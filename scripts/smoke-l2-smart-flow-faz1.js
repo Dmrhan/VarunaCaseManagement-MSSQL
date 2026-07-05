@@ -7,6 +7,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { buildSmartTicketOpeningMerge } from '../server/db/caseRepository.js';
+import { classifyKbFailure, pickKbFailure } from '../server/lib/externalKbClient.js';
 
 let pass = 0;
 let fail = 0;
@@ -132,6 +133,32 @@ expectTrue('6.1 caseService.updateSmartClassification (mutation caseService\'te)
   /caseService = \{[\s\S]*updateSmartClassification/.test(service));
 expectTrue('6.2 UpdateSmartClassificationRequest tipi',
   service.includes('interface UpdateSmartClassificationRequest'));
+
+console.log('── 7) KB hata sınıflandırması (R1) ──');
+// Gerçek olay reprosu: Anthropic kredi hatası upstream data içinde.
+const quotaWrapped = {
+  ok: false,
+  error: { code: 'external_kb_http_error', message: 'Dış API HTTP 500', status: 500 },
+  data: { error: { message: '400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}', status: 500 } },
+};
+expectTrue('7.1 kredi hatası → kb_quota_exceeded', classifyKbFailure(quotaWrapped).code === 'kb_quota_exceeded');
+expectTrue('7.2 kota mesajı eylem içerir (elle seçim + yönetici)',
+  /elle seçim/.test(classifyKbFailure(quotaWrapped).message) && /yönetici/.test(classifyKbFailure(quotaWrapped).message));
+expectTrue('7.3 timeout → kb_timeout (504)',
+  classifyKbFailure({ error: { code: 'external_kb_timeout' } }).code === 'kb_timeout'
+  && classifyKbFailure({ error: { code: 'external_kb_timeout' } }).status === 504);
+expectTrue('7.4 network → kb_unreachable',
+  classifyKbFailure({ error: { code: 'external_kb_network_error' } }).code === 'kb_unreachable');
+expectTrue('7.5 bilinmeyen → external_kb_failed (mevcut davranış)',
+  classifyKbFailure({ error: { code: 'external_kb_http_error' }, data: { x: 1 } }).code === 'external_kb_failed');
+expectTrue('7.6 upstream ham mesajı kullanıcı mesajına SIZMAZ',
+  !classifyKbFailure(quotaWrapped).message.includes('Anthropic'));
+expectTrue('7.7 rate limit de kota sınıfına düşer',
+  classifyKbFailure({ error: { message: 'HTTP 429 rate_limit_error' } }).code === 'kb_quota_exceeded');
+expectTrue('7.8 pickKbFailure en spesifik sınıfı seçer (v2 kota + fallback jenerik)',
+  pickKbFailure({ error: { code: 'external_kb_http_error' }, data: { generic: 1 } }, quotaWrapped).code === 'kb_quota_exceeded');
+expectTrue('7.9 pickKbFailure hepsi jenerikse jenerik döner',
+  pickKbFailure({ error: { code: 'external_kb_http_error' } }, null).code === 'external_kb_failed');
 
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

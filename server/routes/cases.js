@@ -10,7 +10,7 @@ import {
   SolutionStepError,
   extractAiDrafts,
 } from '../db/solutionStepRepository.js';
-import { externalKbClient } from '../lib/externalKbClient.js';
+import { externalKbClient, classifyKbFailure } from '../lib/externalKbClient.js';
 import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
 import { markInProgressForCase } from '../db/actionItemRepository.js';
 import { accountRepository } from '../db/accountRepository.js';
@@ -2140,19 +2140,16 @@ router.post(
             kbResult.error?.code ?? 'unknown',
             kbResult.error?.status ?? '',
           );
-          return res.status(502).json({
-            error: 'external_kb_failed',
-            message:
-              kbResult.error?.message ??
-              'External KB çağrısı başarısız. Manuel adım ekleyebilirsiniz.',
+          const cls = classifyKbFailure(kbResult);
+          return res.status(cls.status).json({
+            error: cls.code,
+            message: cls.message.replace('elle seçimle devam edebilirsiniz', 'manuel adım ekleyebilirsiniz'),
           });
         }
         analyzeResponse = kbResult?.data ?? kbResult ?? null;
       } catch (err) {
-        return res.status(502).json({
-          error: 'external_kb_failed',
-          message: err?.message ?? 'External KB çağrısı başarısız.',
-        });
+        const cls = classifyKbFailure({ error: { message: err?.message } });
+        return res.status(cls.status).json({ error: cls.code, message: cls.message });
       }
     }
     // Madde 2 — KB analyze cevabından engineeringHandoff + customerReplyDraft

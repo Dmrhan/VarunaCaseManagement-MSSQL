@@ -154,7 +154,12 @@ export function SmartClassificationCard({
         description,
       });
       if (!res) {
-        toast({ type: 'warn', message: 'KB analizi sonuç döndürmedi.' });
+        // Sebep toast'ı apiFetch katmanından gelir (sınıflandırılmış:
+        // kota/erişim/zaman aşımı). Burada yalnız EYLEM yolunu göster.
+        toast({
+          type: 'warn',
+          message: 'KB analizi kullanılamıyor — Düzenle ile elle sınıflandırabilirsin.',
+        });
         return;
       }
       setSuggestion(res);
