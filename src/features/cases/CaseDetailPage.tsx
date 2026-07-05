@@ -274,6 +274,18 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
   const thirdParties = useMemo(() => lookupService.thirdParties(), []);
   const { toast } = useToast();
 
+  // WR-C1 L1 guard — CasesListPage.tsx canClaimCase ile birebir aynı kural:
+  // takımı olup canSeeTeamPool=false olan Agent, kendi oluşturduğu kayıt
+  // dahil hiçbir havuz vakasını claim edemez (backend caseRepository.js
+  // claim() aynı kontrolü yapıyor). Görünürlük backend'le eşleşmezse
+  // kullanıcı her tıklamada 403 alır.
+  const myPerson = useMemo(
+    () => (user?.personId ? persons.find((p) => p.id === user.personId) ?? null : null),
+    [persons, user?.personId],
+  );
+  const canSeeTeamPool = myPerson?.isTeamLead === true || ['L2', 'L3'].includes(myPerson?.supportLevel ?? '');
+  const claimBlockedByTeamPool = user?.role === 'Agent' && !!myPerson?.teamId && !canSeeTeamPool;
+
   // WR-A7b — Catalog state (Package + Product). Vakanın companyId/accountId'sine bağlı.
   const [catalogPackages, setCatalogPackages] = useState<
     Array<{ id: string; code: string; name: string; supportLevel: SupportLevel }>
@@ -878,7 +890,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               );
             })()}
             {/* WR-C1 — "Üstlen" butonu Kaydet'in yanına taşındı (LeftPanel'den). */}
-            {!!user?.personId && !item.assignedPersonId && item.status !== 'Çözüldü' && item.status !== 'İptalEdildi' && (
+            {!!user?.personId && !item.assignedPersonId && item.status !== 'Çözüldü' && item.status !== 'İptalEdildi' && !claimBlockedByTeamPool && (
               <button
                 type="button"
                 onClick={handleClaim}

@@ -771,9 +771,17 @@ export function CasesListPage({
       void load();
     }
   }
-  /** WR-C1 — Claim koşulu: kapalı değil, atanmamış, kullanıcının personId'si var. */
+  /** WR-C1 — Claim koşulu: kapalı değil, atanmamış, kullanıcının personId'si var.
+   * L1 agent guard — takımı olup canSeeTeamPool=false olan Agent, kendi
+   * oluşturduğu kayıt dahil hiçbir havuz vakasını claim edemez (backend
+   * caseRepository.js claim() aynı kuralı uygular — "atama takım liderinizde"
+   * hatası). Buton burada gizlenmezse kullanıcı her tıklamada 403 alır;
+   * görünürlük backend kuralıyla birebir eşleşmeli. */
   const canClaimCase = (c: { status: CaseStatus; assignedPersonId?: string | null }) =>
-    !!user?.personId && !c.assignedPersonId && !CLOSED_STATUSES.includes(c.status);
+    !!user?.personId &&
+    !c.assignedPersonId &&
+    !CLOSED_STATUSES.includes(c.status) &&
+    !(user?.role === 'Agent' && !!myTeamId && !canSeeTeamPool);
 
   // Role-aware KPI cards — backend tek truth source (GET /api/cases/stats).
   // Mode rol bazlı: personal (Agent/Backoffice/CSM), team (Supervisor),
