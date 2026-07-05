@@ -536,8 +536,12 @@ router.get(
         orClauses.push({ assignedPersonId: null, assignedTeamId: agentTeamId, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
         orClauses.push({ assignedPersonId: null, assignedTeamId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
       } else {
-        // L1 Agent with team → sadece takımsız havuz, takım havuzu görünmez
-        orClauses.push({ assignedPersonId: null, assignedTeamId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+        // L1 Agent with team → hiçbir sahipsiz/atanmamış havuz görünmez
+        // (ne kendi takımının ne takımsız/genel havuzun). Kayıt üzerine
+        // atama yalnız L1 takım liderinin (Supervisor) elinde — L1 Agent
+        // kendi kendine "Üstlen" ile sahipsiz bir kayıt alamaz. Yalnız
+        // kendine atanmış + kendi açtığı vakaları görür (üstteki ortak
+        // orClauses zaten bunları kapsıyor).
       }
       roleDefaultScope = { OR: orClauses };
     } else if (['Supervisor', 'Backoffice'].includes(req.user.role) && req.user.personId && !roleDefaultViewOff) {
