@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowDownRight,
@@ -385,41 +385,57 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
   }
 
   // ---- AI command handlers (Phase 4a) ----
-  // Filtre değişince mevcut AI çıktıları artık eski kapsama ait — temizle.
+  // Filtre/müşteri seçimi değişince mevcut AI çıktıları artık eski kapsama ait — temizle.
+  // Codex #420 P2: temizlik tek başına yetmez; uçuştaki RUNA çağrısı kapsam
+  // değiştikten SONRA dönerse bayat yanıtı yeni kapsamın altına yazar. Effect
+  // her kapsam değişiminde id'yi ilerletir; run* yalnız kendi id'si hâlâ
+  // güncelse state yazar. Bayat yanıt düşürüldüğü için loading'ler de burada
+  // kapatılır (yoksa spinner sonsuza takılır).
+  const aiScopeReqIdRef = useRef(0);
   useEffect(() => {
+    aiScopeReqIdRef.current += 1;
     setBrief(null);
     setBriefError(null);
+    setBriefLoading(false);
     setBriefDismissed(false);
     setInsights(null);
     setInsightsError(null);
+    setInsightsLoading(false);
     setReport(null);
     setReportError(null);
-  }, [dateFrom, dateTo, statusesKey, caseTypesKey, companiesKey, lensKey]);
+    setReportLoading(false);
+  }, [dateFrom, dateTo, statusesKey, caseTypesKey, companiesKey, lensKey, selectedAccount?.id]);
 
   function runBrief() {
+    const reqId = aiScopeReqIdRef.current;
     setBriefLoading(true);
     setBriefError(null);
     setBriefDismissed(false);
     void aiService.operationsBrief({ ...overviewBody, lens: lensKey }).then((r) => {
+      if (aiScopeReqIdRef.current !== reqId) return; // kapsam değişti — bayat yanıt
       if (r.ok) setBrief(r.data);
       else setBriefError(r.error);
       setBriefLoading(false);
     });
   }
   function runInsights() {
+    const reqId = aiScopeReqIdRef.current;
     setInsightsLoading(true);
     setInsightsError(null);
     void aiService.operationsInsights({ ...overviewBody, lens: lensKey }).then((r) => {
+      if (aiScopeReqIdRef.current !== reqId) return;
       if (r.ok) setInsights(r.data.insights);
       else setInsightsError(r.error);
       setInsightsLoading(false);
     });
   }
   function runReport() {
+    const reqId = aiScopeReqIdRef.current;
     setReportOpen(true);
     setReportLoading(true);
     setReportError(null);
     void aiService.operationsReportDraft({ ...overviewBody, lens: lensKey }).then((r) => {
+      if (aiScopeReqIdRef.current !== reqId) return;
       if (r.ok) setReport(r.data);
       else setReportError(r.error);
       setReportLoading(false);

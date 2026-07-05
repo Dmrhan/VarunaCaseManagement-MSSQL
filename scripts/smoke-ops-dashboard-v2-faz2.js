@@ -98,6 +98,12 @@ expectTrue('4.3 5 mini kart', ['Akıllı Sınıflandırma', 'Çözüm Kaynağı'
 expectTrue('4.4 KB-destekli çözüm başlık metriği', page.includes('KB-destekli çözüm'));
 expectTrue('4.5 çözüm kaynağı TR etiketleri', page.includes("external_kb: 'Bilgi Bankası'") && page.includes("ai_suggested_step: 'AI Önerisi'"));
 expectTrue('4.6 null guard\'lar (—) ', page.includes("'—'"));
+expectTrue('4.7 Codex #419 P2: AI reset effect müşteri lensine bağlı (bayat RUNA çıktısı kalmaz)',
+  /\}, \[[^\]]*selectedAccount\?\.id\]/.test(page));
+expectTrue('4.8 Codex #420 P2: uçuştaki RUNA yanıtı kapsam-id guard\'lı (brief+insights+report) + loading reset',
+  (page.match(/aiScopeReqIdRef\.current !== reqId/g) ?? []).length === 3
+  && page.includes('aiScopeReqIdRef.current += 1')
+  && /aiScopeReqIdRef\.current \+= 1;[\s\S]{0,500}setReportLoading\(false\);\s*\}, \[/.test(page));
 
 console.log('── 5) Servis tipleri ──');
 expectTrue('5.1 OverviewTaxonomyRow + 5 taksonomi alanı',
