@@ -231,6 +231,11 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
   // Phase D — Müşteri eşleştirme modal'ı (Supervisor+).
   const [linkAccountOpen, setLinkAccountOpen] = useState(false);
   const [linkSubmitting, setLinkSubmitting] = useState(false);
+  // "Değiştir" akışı — picker'dan seçim hemen commit edilmez, Kaydet'e kadar
+  // taslak olarak bekler + onay istenir. "Manuel müşteri ara" (müşterisiz
+  // vaka) akışı bundan ayrı — hâlâ anında commit ediyor.
+  const [changeAccountMode, setChangeAccountMode] = useState(false);
+  const [pendingAccountChange, setPendingAccountChange] = useState<{ id: string; name: string } | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [unsnoozing, setUnsnoozing] = useState(false);
@@ -596,21 +601,56 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
   }
 
   async function handleSaveDrafts() {
-    if (!item || Object.keys(drafts).length === 0 || savingDrafts) return;
+    if (!item || savingDrafts) return;
+    const hasFieldDrafts = Object.keys(drafts).length > 0;
+    if (!hasFieldDrafts && !pendingAccountChange) return;
+
+    // Müşteri değişimi varsa önce onay iste — geri dönüşü zor bir aksiyon
+    // (proje bağı sıfırlanıyor, learned sender güncelleniyor).
+    if (pendingAccountChange) {
+      const confirmed = window.confirm(
+        `Müşteriyi "${item.accountName ?? '—'}" yerine "${pendingAccountChange.name}" olarak değiştirmek istediğinize emin misiniz?`,
+      );
+      if (!confirmed) return;
+    }
+
     setSavingDrafts(true);
-    const updated = await caseService.update(item.id, drafts);
-    setSavingDrafts(false);
-    if (updated) {
-      setItem(updated);
+    let currentItem: Case = item;
+    let savedCount = 0;
+
+    if (pendingAccountChange) {
+      const updatedAccount = await caseService.linkAccount(item.id, pendingAccountChange.id);
+      if (!updatedAccount) {
+        setSavingDrafts(false);
+        return;
+      }
+      currentItem = updatedAccount;
+      setItem(updatedAccount);
+      setPendingAccountChange(null);
+      savedCount += 1;
+      void accountService.getCaseCustomerContext(item.id).then((out) => {
+        setCustomerContext(out?.context ?? null);
+      });
+    }
+
+    if (hasFieldDrafts) {
+      const updated = await caseService.update(currentItem.id, drafts);
+      if (updated) {
+        setItem(updated);
+        savedCount += Object.keys(drafts).length;
+      }
       setDrafts({});
       setEditingField(null);
-      toast({ type: 'success', title: 'Vaka güncellendi ✓', message: `${Object.keys(drafts).length} alan kaydedildi.` });
     }
+
+    setSavingDrafts(false);
+    toast({ type: 'success', title: 'Vaka güncellendi ✓', message: `${savedCount} alan kaydedildi.` });
   }
 
   function handleDiscardDrafts() {
     setDrafts({});
     setEditingField(null);
+    setPendingAccountChange(null);
   }
 
   // ESC = açık edit'i iptal et (ya da pending draft'ları sıfırla — kullanıcı seçimi)
@@ -776,28 +816,35 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            {Object.keys(drafts).length > 0 && (
-              <button
-                type="button"
-                onClick={handleDiscardDrafts}
-                className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
-                title="Taslak değişiklikleri sil"
-              >
-                Taslakları sil
-              </button>
-            )}
-            <Button
-              variant={Object.keys(drafts).length > 0 ? 'primary' : 'outline'}
-              size="sm"
-              leftIcon={<Save size={12} />}
-              disabled={Object.keys(drafts).length === 0 || savingDrafts}
-              onClick={handleSaveDrafts}
-              title={Object.keys(drafts).length > 0
-                ? `${Object.keys(drafts).length} alan kaydedilecek`
-                : 'Düzenlenmiş alan yok'}
-            >
-              {savingDrafts ? 'Kaydediliyor…' : `Kaydet${Object.keys(drafts).length > 0 ? ` (${Object.keys(drafts).length})` : ''}`}
-            </Button>
+            {(() => {
+              const pendingCount = Object.keys(drafts).length + (pendingAccountChange ? 1 : 0);
+              return (
+                <>
+                  {pendingCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleDiscardDrafts}
+                      className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+                      title="Taslak değişiklikleri sil"
+                    >
+                      Taslakları sil
+                    </button>
+                  )}
+                  <Button
+                    variant={pendingCount > 0 ? 'primary' : 'outline'}
+                    size="sm"
+                    leftIcon={<Save size={12} />}
+                    disabled={pendingCount === 0 || savingDrafts}
+                    onClick={handleSaveDrafts}
+                    title={pendingCount > 0
+                      ? `${pendingCount} alan kaydedilecek`
+                      : 'Düzenlenmiş alan yok'}
+                  >
+                    {savingDrafts ? 'Kaydediliyor…' : `Kaydet${pendingCount > 0 ? ` (${pendingCount})` : ''}`}
+                  </Button>
+                </>
+              );
+            })()}
             {/* WR-C1 — "Üstlen" butonu Kaydet'in yanına taşındı (LeftPanel'den). */}
             {!!user?.personId && !item.assignedPersonId && item.status !== 'Çözüldü' && item.status !== 'İptalEdildi' && (
               <button
@@ -1046,7 +1093,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
           customerContext={customerContext}
           onOpenAccount={onOpenAccount}
           canLinkAccount={canLinkAccount}
-          onLinkAccount={canLinkAccount ? () => setLinkAccountOpen(true) : undefined}
+          onLinkAccount={canLinkAccount ? () => { setChangeAccountMode(false); setLinkAccountOpen(true); } : undefined}
+          onChangeAccount={canLinkAccount ? () => { setChangeAccountMode(true); setLinkAccountOpen(true); } : undefined}
+          pendingAccountChange={pendingAccountChange}
+          onCancelAccountChange={() => setPendingAccountChange(null)}
           onConfirmLinkSuggestion={
             canLinkAccount
               ? async (suggestion) => {
@@ -1277,6 +1327,14 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
           onClose={() => setLinkAccountOpen(false)}
           onSelect={async (account) => {
             if (!account || linkSubmitting) return;
+            if (changeAccountMode) {
+              // Değiştir akışı — hemen commit etme; taslak olarak bekler,
+              // Kaydet + onay ile uygulanır (bkz. handleSaveDrafts).
+              setPendingAccountChange({ id: account.id, name: account.name });
+              setLinkAccountOpen(false);
+              return;
+            }
+            // Manuel müşteri ara (müşterisiz vaka) — mevcut davranış: anında commit.
             setLinkSubmitting(true);
             const updated = await caseService.linkAccount(item.id, account.id);
             setLinkSubmitting(false);
@@ -1394,6 +1452,9 @@ function LeftPanel({
   onOpenAccount,
   canLinkAccount,
   onLinkAccount,
+  onChangeAccount,
+  pendingAccountChange,
+  onCancelAccountChange,
   onConfirmLinkSuggestion,
   drawerOpen,
   onCloseDrawer,
@@ -1407,6 +1468,11 @@ function LeftPanel({
   onOpenAccount?: (accountId: string) => void;
   canLinkAccount?: boolean;
   onLinkAccount?: () => void;
+  /** Değiştir akışı — mevcut müşteriyi başka bir müşteriyle değiştirmek için. */
+  onChangeAccount?: () => void;
+  /** Değiştir akışında seçilen ama henüz Kaydet ile commit edilmemiş müşteri. */
+  pendingAccountChange?: { id: string; name: string } | null;
+  onCancelAccountChange?: () => void;
   onConfirmLinkSuggestion?: (suggestion: CustomerMatchSuggestion) => Promise<void>;
   drawerOpen: boolean;
   onCloseDrawer: () => void;
@@ -1456,12 +1522,12 @@ function LeftPanel({
                     </button>
                   )}
                   {/* Müşteriyi değiştir — mevcut linkAccount picker'ını
-                      selectedAccountId=item.accountId ile açar; backend
-                      linkAccount zaten overwrite ediyor (bkz. caseRepository.js). */}
-                  {canLinkAccount && onLinkAccount && (
+                      selectedAccountId=item.accountId ile açar. Seçim hemen
+                      commit edilmez; Kaydet + onay ile uygulanır. */}
+                  {canLinkAccount && onChangeAccount && (
                     <button
                       type="button"
-                      onClick={onLinkAccount}
+                      onClick={onChangeAccount}
                       title="Bu vakayı başka bir müşteriye bağla"
                       className="rounded px-1.5 py-0.5 text-[11px] font-medium text-slate-500 hover:bg-slate-100 dark:text-ndark-muted dark:hover:bg-ndark-card"
                     >
@@ -1470,6 +1536,22 @@ function LeftPanel({
                   )}
                 </div>
               </div>
+              {pendingAccountChange && (
+                <div className="mt-1.5 flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800 ring-1 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:ring-amber-900/40">
+                  <span className="min-w-0 truncate">
+                    Yeni müşteri: <strong>{pendingAccountChange.name}</strong> — Kaydet'e basınca uygulanır.
+                  </span>
+                  {onCancelAccountChange && (
+                    <button
+                      type="button"
+                      onClick={onCancelAccountChange}
+                      className="ml-auto shrink-0 font-medium underline underline-offset-2"
+                    >
+                      Vazgeç
+                    </button>
+                  )}
+                </div>
+              )}
               {/* LBD baseline 1+5 — Çip çorbası → sönük tek satır metin.
                   Tek vurgu: priority Critical olduğunda küçük rose dot inline.
                   Diğerleri (şirket / kod / paket / proje / ürün / supportLevel /
