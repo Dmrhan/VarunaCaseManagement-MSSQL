@@ -172,10 +172,46 @@ export function buildOperationsSnapshot(scope, payload, filters) {
     byTeam: (payload.byTeam ?? []).slice(0, 6),
     byCategory: (payload.byCategory ?? []).slice(0, 8),
     topAtRiskAccounts: (payload.topAtRiskAccounts ?? []).slice(0, 6),
+    // Ops Pano v2 FAZ 2 — AI görüş alanları (aggregate-only; PII yok).
+    // 🔒 Sabit Kural: customerContact*, başlık, kişi adı, mail içeriği
+    // bu snapshot'a ASLA girmez — hepsi sayı/oran/etiket.
+    smartTicket: {
+      platform: (payload.bySmartTicketPlatform ?? []).slice(0, 5),
+      businessProcess: (payload.bySmartTicketBusinessProcess ?? []).slice(0, 5),
+      operationType: (payload.bySmartTicketOperationType ?? []).slice(0, 5),
+      affectedObject: (payload.bySmartTicketAffectedObject ?? []).slice(0, 5),
+      impact: (payload.bySmartTicketImpact ?? []).slice(0, 5),
+    },
+    solutionSources: payload.bySolutionStepSource ?? [],
+    kbAssistedResolutionRate: payload.kbAssistedResolutionRate ?? null,
+    mailOps: payload.mailOps ?? null,
+    patternAlerts: payload.patternAlerts ?? null,
+    qaAverages: payload.qaAverages ?? null,
     minSampleViolations: payload.minSampleViolations ?? [],
     notAvailable: payload.notAvailable ?? [],
   };
 }
+
+// Ops Pano v2 FAZ 2 — yeni alanların Türkçe yorum rehberi (brief + insights
+// system prompt'larına eklenir). Commentary-only kural: RUNA dağılımı
+// YORUMLAR, taksonomi/kategori ÜRETMEZ, aksiyon önerisi operasyoneldir.
+const FAZ2_GUIDANCE = [
+  '',
+  'YENI VERI ALANLARI (varsa yorumla; yoksa deginme):',
+  ' - smartTicket.*: Akıllı Ticket taksonomi dağılımları (platform / iş süreci /',
+  '   işlem tipi / etkilenen nesne / etki). En yoğun 1-2 kümeyi SAYIYLA söyle',
+  '   ("Backoffice 550 vaka ile önde"). Yeni kategori ÖNERME — sadece dağılımı yorumla.',
+  ' - solutionSources + kbAssistedResolutionRate: çözüm adımlarının kaynağı.',
+  '   kbAssistedResolutionRate degerini CÜMLE İÇİNDE fiili sayıyla söyle',
+  '   ("KB-destekli çözüm oranı %X"). Oran düşükse olası nedenleri TEMKİNLİ',
+  '   sor/etiketle (KB içeriği eksik olabilir, agent alışkanlığı olabilir).',
+  ' - mailOps: bekleyen müşteri yanıtı (pendingCustomerReply), dönem inbound/',
+  '   outbound hacmi, ilk yanıt MEDYANI (dk). Medyan yüksekse SLA riskiyle ilişkilendir.',
+  ' - patternAlerts: aktif örüntü alarmı sayısı + en büyük küme (kategori + vaka',
+  '   sayısı). Aktif alarm varsa risks bölümünde MUTLAKA an.',
+  ' - qaAverages: empati/netlik/hız ortalamaları (5 üzerinden) + örneklem. null ise',
+  '   örneklem yetersizdir — yorum yapma.',
+].join('\n');
 
 // ──────────────────────────────────────────────────────────────────
 // Common prompt building blocks
@@ -240,6 +276,7 @@ export function buildBriefPrompt(scope, snapshot, lens) {
     COMMON_RULES,
     '',
     'GOREV: Mevcut dashboard kapsamindan bir "yönetici özeti" üret.',
+    FAZ2_GUIDANCE,
     '',
     'JSON formati:',
     '{',
@@ -286,6 +323,9 @@ export function buildInsightsPrompt(scope, snapshot, lens) {
     '',
     'GOREV: Snapshot uzerinden 0-5 adet "insight kart" üret.',
     'Her insight muhakkak SAYISAL evidence icermeli. Evidence yoksa insight uretme.',
+    FAZ2_GUIDANCE,
+    'Yeni alanlardan gelen evidence icin bucketKind/bucketKey NULL birakilabilir',
+    '(drilldown karsiligi henuz yok) — value yine SAYISAL olmali.',
     'Evidence bucket yapisi Phase 3 drilldown ile birebir uyumlu olmali.',
     '',
     'INSIGHT TIPI:',

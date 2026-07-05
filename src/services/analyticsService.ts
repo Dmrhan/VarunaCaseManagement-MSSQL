@@ -213,6 +213,12 @@ export interface OverviewScope {
   effectiveScopeReason: string;
 }
 
+export interface OverviewTaxonomyRow {
+  key: string;
+  label: string;
+  count: number;
+}
+
 export interface OperationsOverviewResponse {
   asOf: string;
   asOfLocal: string;
@@ -240,6 +246,31 @@ export interface OperationsOverviewResponse {
   byRequestType: OverviewCountPair[];
   /** Ops Pano v2 FAZ 1 — Kanal (origin) kırılımı. */
   byOrigin: OverviewCountPair[];
+  /** Ops Pano v2 FAZ 2 — AI görüş alanı (aggregate-only; PII yok). */
+  bySmartTicketPlatform: OverviewTaxonomyRow[];
+  bySmartTicketBusinessProcess: OverviewTaxonomyRow[];
+  bySmartTicketOperationType: OverviewTaxonomyRow[];
+  bySmartTicketAffectedObject: OverviewTaxonomyRow[];
+  bySmartTicketImpact: OverviewTaxonomyRow[];
+  bySolutionStepSource: OverviewCountPair[];
+  /** external_kb adım oranı 0-1; hiç adım yoksa null. */
+  kbAssistedResolutionRate: number | null;
+  mailOps: {
+    pendingCustomerReply: number;
+    inboundVolume: number;
+    outboundVolume: number;
+    firstResponseMedianMin: number | null;
+  };
+  patternAlerts: {
+    activeCount: number;
+    largestSpike: { category: string; caseCount: number } | null;
+  };
+  qaAverages: {
+    empathy: number | null;
+    clarity: number | null;
+    speed: number | null;
+    sampleCount: number;
+  };
   byCompany: OverviewCompanyRow[] | null;
   byTeam: OverviewTeamRow[];
   byCategory: OverviewCategoryRow[];

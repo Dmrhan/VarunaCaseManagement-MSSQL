@@ -17,6 +17,7 @@ export type DashboardSectionKey =
   | 'statusPriorityGroup'   // composite: byStatus + byPriority (2-col)
   | 'byCaseType'
   | 'requestOriginGroup'      // Ops Pano v2 FAZ 1 — composite: byRequestType + byOrigin (2-col)
+  | 'aiDataGroup'             // Ops Pano v2 FAZ 2 — AI görüş mini kartları (5'li)
   | 'byCompany'
   | 'byTeam'
   | 'byCategory'
@@ -82,6 +83,7 @@ export const OPERATIONS_LENS: LensConfig = {
     'statusPriorityGroup',
     'byCaseType',
     'requestOriginGroup',
+    'aiDataGroup',
     'byCompany',
     'byTeam',
     'byCategory',
@@ -125,7 +127,7 @@ export const CUSTOMER_LENS: LensConfig = {
     'statusPriorityGroup',
     'kpiGrid',
   ],
-  hiddenSections: ['byCaseType', 'byTeam', 'requestOriginGroup'],
+  hiddenSections: ['byCaseType', 'byTeam', 'requestOriginGroup', 'aiDataGroup'],
   aiTone:
     'Tonlama: Musteri risk kumelerine, tekrar eden kategori sorunlarina ve hesap bazli aksiyonlara odaklan. ' +
     'Bireysel agent performansi yargilama; iletisim ve hesap koruma aksiyonlari oner.',
@@ -163,7 +165,7 @@ export const EXECUTIVE_LENS: LensConfig = {
     'byCompany',
     'atRiskAccounts',
   ],
-  hiddenSections: ['statusPriorityGroup', 'byCaseType', 'byTeam', 'byCategory', 'requestOriginGroup'],
+  hiddenSections: ['statusPriorityGroup', 'byCaseType', 'byTeam', 'byCategory', 'requestOriginGroup', 'aiDataGroup'],
   aiTone:
     'Tonlama: Karar-destekli, ozet, sayisal. Yonetici icin 3-5 kritik hareket noktasi belirle; ' +
     'gunluk operasyonel detay (statu adetleri, takim bazli yuk) verme.',
