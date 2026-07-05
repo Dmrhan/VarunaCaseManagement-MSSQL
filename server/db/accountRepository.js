@@ -280,6 +280,11 @@ export async function listAccounts({
     whereAnd.push({ id: { in: ids } });
   }
 
+  // Chip seçili değilken (sf=null) broad arama iki katman halinde fetch
+  // edilir — isim eşleşmeleri (nameOR) önce, ikincil eşleşmeler (otherOR)
+  // sonra. Bkz. aşağıdaki arama bloğu + $transaction sonrası tiered fetch.
+  let tieredSearch = null;
+
   if (search && search.trim().length >= 2) {
     const q = search.trim();
     // C2 review fix (P1): externalCustomerCode predicate is scoped INSIDE
@@ -320,17 +325,38 @@ export async function listAccounts({
 
     // searchFields: belirli alanları seç; boş/undefined → tüm alanlar (geriye uyum).
     const sf = Array.isArray(searchFields) && searchFields.length > 0 ? new Set(searchFields) : null;
-    const orBranches = [];
-    if (!sf || sf.has('name'))    orBranches.push(...nameOR);
-    if (!sf || sf.has('vkn'))     orBranches.push({ vkn: { startsWith: q } }, ...(tcknHashBranch ? [tcknHashBranch] : []));
-    // Phase 3 — 3 phone slot E.164 search predicate genişletildi.
-    if (!sf || sf.has('phone'))   orBranches.push({ phoneE164: { contains: q } }, { phone2E164: { contains: q } }, { phone3E164: { contains: q } });
-    if (!sf || sf.has('code'))    orBranches.push({ companies: { some: { companyId: externalCodeAcScope, externalCustomerCode: { contains: q } } } });
-    if (!sf || sf.has('contact')) orBranches.push({ contacts: { some: { OR: [{ phone: { contains: q } }, ...contactEmailOR, ...contactNameOR] } } });
-    // Proje adı veya kodu ile arama — chip'lere bağlı değil, her zaman aktif.
-    orBranches.push({ companies: { some: { companyId: externalCodeAcScope, projects: { some: { isActive: true, OR: [...projectNameOR, { code: { contains: q } }] } } } } });
-    if (orBranches.length > 0) {
-      whereAnd.push({ OR: orBranches });
+
+    if (sf) {
+      // Belirli chip(ler) seçili — tek katman, sıralama belirsizliği yok
+      // (yalnız seçili alan grupları aranıyor).
+      const orBranches = [];
+      if (sf.has('name'))    orBranches.push(...nameOR);
+      if (sf.has('vkn'))     orBranches.push({ vkn: { startsWith: q } }, ...(tcknHashBranch ? [tcknHashBranch] : []));
+      if (sf.has('phone'))   orBranches.push({ phoneE164: { contains: q } }, { phone2E164: { contains: q } }, { phone3E164: { contains: q } });
+      if (sf.has('code'))    orBranches.push({ companies: { some: { companyId: externalCodeAcScope, externalCustomerCode: { contains: q } } } });
+      if (sf.has('contact')) orBranches.push({ contacts: { some: { OR: [{ phone: { contains: q } }, ...contactEmailOR, ...contactNameOR] } } });
+      if (orBranches.length > 0) {
+        whereAnd.push({ OR: orBranches });
+      }
+    } else {
+      // Hiç chip seçili değil — "her yerde ara". Bu OR'u whereAnd'e hemen
+      // eklemiyoruz: isim eşleşmeleri (tier 1) ile phone/vkn/proje/contact
+      // gibi ikincil eşleşmeler (tier 2) fetch aşamasında AYRI sorgulanıp
+      // isim eşleşmeleri önce gösterilecek — bkz. tieredSearch aşağıda.
+      // Gerekçe: tek alfabetik sıralamada, "Nestle" gibi bir aramada coincidental
+      // ikincil eşleşmeler (ör. "Nestle" markalı dağıtım projesi olan yüzlerce
+      // bayi hesabı) gerçek isim eşleşmelerini sayfalarca geriye gömüyordu.
+      tieredSearch = {
+        nameOR,
+        otherOR: [
+          { vkn: { startsWith: q } },
+          ...(tcknHashBranch ? [tcknHashBranch] : []),
+          { phoneE164: { contains: q } }, { phone2E164: { contains: q } }, { phone3E164: { contains: q } },
+          { companies: { some: { companyId: externalCodeAcScope, externalCustomerCode: { contains: q } } } },
+          { contacts: { some: { OR: [{ phone: { contains: q } }, ...contactEmailOR, ...contactNameOR] } } },
+          { companies: { some: { companyId: externalCodeAcScope, projects: { some: { isActive: true, OR: [...projectNameOR, { code: { contains: q } }] } } } } },
+        ],
+      };
     }
   }
 
@@ -360,67 +386,118 @@ export async function listAccounts({
     whereAnd.push({ companies: { some: { status, ...statusCompanyScope } } });
   }
 
-  const where = { AND: whereAnd };
-
-  const [total, rows] = await prisma.$transaction([
-    prisma.account.count({ where }),
-    prisma.account.findMany({
-      where,
-      orderBy: { name: 'asc' },
-      skip: (safePage - 1) * safeLimit,
-      take: safeLimit,
+  const ACCOUNT_LIST_SELECT = {
+    id: true,
+    name: true,
+    vkn: true,
+    phone: true,
+    phoneE164: true, // WR-A2
+    phoneType: true, // Phase 2
+    phoneExtension: true, // Phase 2
+    // Phase 3 — slot 2/3 + primary
+    phone2: true,
+    phone2E164: true,
+    phone2Type: true,
+    phone2Extension: true,
+    phone3: true,
+    phone3E164: true,
+    phone3Type: true,
+    phone3Extension: true,
+    primaryPhoneSlot: true,
+    email: true,
+    isActive: true,
+    // WR-A1
+    customerType: true,
+    customerRole: true, // Faz B-temel
+    legalName: true,
+    registrationNo: true,
+    taxOffice: true,
+    // WR-A2 — tcknHash select edilmez (privacy); sadece tcknLast4 (mask için).
+    tcknLast4: true,
+    companies: {
       select: {
         id: true,
-        name: true,
-        vkn: true,
-        phone: true,
-        phoneE164: true, // WR-A2
-        phoneType: true, // Phase 2
-        phoneExtension: true, // Phase 2
-        // Phase 3 — slot 2/3 + primary
-        phone2: true,
-        phone2E164: true,
-        phone2Type: true,
-        phone2Extension: true,
-        phone3: true,
-        phone3E164: true,
-        phone3Type: true,
-        phone3Extension: true,
-        primaryPhoneSlot: true,
-        email: true,
-        isActive: true,
-        // WR-A1
-        customerType: true,
-        customerRole: true, // Faz B-temel
-        legalName: true,
-        registrationNo: true,
-        taxOffice: true,
-        // WR-A2 — tcknHash select edilmez (privacy); sadece tcknLast4 (mask için).
-        tcknLast4: true,
-        companies: {
+        companyId: true,
+        status: true,
+        externalCustomerCode: true,
+        company: {
           select: {
-            id: true,
-            companyId: true,
-            status: true,
-            externalCustomerCode: true,
-            company: {
-              select: {
-                name: true,
-                // Phase C2 polish: Company chip renkleri CompanySettings.primaryColor'dan.
-                settings: { select: { primaryColor: true } },
-              },
-            },
-            // Picker inline proje listesi — yalnız aktif projeler.
-            projects: {
-              where: { isActive: true, status: 'Active' },
-              select: { id: true, name: true, code: true },
-              orderBy: { name: 'asc' },
-            },
+            name: true,
+            // Phase C2 polish: Company chip renkleri CompanySettings.primaryColor'dan.
+            settings: { select: { primaryColor: true } },
           },
         },
+        // Picker inline proje listesi — yalnız aktif projeler.
+        projects: {
+          where: { isActive: true, status: 'Active' },
+          select: { id: true, name: true, code: true },
+          orderBy: { name: 'asc' },
+        },
       },
-    }),
-  ]);
+    },
+  };
+
+  let total;
+  let rows;
+
+  if (tieredSearch) {
+    // Broad arama (chip seçili değil) — isim eşleşmeleri (tier 1) ile
+    // ikincil alan eşleşmeleri (tier 2) ayrı sorgulanır; tier 2, tier 1'de
+    // zaten çıkan hesapları NOT ile dışlar (duplicate önlenir). Sayfa
+    // sınırı iki katman arasına denk gelebileceği için skip/take ikiye
+    // bölünüp gerekirse her iki katmandan da fetch yapılır.
+    const whereTier1 = { AND: [...whereAnd, { OR: tieredSearch.nameOR }] };
+    const whereTier2 = { AND: [...whereAnd, { OR: tieredSearch.otherOR }, { NOT: { OR: tieredSearch.nameOR } }] };
+
+    const [countTier1, countTier2] = await prisma.$transaction([
+      prisma.account.count({ where: whereTier1 }),
+      prisma.account.count({ where: whereTier2 }),
+    ]);
+    total = countTier1 + countTier2;
+
+    const skip = (safePage - 1) * safeLimit;
+    const take = safeLimit;
+    rows = [];
+
+    if (skip < countTier1) {
+      const take1 = Math.min(take, countTier1 - skip);
+      const tier1Rows = await prisma.account.findMany({
+        where: whereTier1,
+        orderBy: { name: 'asc' },
+        skip,
+        take: take1,
+        select: ACCOUNT_LIST_SELECT,
+      });
+      rows.push(...tier1Rows);
+    }
+
+    const remaining = take - rows.length;
+    if (remaining > 0) {
+      const tier2Skip = Math.max(0, skip - countTier1);
+      const tier2Rows = await prisma.account.findMany({
+        where: whereTier2,
+        orderBy: { name: 'asc' },
+        skip: tier2Skip,
+        take: remaining,
+        select: ACCOUNT_LIST_SELECT,
+      });
+      rows.push(...tier2Rows);
+    }
+  } else {
+    const where = { AND: whereAnd };
+    const result = await prisma.$transaction([
+      prisma.account.count({ where }),
+      prisma.account.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        skip: (safePage - 1) * safeLimit,
+        take: safeLimit,
+        select: ACCOUNT_LIST_SELECT,
+      }),
+    ]);
+    total = result[0];
+    rows = result[1];
+  }
 
   const accountIds = rows.map((r) => r.id);
 
