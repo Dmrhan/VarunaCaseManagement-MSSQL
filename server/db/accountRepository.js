@@ -327,8 +327,14 @@ export async function listAccounts({
     if (!sf || sf.has('phone'))   orBranches.push({ phoneE164: { contains: q } }, { phone2E164: { contains: q } }, { phone3E164: { contains: q } });
     if (!sf || sf.has('code'))    orBranches.push({ companies: { some: { companyId: externalCodeAcScope, externalCustomerCode: { contains: q } } } });
     if (!sf || sf.has('contact')) orBranches.push({ contacts: { some: { OR: [{ phone: { contains: q } }, ...contactEmailOR, ...contactNameOR] } } });
-    // Proje adı veya kodu ile arama — chip'lere bağlı değil, her zaman aktif.
-    orBranches.push({ companies: { some: { companyId: externalCodeAcScope, projects: { some: { isActive: true, OR: [...projectNameOR, { code: { contains: q } }] } } } } });
+    // Proje adı veya kodu ile arama — diğer alanlarla aynı kurala tabi:
+    // hiç chip seçili değilse (sf=null, "her yerde ara") dahil edilir;
+    // belirli chip'ler seçiliyse (ör. yalnız Ünvan) proje araması devre dışı
+    // kalır — aksi halde ör. "Nestle" ünvan aramasında, adı alakasız ama
+    // "Nestle" markalı projesi olan yüzlerce bayi hesabı sonucu kirletiyordu.
+    if (!sf) {
+      orBranches.push({ companies: { some: { companyId: externalCodeAcScope, projects: { some: { isActive: true, OR: [...projectNameOR, { code: { contains: q } }] } } } } });
+    }
     if (orBranches.length > 0) {
       whereAnd.push({ OR: orBranches });
     }
