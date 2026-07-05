@@ -506,6 +506,9 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
       createdAt: true,
       // WR-A1
       customerType: true,
+      // Faz B-temel — Müşteri Türü (rol). Eksikti: select'te yoktu, edit
+      // formu her zaman boş görüyordu (DB'de değer olsa bile).
+      customerRole: true,
       legalName: true,
       registrationNo: true,
       taxOffice: true,
