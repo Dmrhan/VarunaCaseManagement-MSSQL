@@ -1315,6 +1315,10 @@ export const caseRepository = {
       // Takım havuzu görünürlük kuralı (liste ile tutarlı): Agent için
       // sadece görebildiği havuzu sayaçlara yansıt.
       let agentUnassignedWhere;
+      // L1 Agent (takımı var, takım lideri değil, L2/L3 değil) — üzerine
+      // kayıt yalnız L1 takım liderinin (Supervisor) elinde. Hiçbir sahipsiz
+      // havuz görmez; "Atanmamış" sayacı da 0 sabitlenir (liste ile tutarlı).
+      let agentBlockedFromPool = false;
       if (role === 'Agent') {
         const agentPerson = await prisma.person.findUnique({
           where: { id: personId },
@@ -1327,6 +1331,7 @@ export const caseRepository = {
         } else if (canSeeTeamPool) {
           agentUnassignedWhere = { assignedPersonId: null, OR: [{ assignedTeamId: agentTeamId }, { assignedTeamId: null }] };
         } else {
+          agentBlockedFromPool = true;
           agentUnassignedWhere = { assignedPersonId: null, assignedTeamId: null };
         }
       } else {
@@ -1350,8 +1355,12 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, assignedPersonId: personId, snoozeUntil: { gt: new Date() }, status: { in: STATS_OPEN_STATUSES } }),
         }),
-        // unassigned chip: liste görünürlüğüyle tutarlı havuz sayısı
-        prisma.case.count({ where: scoped({ ...scope, ...agentUnassignedWhere, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
+        // unassigned chip: liste görünürlüğüyle tutarlı havuz sayısı.
+        // L1 Agent (agentBlockedFromPool) hiç sahipsiz kayıt görmediği için
+        // sorgu bile atılmadan 0 sabitlenir.
+        agentBlockedFromPool
+          ? Promise.resolve(0)
+          : prisma.case.count({ where: scoped({ ...scope, ...agentUnassignedWhere, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
         prisma.case.count({ where: scoped({ ...scope, priority: 'Critical', status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
       ]);
       return { mode: 'personal', assignedToMe, slaRiskMine, resolvedToday, snoozedMine, unassigned, critical };
@@ -2208,14 +2217,22 @@ export const caseRepository = {
       });
     }
 
-    // Takım havuzu guard: assignedTeamId dolu vakalar (maille gelen havuz).
-    // Agent rolü için: kendi takımı olmalı ve takım lideri veya L2/L3 olmalı.
-    // Takımsız havuz (assignedTeamId=null) ve Admin/Supervisor/SystemAdmin kısıtlanmaz.
-    if (current.assignedTeamId !== null && user.role === 'Agent') {
-      const canClaim =
-        person.teamId === current.assignedTeamId &&
-        (person.isTeamLead === true || ['L2', 'L3'].includes(person.supportLevel ?? ''));
-      if (!canClaim) {
+    // Havuz guard'ı — Agent rolü için:
+    //  1) L1 Agent (takımı var, takım lideri veya L2/L3 DEĞİL) — hiçbir
+    //     sahipsiz kaydı üstleyemez: ne kendi takımının havuzunu ne
+    //     takımsız/genel havuzu. Atama yalnız L1 takım liderinin (Supervisor)
+    //     elinde — liste görünürlüğüyle aynı kural (bkz. routes/cases.js
+    //     roleDefaultScope).
+    //  2) Takım lideri veya L2/L3 olan Agent, yalnız KENDİ takımının
+    //     havuzunu üstleyebilir — başka bir takımın havuzu (assignedTeamId
+    //     dolu ve kendi takımından farklı) engellenir.
+    // Takımsız Agent, Admin/Supervisor/SystemAdmin kısıtlanmaz.
+    if (user.role === 'Agent') {
+      const canSeeTeamPool = person.isTeamLead === true || ['L2', 'L3'].includes(person.supportLevel ?? '');
+      if (person.teamId && !canSeeTeamPool) {
+        throw new CaseAccessError('Bu vakayı üstlenme yetkiniz yok — atama takım liderinizde.');
+      }
+      if (current.assignedTeamId !== null && person.teamId !== current.assignedTeamId) {
         throw new CaseAccessError('Bu takım havuzunu üstlenme yetkiniz yok.');
       }
     }
