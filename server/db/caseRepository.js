@@ -3684,7 +3684,16 @@ export const caseRepository = {
     if (
       dbNext === 'Cozuldu' &&
       prev.status !== 'Cozuldu' &&
-      process.env.SMART_TICKET_CLOSURE_REQUIRED !== 'false'
+      process.env.SMART_TICKET_CLOSURE_REQUIRED !== 'false' &&
+      // L2-Smart-Flow FAZ 1.1 (2026-07-05) — TENANT KAPISI: kapanış analizi
+      // zorunluluğu yalnız KB entegrasyonu AKTİF şirkette. KB'siz kiracıda
+      // (örn. PARAM) taxonomy verisi de yok → dropdown boş → kural vakayı
+      // KAPATILAMAZ hale getiriyordu (go-live engeli). Fail-safe: setting
+      // okunamazsa zorunluluk UYGULANMAZ (kapatma bloklanmaz).
+      (await prisma.externalKbSetting
+        .findUnique({ where: { companyId: prev.companyId }, select: { enabled: true } })
+        .then((s) => s?.enabled === true)
+        .catch(() => false))
     ) {
       const prevClosure = prev.customFields?.smartTicket?.closure;
       const alreadyAnalyzed = !!(

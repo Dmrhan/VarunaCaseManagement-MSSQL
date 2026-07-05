@@ -29,6 +29,7 @@ import {
   type SuggestClosureResponse,
 } from '@/services/caseService';
 import { aiService, aiErrorMessage } from '@/services/aiService';
+import { externalKbService } from '@/services/externalKbService';
 import {
   buildClosureSuggestionTelemetry,
   type AppliedClosureSelection,
@@ -186,6 +187,22 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   // pre-fill (kullanıcı onayıyla, mevcut Stage 3 closure pattern'i).
   // Approval / checklist / ResolutionApprovalPolicy guard'ları bypass
   // edilmez.
+  // L2-Smart-Flow FAZ 1.1 — TENANT KAPISI: KB entegrasyonu kapalı şirkette
+  // (örn. PARAM) KB önerisi + kapanış etiket bölümü GİZLENİR ve "KB analizi
+  // zorunlu" kuralı UYGULANMAZ (taxonomy verisi olmayan kiracıda vaka
+  // kapatılamaz hale geliyordu). null = yükleniyor (zorunluluk aktif kalır
+  // — UNIVERA default'u güvenli taraf).
+  const [kbEnabled, setKbEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    if (!item.companyId) return;
+    void externalKbService
+      .settingsStatus(item.companyId)
+      .then((st) => { if (alive) setKbEnabled(st?.enabled === true); })
+      .catch(() => { if (alive) setKbEnabled(null); });
+    return () => { alive = false; };
+  }, [item.companyId]);
+
   const [kbSuggesting, setKbSuggesting] = useState(false);
   const [kbSuggestion, setKbSuggestion] = useState<SuggestClosureResponse | null>(null);
   const [kbSuggestionError, setKbSuggestionError] = useState<string | null>(null);
@@ -413,6 +430,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     prevClosureCf?.rootCauseGroup || prevClosureCf?.rootCauseGroupLabel || prevClosureCf?.closureSuggestion
   );
   const kbAnalysisPending =
+    kbEnabled !== false &&
     !closureAlreadyAnalyzed &&
     !kbSuggestion &&
     !(closureRcg || closureRcd || closureRt || closurePp);
@@ -679,14 +697,16 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                   Klasik vakada info-only kart; Smart Ticket vakada
                   dropdown pre-fill (kullanıcı onayıyla). Approval /
                   checklist guard'ları bypass edilmez. */}
-              <KbClosureSuggestionPanel
-                resolutionNote={resolutionNote}
-                kbSuggesting={kbSuggesting}
-                kbSuggestion={kbSuggestion}
-                kbSuggestionError={kbSuggestionError}
-                onSuggest={() => void handleKbSuggest()}
-                onClarifyAnswer={(answer) => void handleKbSuggest(answer)}
-              />
+              {kbEnabled !== false && (
+                <KbClosureSuggestionPanel
+                  resolutionNote={resolutionNote}
+                  kbSuggesting={kbSuggesting}
+                  kbSuggestion={kbSuggestion}
+                  kbSuggestionError={kbSuggestionError}
+                  onSuggest={() => void handleKbSuggest()}
+                  onClarifyAnswer={(answer) => void handleKbSuggest(answer)}
+                />
+              )}
 
               {/* WR-Smart-Ticket Phase 1e + kapanış-tüm-vakalar genişletmesi —
                   yapılandırılmış kapanış alanları TÜM vakalarda gösterilir
@@ -698,6 +718,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                   boş bıraktığı alanlar boş kalabilir (bilinçli; gelişim
                   verisi). Submit'te smartTicketClosure payload backend
                   deep-merge ile customFields.smartTicket.closure'a yazar. */}
+              {kbEnabled !== false && (
               <div className="rounded-md border border-brand-100 bg-brand-50/40 p-3 dark:border-brand-900/30 dark:bg-brand-950/20">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-xs font-medium text-brand-700 dark:text-brand-200">
@@ -781,6 +802,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                     yazılır; mevcut Smart Ticket açılış bilgileri korunur.
                   </p>
                 </div>
+              )}
             </>
           )}
 
