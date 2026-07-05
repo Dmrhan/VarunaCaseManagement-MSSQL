@@ -784,7 +784,13 @@ export function CasesListPage({
       if (poolVisiblePersonal && myTeamId) {
         tiles.push(
           tile('personal.pool', 'Havuz', poolCount ?? 0, 'blue', <Boxes size={16} />, () => {
-            setFilters({ ...initialFilters, teamId: myTeamId, unassigned: true });
+            // NOT: unassigned=true asıl olarak quickQueueFilter state'inden
+            // okunuyor (bkz. load()) — filters.unassigned load()'da hiç
+            // kullanılmıyor, sadece quickQueueFilter='unassigned' filtreyi
+            // gerçekten uygular. İkisini birden set etmezsek atanmış
+            // kayıtlar da listeye sızar.
+            setFilters({ ...initialFilters, teamId: myTeamId });
+            setQuickQueueFilter('unassigned');
             setInboxTab('open');
             setQuickFilter(null);
           }),
@@ -823,7 +829,13 @@ export function CasesListPage({
         // Havuz — Supervisor takım lideri persona kabul edilir, seviyeden
         // bağımsız her zaman görünür. En başa, "Ekibimde Açık"ın önüne konur.
         tile('team.pool', 'Havuz', poolCount ?? 0, 'blue', <Boxes size={16} />, () => {
-          setFilters({ ...initialFilters, teamScope: true, unassigned: true });
+          // NOT: unassigned=true asıl olarak quickQueueFilter state'inden
+          // okunuyor (bkz. load()) — filters.unassigned load()'da hiç
+          // kullanılmıyor, sadece quickQueueFilter='unassigned' filtreyi
+          // gerçekten uygular. İkisini birden set etmezsek atanmış
+          // kayıtlar da listeye sızar.
+          setFilters({ ...initialFilters, teamScope: true });
+          setQuickQueueFilter('unassigned');
           setInboxTab('open');
           setQuickFilter(null);
         }),
