@@ -659,13 +659,24 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
       if (updated) {
         setItem(updated);
         savedCount += Object.keys(drafts).length;
+        setDrafts({});
+        setEditingField(null);
       }
-      setDrafts({});
-      setEditingField(null);
+      // updated undefined ise: apiFetch zaten hata toast'unu gösterdi.
+      // Taslaklar KORUNUR — aksi halde kullanıcı reddedilmiş bir
+      // güncellemeyi kaydedilmiş sanıp kaydedilmemiş değişikliklerini
+      // kaybederdi.
     }
 
     setSavingDrafts(false);
-    toast({ type: 'success', title: 'Vaka güncellendi ✓', message: `${savedCount} alan kaydedildi.` });
+    // Yalnız gerçekten bir şey kaydedildiyse (savedCount > 0) başarı
+    // bildirimi gösterilir — müşteri değişimi başarılı olup alan
+    // güncellemesi başarısız olursa bile başarılı kısım doğru raporlanır;
+    // hiçbir şey kaydedilmediyse (savedCount === 0) sahte "0 alan
+    // kaydedildi" bildirimi gösterilmez, apiFetch'in kendi hata mesajı yeterli.
+    if (savedCount > 0) {
+      toast({ type: 'success', title: 'Vaka güncellendi ✓', message: `${savedCount} alan kaydedildi.` });
+    }
   }
 
   function handleDiscardDrafts() {
