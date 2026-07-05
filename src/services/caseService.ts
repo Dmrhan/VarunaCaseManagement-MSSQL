@@ -2286,6 +2286,32 @@ export const caseService = {
     return item ?? undefined;
   },
 
+  /**
+   * L2-Smart-Flow FAZ 1 — Akıllı Tanımlar (açılış 5 taxonomy alanı) mevcut
+   * vaka üzerinde güncelleme. PATCH /api/cases/:id/smart-classification
+   * Backend deep-merge sözleşmesi: diğer customFields dalları + smartTicket
+   * alt-dalları (closure/aiDrafts/…) AYNEN korunur; 5 alan TAM SET yazılır
+   * (boş gelen silinir — kullanıcı kararı: analiz/kayıt ezer).
+   */
+  async updateSmartClassification(
+    caseId: string,
+    payload: UpdateSmartClassificationRequest,
+  ): Promise<Case | undefined> {
+    const result = await apiFetch<Case>(
+      `/api/cases/${caseId}/smart-classification`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'Akıllı Tanımlar kaydedilemedi',
+    );
+    // Codex R1 P2 — diğer case mutation'larıyla parite (WR-H2): 30sn TTL
+    // cache'i temizlenmezse geri dönüşte kayıt-öncesi sınıflandırma görünür.
+    if (result) invalidateCaseDetail(caseId);
+    return result;
+  },
+
   async importAiSuggestedSolutionSteps(
     caseId: string,
     body: ImportAiSuggestedBody,
@@ -2670,6 +2696,34 @@ export interface SuggestClassificationRequest {
   productId?: string;
   projectId?: string;
   bildirimNo?: string;
+}
+
+/**
+ * L2-Smart-Flow FAZ 1 — Akıllı Tanımlar güncelleme isteği.
+ * fields TAM SET gönderilir; code boş/undefined → alan temizlenir.
+ */
+export interface UpdateSmartClassificationRequest {
+  fields: Partial<
+    Record<SuggestClassificationField, { code?: string | null; label?: string | null }>
+  >;
+  classificationSuggestion?: {
+    appliedAt?: string;
+    appliedFields?: string[];
+    perField?: Partial<
+      Record<
+        SuggestClassificationField,
+        { matchedBy?: string; confidence?: number; suggestedCode?: string }
+      >
+    >;
+    unmatched?: Array<{ taxonomyType: string; rawValue?: string }>;
+  };
+  appliedMapping?: {
+    source?: string;
+    category?: string;
+    subCategory?: string;
+    requestType?: string;
+    trace?: string[];
+  };
 }
 
 export interface SuggestClassificationItem {

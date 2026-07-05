@@ -233,6 +233,77 @@ export async function proxy({ setting, endpoint, method, path, body }) {
   }
 }
 
+/**
+ * L2-Smart-Flow R1 (2026-07-05) — KB hata SINIFLANDIRMASI.
+ *
+ * Neden: tüm KB hataları tek 'external_kb_failed' koduna eziliyordu; agent
+ * "502 başarısız" görüyor, admin sebebi log kazmadan bilemiyordu (gerçek
+ * olay: Anthropic kredi bitti, teşhis manuel kazı gerektirdi).
+ *
+ * wrapped = proxy() dönüşü (ok:false). Upstream gövdesi (data) İNCELENİR
+ * ama kullanıcıya AYNEN GÖSTERİLMEZ (iç altyapı detayı sızdırmamak için) —
+ * yalnız sınıf + Türkçe eylem mesajı döner. Tüm KB akışları (sınıflandırma,
+ * çözüm adımları, kapanış önerisi) aynı helper'ı kullanır.
+ */
+export function classifyKbFailure(wrapped) {
+  const code = wrapped?.error?.code ?? 'external_kb_failed';
+  const upstream = (() => {
+    try {
+      return JSON.stringify(wrapped?.data ?? '') + ' ' + String(wrapped?.error?.message ?? '');
+    } catch {
+      return String(wrapped?.error?.message ?? '');
+    }
+  })();
+
+  if (/credit balance|insufficient[_ ]credit|billing|purchase credits|quota|rate.?limit|429/i.test(upstream)) {
+    return {
+      code: 'kb_quota_exceeded',
+      status: 502,
+      message:
+        'Yapay zeka kullanım kredisi/kotası tükenmiş görünüyor — elle seçimle devam edebilirsiniz. ' +
+        'Sistem yöneticinize bildirin (AI sağlayıcı hesabına kredi yüklenmeli).',
+    };
+  }
+  if (code === 'external_kb_timeout') {
+    return {
+      code: 'kb_timeout',
+      status: 504,
+      message: 'Bilgi Bankası yanıt vermedi (zaman aşımı) — elle seçimle devam edebilirsiniz.',
+    };
+  }
+  if (code === 'external_kb_network_error') {
+    return {
+      code: 'kb_unreachable',
+      status: 502,
+      message:
+        'Bilgi Bankası servisine ulaşılamadı — elle seçimle devam edebilirsiniz. ' +
+        'Sorun sürerse sistem yöneticinize bildirin.',
+    };
+  }
+  return {
+    code: 'external_kb_failed',
+    status: 502,
+    message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
+  };
+}
+
+/**
+ * Birden çok başarısız denemeden (örn. categorize-v2 + analyze fallback)
+ * EN SPESİFİK sınıfı seç — jenerik 'external_kb_failed' ancak hiçbiri
+ * sınıflanamazsa döner. (Gerçek olay: kota bilgisi v2 cevabındaydı,
+ * yalnız fallback'e bakınca jenerik kalıyordu.)
+ */
+export function pickKbFailure(...wrappeds) {
+  let fallback = null;
+  for (const w of wrappeds) {
+    if (!w) continue;
+    const cls = classifyKbFailure(w);
+    if (cls.code !== 'external_kb_failed') return cls;
+    fallback = fallback ?? cls;
+  }
+  return fallback ?? classifyKbFailure(null);
+}
+
 /** High-level helpers used by routes — `endpoint` is the symbolic label. */
 export const externalKbClient = {
   async health(setting) {
