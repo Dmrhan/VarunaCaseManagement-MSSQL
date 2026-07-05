@@ -341,11 +341,15 @@ export function CasesListPage({
     [filters.teamId, personsAll],
   );
 
-  // Havuz kartı — kullanıcının kendi takımı + o takımın destek seviyesi.
-  // Agent/Backoffice/CSM: L1 takımlarında kart hiç gösterilmez (L1 zaten
-  // kendi işini yönetiyor); L2/L3 takımlarında görünür. Supervisor'da
-  // (team mode) takım lideri persona kabul edilir, seviyeden bağımsız
-  // her zaman görünür — server 'teamScope' filtresiyle kendi takımını çözer.
+  // Havuz kartı — kullanıcının kendi takımı + KİŞİNİN kendi destek seviyesi/
+  // takım liderliği. Backend guard'ıyla (routes/cases.js roleDefaultScope +
+  // caseRepository.js claim()) birebir aynı kural kullanılmalı: ikisi de
+  // Person.isTeamLead / Person.supportLevel'a bakıyor, Team.defaultSupportLevel'a
+  // DEĞİL. Önceden burada yanlışlıkla myTeam.defaultSupportLevel kullanılıyordu
+  // — kişinin kendi seviyesi takımınkinden farklıysa (ör. L1 takımda L2/lider
+  // bir kişi, veya L2 takımda L1 bir kişi), kart ya backend izin verdiği halde
+  // gizli kalıyordu ya da backend'in engellediği bir kullanıcıya boş/0 sonuçlu
+  // olarak gösteriliyordu.
   const myPerson = useMemo(
     () => (user?.personId ? personsAll.find((p) => p.id === user.personId) ?? null : null),
     [personsAll, user?.personId],
@@ -356,7 +360,8 @@ export function CasesListPage({
     [teams, myTeamId],
   );
   const myTeamSupportLevel = myTeam?.defaultSupportLevel ?? 'L1';
-  const poolVisiblePersonal = Boolean(myTeamId) && myTeamSupportLevel !== 'L1';
+  const canSeeTeamPool = myPerson?.isTeamLead === true || ['L2', 'L3'].includes(myPerson?.supportLevel ?? '');
+  const poolVisiblePersonal = Boolean(myTeamId) && canSeeTeamPool;
 
   // Supervisor Takım Havuzu — yalnız "kendi takımım" değil, kendi takımıyla
   // AYNI defaultSupportLevel'a sahip TÜM (aynı şirketteki, aktif) takımların
@@ -454,6 +459,7 @@ export function CasesListPage({
     filters.caseType,
     filters.priorities,
     filters.teamId,
+    filters.teamIds,
     filters.personId,
     filters.dateFrom,
     filters.dateTo,
