@@ -3,6 +3,7 @@ import { verifyJwt } from '../db/auth.js';
 import { prisma } from '../db/client.js';
 import { aiClient, callOpenAI, logAIUsage, AI_MODEL, AI_MAX_TOKENS, AI_TIMEOUT_MS } from '../lib/aiClient.js';
 import { computeOperationsOverview } from '../analytics/operationsAggregator.js';
+import { checkAccountInScope } from '../analytics/accountScopeGuard.js';
 import { deriveAnalyticsScope, describeScope } from '../analytics/scopeDerivation.js';
 import { FORMULA_VERSION } from '../analytics/metricFormulas.js';
 import {
@@ -1242,6 +1243,20 @@ async function buildScopedSnapshot(req) {
   if (validation.error) return { status: 400, error: validation.error };
   const { from, to } = validation;
   const scope = deriveAnalyticsScope(req.user, body);
+
+  // Codex R1 P1 (PR #417) — müşteri lensi AI snapshot'ına da uygulanır.
+  // Aksi halde kartlar müşteriye daralmışken RUNA TÜM kapsam üzerinden
+  // yorum üretir (yanıltıcı çıktı). Guard analytics ile TEK KAYNAK.
+  let accountId;
+  if (body.accountId !== undefined && body.accountId !== null && body.accountId !== '') {
+    if (typeof body.accountId !== 'string') {
+      return { status: 400, error: 'accountId string olmalı.' };
+    }
+    const check = await checkAccountInScope(body.accountId, scope);
+    if (!check.ok) return { status: check.status, error: check.body.error };
+    accountId = body.accountId;
+  }
+
   const filters = {
     from: from.toISOString(),
     to: to.toISOString(),
@@ -1249,6 +1264,7 @@ async function buildScopedSnapshot(req) {
     caseTypes: sanitizeOpsStringArray(body.caseTypes),
     statuses: sanitizeOpsStringArray(body.statuses),
     granularity: body.granularity === 'hour' ? 'hour' : 'day',
+    ...(accountId ? { accountId } : {}),
   };
   const payload = await computeOperationsOverview({ scope, filters });
   // operationsAggregator scope objesini payload icine yazmaz — burada ekleyelim ki narrative cikabilsin

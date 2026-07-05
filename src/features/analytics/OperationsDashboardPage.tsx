@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
+  Tag,
+  X,
   Building2,
   CheckCircle2,
   ChevronLeft,
@@ -60,6 +62,7 @@ import {
   type LensKey,
 } from './operationsLensConfig';
 import { useAuth } from '@/services/AuthContext';
+import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
 
 /**
  * Operations Intelligence — Dashboard (Phase 2 UI)
@@ -216,6 +219,10 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
   const [statuses, setStatuses] = useState<string[]>([]);
   const [caseTypes, setCaseTypes] = useState<string[]>([]);
   const [companies, setCompanies] = useState<string[]>([]);
+  // Ops Pano v2 FAZ 1 — müşteri lensi. Seçilince TÜM kart/kırılım/trend
+  // yalnız bu müşterinin vakalarını sayar (backend scope-guard'lı).
+  const [selectedAccount, setSelectedAccount] = useState<{ id: string; name: string } | null>(null);
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
   // Mevcut kapsam icindeki sirket listesi — overview response'larindan birlestirilerek
   // toplanir; user PARAM'a daraltinca byCompany kuculur ama allCompanies kuculmesin
   // diye ayri tutuyoruz. SystemAdmin disindaki rollerde byCompany null → bos kalir.
@@ -266,7 +273,10 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
     statuses: statuses.length > 0 ? statuses : undefined,
     caseTypes: caseTypes.length > 0 ? caseTypes : undefined,
     granularity: 'day',
-  }), [dateFrom, dateTo, statusesKey, caseTypesKey, companiesKey]);
+    // Müşteri lensi — drilldown istekleri de overviewBody'yi spread ettiği
+    // için accountId oraya da otomatik akar.
+    accountId: selectedAccount?.id,
+  }), [dateFrom, dateTo, statusesKey, caseTypesKey, companiesKey, selectedAccount?.id]);
 
   useEffect(() => {
     let alive = true;
@@ -460,13 +470,29 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
         caseTypes={caseTypes}
         companies={companies}
         availableCompanies={allCompanies}
+        selectedAccountName={selectedAccount?.name ?? null}
+        onOpenAccountPicker={() => setAccountPickerOpen(true)}
+        onClearAccount={() => setSelectedAccount(null)}
         onToggleStatus={toggleStatus}
         onToggleCaseType={toggleCaseType}
         onToggleCompany={toggleCompany}
         onClear={() => {
           setStatuses([]);
           setCaseTypes([]);
+          setSelectedAccount(null);
           setCompanies([]);
+        }}
+      />
+
+      {/* Ops Pano v2 FAZ 1 — müşteri seçici (server-side arama; SmartTicket
+          picker REUSE). Seçim state'e düşer, overviewBody + drilldown scoped. */}
+      <AccountSearchPicker
+        open={accountPickerOpen}
+        selectedAccountId={selectedAccount?.id ?? null}
+        onClose={() => setAccountPickerOpen(false)}
+        onSelect={(account) => {
+          setSelectedAccount(account ? { id: account.id, name: account.name } : null);
+          setAccountPickerOpen(false);
         }}
       />
 
@@ -725,6 +751,29 @@ function SectionRenderer({
           onOpenDrilldown={openDrilldown}
         />
       );
+    case 'requestOriginGroup':
+      // Ops Pano v2 FAZ 1 (1b) — aggregate'ler hazırdı (Bülten A1), UI'a
+      // bağlandı. Drilldown bucket'ı yok (bilinçli — mini kart + dağılım).
+      return (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <BreakdownCard
+            title="Talep Türü"
+            icon={<Tag size={16} />}
+            loading={loading}
+            items={mapRequestTypeItems(data?.byRequestType ?? [])}
+            emptyHint="Bu dönemde vaka oluşturulmamış."
+            onOpenDrilldown={openDrilldown}
+          />
+          <BreakdownCard
+            title="Kanal"
+            icon={<Inbox size={16} />}
+            loading={loading}
+            items={mapOriginItems(data?.byOrigin ?? [])}
+            emptyHint="Bu dönemde vaka oluşturulmamış."
+            onOpenDrilldown={openDrilldown}
+          />
+        </div>
+      );
     case 'byCompany':
       // byCompany sadece backend null degilse render — scope guard server-side.
       if (!data?.byCompany || data.byCompany.length === 0) return null;
@@ -869,6 +918,9 @@ function FilterBar({
   caseTypes,
   companies,
   availableCompanies,
+  selectedAccountName,
+  onOpenAccountPicker,
+  onClearAccount,
   onToggleStatus,
   onToggleCaseType,
   onToggleCompany,
@@ -878,18 +930,49 @@ function FilterBar({
   caseTypes: string[];
   companies: string[];
   availableCompanies: Array<{ id: string; name: string }>;
+  /** Ops Pano v2 FAZ 1 — müşteri lensi (null = tüm müşteriler). */
+  selectedAccountName: string | null;
+  onOpenAccountPicker: () => void;
+  onClearAccount: () => void;
   onToggleStatus: (s: string) => void;
   onToggleCaseType: (t: string) => void;
   onToggleCompany: (id: string) => void;
   onClear: () => void;
 }) {
-  const anyActive = statuses.length > 0 || caseTypes.length > 0 || companies.length > 0;
+  const anyActive =
+    statuses.length > 0 || caseTypes.length > 0 || companies.length > 0 || selectedAccountName !== null;
   // Tek sirket icin chip gostermek anlamsiz (zaten daraltma yapilamaz).
   const showCompanies = availableCompanies.length > 1;
   return (
     <div className="space-y-1.5 rounded-md border border-slate-200 bg-slate-50/50 px-3 py-2 dark:border-ndark-border dark:bg-ndark-bg/30">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium text-slate-500 dark:text-ndark-muted">Statü:</span>
+        <span className="text-xs font-medium text-slate-500 dark:text-ndark-muted">Müşteri:</span>
+        {selectedAccountName ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-medium text-brand-800 dark:bg-brand-900/40 dark:text-brand-200">
+            {selectedAccountName}
+            <button
+              type="button"
+              onClick={onClearAccount}
+              className="rounded-full hover:bg-brand-200 dark:hover:bg-brand-800"
+              title="Müşteri filtresini temizle"
+              aria-label="Müşteri filtresini temizle"
+            >
+              <X size={12} />
+            </button>
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={onOpenAccountPicker}
+            className="rounded-full border border-dashed border-slate-300 px-2.5 py-0.5 text-xs text-slate-500 transition hover:border-brand-400 hover:text-brand-700 dark:border-ndark-border dark:text-ndark-muted"
+          >
+            + Müşteri seç
+          </button>
+        )}
+        <span className="text-[11px] text-slate-400 dark:text-ndark-muted">
+          Müşteri seçince tüm görseller yalnız o müşterinin vakalarını sayar.
+        </span>
+        <span className="ml-2 text-xs font-medium text-slate-500 dark:text-ndark-muted">Statü:</span>
         {STATUS_ORDER.map((s) => (
           <FilterChip
             key={s}
@@ -1344,6 +1427,57 @@ function mapCaseTypeItems(rows: { key: string; count: number }[]): DrilldownBarI
     value: r.count,
     color: CASE_TYPE_COLOR[r.key] ?? 'bg-slate-500',
     bucket: { kind: 'caseType', key: r.key, label: CASE_TYPE_LABEL[r.key] ?? r.key },
+  }));
+}
+
+// Ops Pano v2 FAZ 1 — DB'de ASCII-normalize enum (Sikayet/Oneri), UI'da TR
+// (server/db/enumMap.js M_REQUEST + M_ORIGIN'in görüntü karşılığı).
+const REQUEST_TYPE_LABEL: Record<string, string> = {
+  Bilgi: 'Bilgi',
+  Oneri: 'Öneri',
+  Talep: 'Talep',
+  Sikayet: 'Şikayet',
+  Hata: 'Hata',
+};
+const REQUEST_TYPE_COLOR: Record<string, string> = {
+  Bilgi: 'bg-sky-500',
+  Oneri: 'bg-emerald-500',
+  Talep: 'bg-brand-500',
+  Sikayet: 'bg-rose-500',
+  Hata: 'bg-amber-500',
+};
+const ORIGIN_LABEL: Record<string, string> = {
+  Telefon: 'Telefon',
+  Eposta: 'E-posta',
+  Web: 'Web',
+  Chatbot: 'Chatbot',
+  Diger: 'Diğer',
+};
+const ORIGIN_COLOR: Record<string, string> = {
+  Telefon: 'bg-violet-500',
+  Eposta: 'bg-brand-500',
+  Web: 'bg-emerald-500',
+  Chatbot: 'bg-amber-500',
+  Diger: 'bg-slate-500',
+};
+
+function mapRequestTypeItems(rows: { key: string; count: number }[]): DrilldownBarItem[] {
+  return rows.map((r) => ({
+    key: r.key,
+    label: REQUEST_TYPE_LABEL[r.key] ?? r.key,
+    value: r.count,
+    color: REQUEST_TYPE_COLOR[r.key] ?? 'bg-slate-500',
+    // bucket YOK — drilldown bilinçli kapalı (FAZ 1 kapsamı; BreakdownCard
+    // bucket'sız item'ı tıklanamaz düz metin basar).
+  }));
+}
+
+function mapOriginItems(rows: { key: string; count: number }[]): DrilldownBarItem[] {
+  return rows.map((r) => ({
+    key: r.key,
+    label: ORIGIN_LABEL[r.key] ?? r.key,
+    value: r.count,
+    color: ORIGIN_COLOR[r.key] ?? 'bg-slate-500',
   }));
 }
 
