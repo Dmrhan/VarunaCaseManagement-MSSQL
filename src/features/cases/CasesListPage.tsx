@@ -6,6 +6,7 @@ import {
   AlertCircle,
   ArrowDown,
   ArrowUp,
+  Boxes,
   Globe,
   Mail,
   MessageSquare,
@@ -328,6 +329,51 @@ export function CasesListPage({
     () => (filters.teamId ? personsAll.filter((p) => p.teamId === filters.teamId) : personsAll),
     [filters.teamId, personsAll],
   );
+
+  // Havuz kartı — kullanıcının kendi takımı + o takımın destek seviyesi.
+  // Agent/Backoffice/CSM: L1 takımlarında kart hiç gösterilmez (L1 zaten
+  // kendi işini yönetiyor); L2/L3 takımlarında görünür. Supervisor'da
+  // (team mode) takım lideri persona kabul edilir, seviyeden bağımsız
+  // her zaman görünür — server 'teamScope' filtresiyle kendi takımını çözer.
+  const myPerson = useMemo(
+    () => (user?.personId ? personsAll.find((p) => p.id === user.personId) ?? null : null),
+    [personsAll, user?.personId],
+  );
+  const myTeamId = myPerson?.teamId ?? null;
+  const myTeam = useMemo(
+    () => (myTeamId ? teams.find((t) => t.id === myTeamId) ?? null : null),
+    [teams, myTeamId],
+  );
+  const myTeamSupportLevel = myTeam?.defaultSupportLevel ?? 'L1';
+  const poolVisiblePersonal = Boolean(myTeamId) && myTeamSupportLevel !== 'L1';
+
+  // Havuz sayacı — kart tıklandığında listelenecek sayıyla birebir aynı
+  // olmalı (client-side/pagination'a bağlı tahmini sayım riskli). Bu yüzden
+  // mevcut liste endpoint'i aynı filtrelerle limit=1 çağrılıp gerçek
+  // '@odata.count' okunuyor — yeni endpoint yok, tek ek istek.
+  const [poolCount, setPoolCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPoolCount() {
+      if (caseStats?.mode === 'team') {
+        const { total } = await caseService.list(
+          { teamScope: true, unassigned: true },
+          { page: 1, pageSize: 1 },
+        );
+        if (!cancelled) setPoolCount(total);
+      } else if (caseStats?.mode === 'personal' && poolVisiblePersonal && myTeamId) {
+        const { total } = await caseService.list(
+          { teamId: myTeamId, unassigned: true },
+          { page: 1, pageSize: 1 },
+        );
+        if (!cancelled) setPoolCount(total);
+      } else {
+        setPoolCount(null);
+      }
+    }
+    void loadPoolCount();
+    return () => { cancelled = true; };
+  }, [caseStats?.mode, poolVisiblePersonal, myTeamId]);
 
   // targetPage: undefined = mevcut page state'i kullan; sayı = o sayfayı yükle.
   const load = async (targetPage?: number, queueFilter?: QuickQueueFilter) => {
@@ -681,6 +727,169 @@ export function CasesListPage({
   const canClaimCase = (c: { status: CaseStatus; assignedPersonId?: string | null }) =>
     !!user?.personId && !c.assignedPersonId && !CLOSED_STATUSES.includes(c.status);
 
+  // Role-aware KPI cards — backend tek truth source (GET /api/cases/stats).
+  // Mode rol bazlı: personal (Agent/Backoffice/CSM), team (Supervisor),
+  // operations (Admin/SystemAdmin). Tile click → list filter intent + seçili
+  // tile görsel hint. JSX dışına alındı ki tile sayısı (4 veya Havuz'lu 5)
+  // grid kolon sayısını belirleyebilsin.
+  const kpiTiles: React.ReactNode[] = (() => {
+    // Color band per card category (spec: blue/red/green/amber)
+    const TILE_BORDER = {
+      blue: 'border-t-2 border-t-blue-500 dark:border-t-blue-600',
+      red: 'border-t-2 border-t-rose-500 dark:border-t-rose-600',
+      green: 'border-t-2 border-t-emerald-500 dark:border-t-emerald-600',
+      amber: 'border-t-2 border-t-amber-500 dark:border-t-amber-600',
+    } as const;
+    type Color = keyof typeof TILE_BORDER;
+
+    const tile = (
+      id: string,
+      label: string,
+      value: number,
+      color: Color,
+      icon: React.ReactNode,
+      onClick: () => void,
+    ) => (
+      <KpiTile
+        key={id}
+        label={label}
+        value={value}
+        icon={icon}
+        tone={value === 0 ? 'slate' : (color === 'red' ? 'rose' : color === 'green' ? 'emerald' : color === 'amber' ? 'amber' : 'brand')}
+        selected={selectedKpi === id}
+        extraClassName={TILE_BORDER[color]}
+        onClick={() => {
+          setSelectedKpi(id);
+          onClick();
+        }}
+      />
+    );
+
+    if (statsLoading && !caseStats) {
+      return [0, 1, 2, 3].map((i) => (
+        <div
+          key={`skel-${i}`}
+          className="h-[64px] animate-pulse rounded-xl bg-slate-100 dark:bg-ndark-card"
+        />
+      ));
+    }
+
+    // PERSONAL (Agent/Backoffice/CSM)
+    if (caseStats?.mode === 'personal' && user?.personId) {
+      const s = caseStats;
+      const me = user.personId;
+      const tiles: React.ReactNode[] = [];
+      // Havuz — yalnız kullanıcının kendi takımı L2/L3 ise görünür (L1 zaten
+      // kendi işini yönetir). En başa, "Bana Atanan"ın önüne konur.
+      if (poolVisiblePersonal && myTeamId) {
+        tiles.push(
+          tile('personal.pool', 'Havuz', poolCount ?? 0, 'blue', <Boxes size={16} />, () => {
+            setFilters({ ...initialFilters, teamId: myTeamId, unassigned: true });
+            setInboxTab('open');
+            setQuickFilter(null);
+          }),
+        );
+      }
+      tiles.push(
+        tile('personal.assigned', 'Bana Atanan', s.assignedToMe, 'blue', <User size={16} />, () => {
+          setFilters({ ...initialFilters, personId: me });
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('personal.slaRiskMine', 'SLA Riskimde', s.slaRiskMine, 'red', <AlertCircle size={16} />, () => {
+          setFilters({ ...initialFilters, personId: me, slaViolation: true });
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('personal.resolvedToday', 'Bugün Çözdüm', s.resolvedToday, 'green', <CheckCircle2 size={16} />, () => {
+          setFilters({ ...initialFilters, personId: me, resolvedToday: true });
+          setInboxTab('closed');
+          setQuickFilter(null);
+          setQuickQueueFilter('all');
+        }),
+        tile('personal.snoozed', 'Ertelenenlerim', s.snoozedMine, 'amber', <Clock size={16} />, () => {
+          setFilters(initialFilters);
+          setInboxTab('later');
+          setQuickFilter(null);
+        }),
+      );
+      return tiles;
+    }
+
+    // TEAM (Supervisor)
+    if (caseStats?.mode === 'team') {
+      const s = caseStats;
+      return [
+        // Havuz — Supervisor takım lideri persona kabul edilir, seviyeden
+        // bağımsız her zaman görünür. En başa, "Ekibimde Açık"ın önüne konur.
+        tile('team.pool', 'Havuz', poolCount ?? 0, 'blue', <Boxes size={16} />, () => {
+          setFilters({ ...initialFilters, teamScope: true, unassigned: true });
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('team.open', 'Ekibimde Açık', s.teamOpenCount, 'blue', <Inbox size={16} />, () => {
+          setFilters({ ...initialFilters, teamScope: true });
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('team.sla', 'Ekibimde SLA', s.teamSlaRisk, 'red', <ShieldAlert size={16} />, () => {
+          setFilters({ ...initialFilters, teamScope: true, slaViolation: true });
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('team.escalation', 'Eskale Edildi', s.teamEscalation, 'amber', <AlertCircle size={16} />, () => {
+          setFilters({ ...initialFilters, teamScope: true, statuses: ['Eskalasyon'] });
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('team.resolvedToday', 'Bugün Çözülen', s.teamResolvedToday, 'green', <CheckCircle2 size={16} />, () => {
+          setFilters({ ...initialFilters, teamScope: true, resolvedToday: true });
+          setInboxTab('closed');
+          setQuickFilter(null);
+          setQuickQueueFilter('all');
+        }),
+      ];
+    }
+
+    // OPERATIONS (Admin/SystemAdmin)
+    if (caseStats?.mode === 'operations') {
+      const s = caseStats;
+      return [
+        tile('ops.totalOpen', 'Toplam Açık', s.totalOpen, 'blue', <Inbox size={16} />, () => {
+          setFilters(initialFilters);
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('ops.slaViolation', 'SLA İhlali', s.slaViolation, 'red', <ShieldAlert size={16} />, () => {
+          setFilters({ ...initialFilters, slaViolation: true });
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('ops.critical', 'Kritik', s.critical, 'red', <Flag size={16} />, () => {
+          setFilters({ ...initialFilters, priorities: ['Critical'] });
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('ops.resolvedToday', 'Bugün Çözülen', s.resolvedToday, 'green', <CheckCircle2 size={16} />, () => {
+          setFilters({ ...initialFilters, resolvedToday: true });
+          setInboxTab('closed');
+          setQuickFilter(null);
+          setQuickQueueFilter('all');
+        }),
+      ];
+    }
+
+    // Stats fetch failed / empty scope — placeholder cards with "—".
+    return [0, 1, 2, 3].map((i) => (
+      <div
+        key={`empty-${i}`}
+        className="flex h-[64px] items-center justify-center rounded-xl bg-white text-sm text-slate-400 ring-1 ring-slate-200 dark:bg-ndark-card dark:text-ndark-muted dark:ring-ndark-border"
+      >
+        —
+      </div>
+    ));
+  })();
+
   return (
     <div className="space-y-4">
       {patternCasesFilter && (
@@ -765,149 +974,12 @@ export function CasesListPage({
 
       {/*
         Role-aware KPI cards — backend tek truth source (GET /api/cases/stats).
-        Mode rol bazlı: personal (Agent/Backoffice/CSM), team (Supervisor),
-        operations (Admin/SystemAdmin). Tile click → list filter intent +
-        seçili tile görsel hint. Card sayısı ile click sonrası liste sayısı
-        eşleşir (pagination hariç).
+        Havuz kartı dahilse (personal L2/L3 veya team/Supervisor) 5 kart olur;
+        grid kolon sayısı buna göre genişler (kpiTiles component'in üstünde
+        hesaplanır, bkz. yukarı).
       */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {(() => {
-          // Color band per card category (spec: blue/red/green/amber)
-          const TILE_BORDER = {
-            blue: 'border-t-2 border-t-blue-500 dark:border-t-blue-600',
-            red: 'border-t-2 border-t-rose-500 dark:border-t-rose-600',
-            green: 'border-t-2 border-t-emerald-500 dark:border-t-emerald-600',
-            amber: 'border-t-2 border-t-amber-500 dark:border-t-amber-600',
-          } as const;
-          type Color = keyof typeof TILE_BORDER;
-
-          const tile = (
-            id: string,
-            label: string,
-            value: number,
-            color: Color,
-            icon: React.ReactNode,
-            onClick: () => void,
-          ) => (
-            <KpiTile
-              key={id}
-              label={label}
-              value={value}
-              icon={icon}
-              tone={value === 0 ? 'slate' : (color === 'red' ? 'rose' : color === 'green' ? 'emerald' : color === 'amber' ? 'amber' : 'brand')}
-              selected={selectedKpi === id}
-              extraClassName={TILE_BORDER[color]}
-              onClick={() => {
-                setSelectedKpi(id);
-                onClick();
-              }}
-            />
-          );
-
-          if (statsLoading && !caseStats) {
-            return [0, 1, 2, 3].map((i) => (
-              <div
-                key={`skel-${i}`}
-                className="h-[64px] animate-pulse rounded-xl bg-slate-100 dark:bg-ndark-card"
-              />
-            ));
-          }
-
-          // PERSONAL (Agent/Backoffice/CSM)
-          if (caseStats?.mode === 'personal' && user?.personId) {
-            const s = caseStats;
-            const me = user.personId;
-            return [
-              tile('personal.assigned', 'Bana Atanan', s.assignedToMe, 'blue', <User size={16} />, () => {
-                setFilters({ ...initialFilters, personId: me });
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('personal.slaRiskMine', 'SLA Riskimde', s.slaRiskMine, 'red', <AlertCircle size={16} />, () => {
-                setFilters({ ...initialFilters, personId: me, slaViolation: true });
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('personal.resolvedToday', 'Bugün Çözdüm', s.resolvedToday, 'green', <CheckCircle2 size={16} />, () => {
-                setFilters({ ...initialFilters, personId: me, resolvedToday: true });
-                setInboxTab('closed');
-                setQuickFilter(null);
-                setQuickQueueFilter('all');
-              }),
-              tile('personal.snoozed', 'Ertelenenlerim', s.snoozedMine, 'amber', <Clock size={16} />, () => {
-                setFilters(initialFilters);
-                setInboxTab('later');
-                setQuickFilter(null);
-              }),
-            ];
-          }
-
-          // TEAM (Supervisor)
-          if (caseStats?.mode === 'team') {
-            const s = caseStats;
-            return [
-              tile('team.open', 'Ekibimde Açık', s.teamOpenCount, 'blue', <Inbox size={16} />, () => {
-                setFilters({ ...initialFilters, teamScope: true });
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('team.sla', 'Ekibimde SLA', s.teamSlaRisk, 'red', <ShieldAlert size={16} />, () => {
-                setFilters({ ...initialFilters, teamScope: true, slaViolation: true });
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('team.escalation', 'Eskale Edildi', s.teamEscalation, 'amber', <AlertCircle size={16} />, () => {
-                setFilters({ ...initialFilters, teamScope: true, statuses: ['Eskalasyon'] });
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('team.resolvedToday', 'Bugün Çözülen', s.teamResolvedToday, 'green', <CheckCircle2 size={16} />, () => {
-                setFilters({ ...initialFilters, teamScope: true, resolvedToday: true });
-                setInboxTab('closed');
-                setQuickFilter(null);
-                setQuickQueueFilter('all');
-              }),
-            ];
-          }
-
-          // OPERATIONS (Admin/SystemAdmin)
-          if (caseStats?.mode === 'operations') {
-            const s = caseStats;
-            return [
-              tile('ops.totalOpen', 'Toplam Açık', s.totalOpen, 'blue', <Inbox size={16} />, () => {
-                setFilters(initialFilters);
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('ops.slaViolation', 'SLA İhlali', s.slaViolation, 'red', <ShieldAlert size={16} />, () => {
-                setFilters({ ...initialFilters, slaViolation: true });
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('ops.critical', 'Kritik', s.critical, 'red', <Flag size={16} />, () => {
-                setFilters({ ...initialFilters, priorities: ['Critical'] });
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('ops.resolvedToday', 'Bugün Çözülen', s.resolvedToday, 'green', <CheckCircle2 size={16} />, () => {
-                setFilters({ ...initialFilters, resolvedToday: true });
-                setInboxTab('closed');
-                setQuickFilter(null);
-                setQuickQueueFilter('all');
-              }),
-            ];
-          }
-
-          // Stats fetch failed / empty scope — placeholder cards with "—".
-          return [0, 1, 2, 3].map((i) => (
-            <div
-              key={`empty-${i}`}
-              className="flex h-[64px] items-center justify-center rounded-xl bg-white text-sm text-slate-400 ring-1 ring-slate-200 dark:bg-ndark-card dark:text-ndark-muted dark:ring-ndark-border"
-            >
-              —
-            </div>
-          ));
-        })()}
+      <div className={cn('grid grid-cols-2 gap-3', kpiTiles.length >= 5 ? 'sm:grid-cols-5' : 'sm:grid-cols-4')}>
+        {kpiTiles}
       </div>
 
       {/*
