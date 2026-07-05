@@ -2726,8 +2726,13 @@ export const caseRepository = {
 
     const before = await prisma.case.findUnique({
       where: { id: caseId },
-      select: { accountName: true },
+      select: { accountId: true, accountName: true },
     });
+
+    // Hesap gerçekten değişiyorsa (ilk bağlama dahil), eski müşteriye ait
+    // proje referansı sarkan kalmasın diye temizlenir. Aynı hesaba tekrar
+    // bağlanılıyorsa (relink no-op) proje alanlarına dokunulmaz.
+    const accountChanging = before?.accountId !== account.id;
 
     const updated = await prisma.case.update({
       where: { id: caseId },
@@ -2735,6 +2740,7 @@ export const caseRepository = {
         accountId: account.id,
         accountName: account.name,
         customerMatchPending: false,
+        ...(accountChanging ? { accountProjectId: null, accountProjectName: null } : {}),
         history: {
           create: {
             companyId,
