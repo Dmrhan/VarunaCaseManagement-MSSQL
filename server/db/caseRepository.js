@@ -1489,11 +1489,35 @@ export const caseRepository = {
     return shape(c);
   },
 
-  async create(input, actor) {
+  /**
+   * Vaka açılış atama bildirimi (çan + ActionItem) — TEK KAYNAK.
+   * create() içinden (default) veya deferAssignmentNotify ile ertelendiyse
+   * caller'dan (intake, dedupe checkpoint SONRASI) çağrılır.
+   */
+  async notifyAssignmentCreated(created, actor) {
+    await notifyAssignmentTargets({
+      caseId: created.id,
+      companyId: created.companyId,
+      assignedPersonId: created.assignedPersonId,
+      assignedTeamId: created.assignedTeamId,
+      actorUserId: actorUserIdOf(actor),
+      message: `${created.caseNumber} oluşturuldu ve atandı.`,
+      eventType: 'watcher_update',
+      kind: 'assignment',
+    });
+  },
+
+  async create(input, actor, opts = {}) {
     // input: NewCaseInput shape (caseService.ts §142)
     // actor: ActorContext (server/lib/actor.js); route layer requireActor(req)
     //        ile üretip pass eder. Eksikse defansif throw (Mock User
     //        fallback'ı geri dönmez — caller migrasyonu zorunlu).
+    // opts.deferAssignmentNotify (Codex #435 P2): true → atama bildirimleri
+    //        (çan + ActionItem) BURADA yazılmaz; caller duplicate-dedupe
+    //        checkpoint'ini geçtikten sonra notifyAssignmentCreated() çağırır.
+    //        Sebep: emitGenericNotification/emitActionItem fire-and-forget
+    //        (void) — intake yarış rollback'i vakayı sildikten SONRA geç
+    //        ActionItem yazılabilir (FK yok, cascade koruma da yok).
     assertActor(actor, 'caseRepository.create');
     // TR string enum'larını ASCII identifier'a çevir
     const m = toDb(input);
@@ -1817,17 +1841,8 @@ export const caseRepository = {
       include: CASE_INCLUDE,
     });
 
-    if (!isSmartTicketSelfAssigned) {
-      await notifyAssignmentTargets({
-        caseId: created.id,
-        companyId: created.companyId,
-        assignedPersonId: created.assignedPersonId,
-        assignedTeamId: created.assignedTeamId,
-        actorUserId: actorUserIdOf(actor),
-        message: `${created.caseNumber} oluşturuldu ve atandı.`,
-        eventType: 'watcher_update',
-        kind: 'assignment',
-      });
+    if (!isSmartTicketSelfAssigned && !opts?.deferAssignmentNotify) {
+      await caseRepository.notifyAssignmentCreated(created, actor);
     }
 
     // M4.1 FAZ B — case_created event emission BURADA YAPILMIYOR.

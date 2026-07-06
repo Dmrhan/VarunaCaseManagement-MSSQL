@@ -34,7 +34,7 @@ expectTrue('K2.4 P2002 dışı hata hâlâ fırlatılır (throw err korunur)',
 
 console.log('── K1) intake — pre-create gate ──');
 const gateIdx = intake.indexOf('duplicate messageId — vaka açılmadı');
-const createIdx = intake.indexOf('created = await caseRepository.create(newCaseInput, actor)');
+const createIdx = intake.indexOf('created = await caseRepository.create(newCaseInput, actor');
 expectTrue('K1.1 gate mevcut ve caseRepository.create ÖNCESİNDE',
   gateIdx > -1 && createIdx > -1 && gateIdx < createIdx);
 expectTrue('K1.2 gate companyId_messageId unique lookup kullanır',
@@ -64,6 +64,23 @@ expectTrue('K3.6 Codex #434 P2: FK\'siz ActionItem + CaseNotification rollback\'
   /actionItem\.deleteMany\(\{ where: \{ caseId: created\.id, companyId \} \}\)/.test(intake)
   && /caseNotification\.deleteMany\(\{ where: \{ caseId: created\.id \} \}\)/.test(intake)
   && intake.indexOf('actionItem.deleteMany') < intake.indexOf('prisma.case.delete'));
+
+console.log('── K4) Codex #435 P2 — ertelenen atama bildirimi (geç ActionItem sızıntısı) ──');
+const caseRepo = readFileSync('server/db/caseRepository.js', 'utf8');
+expectTrue('K4.1 create() opts.deferAssignmentNotify bayrağını tanır',
+  /async create\(input, actor, opts = \{\}\)/.test(caseRepo)
+  && /!isSmartTicketSelfAssigned && !opts\?\.deferAssignmentNotify/.test(caseRepo));
+expectTrue('K4.2 notifyAssignmentCreated tek-kaynak metod (create içi + intake aynı gövde)',
+  /async notifyAssignmentCreated\(created, actor\)/.test(caseRepo)
+  && caseRepo.includes('await caseRepository.notifyAssignmentCreated(created, actor)'));
+expectTrue('K4.3 intake create\'i defer bayrağıyla çağırır',
+  intake.includes("caseRepository.create(newCaseInput, actor, { deferAssignmentNotify: true })"));
+const notifyIdx = intake.indexOf('await caseRepository.notifyAssignmentCreated(created, actor)');
+expectTrue('K4.4 sıra: rollback checkpoint < kazanan bildirimi < ek persist (kaybeden hiç bildirim üretmez)',
+  rollbackIdx > -1 && notifyIdx > -1 && rollbackIdx < notifyIdx && notifyIdx < attachIdx);
+expectTrue('K4.5 bildirim hatası mail düşürmez (try/catch)',
+  /try \{\s*await caseRepository\.notifyAssignmentCreated\(created, actor\);\s*\} catch/.test(intake.replace(/\n\s*/g, ' ').replace(/ +/g, ' ')) ||
+  /notifyAssignmentCreated\(created, actor\);[\s\S]{0,60}catch \(notifyErr\)/.test(intake));
 
 console.log('── Kontrat ──');
 expectTrue('C.1 poller intakeResult.ok ile \\Seen basar (skip de ok:true → mail tekrar işlenmez)',
