@@ -330,6 +330,11 @@ function buildWhereSql(scope, filters) {
     addIn('[companyId]', scope.companyIds);
   }
 
+  // 2026-07-06 — arşivli vakalar TÜM pano metriklerinden dışlanır (liste
+  // paritesi; 448 arşivli temizlik vakası sayaçları şişirmişti). buildWhereSql
+  // tüm query ailelerinin tek where kaynağı olduğu için tek nokta yeter.
+  clauses.push('[isArchived] = 0');
+
   if (scope.teamIds && scope.teamIds.length > 0) addIn('[assignedTeamId]', scope.teamIds);
   if (scope.personIds && scope.personIds.length > 0) addIn('[assignedPersonId]', scope.personIds);
   if (filters.productGroups && filters.productGroups.length > 0) addIn('[productGroup]', filters.productGroups);
@@ -771,6 +776,7 @@ async function queryPatternAlertSummary(scope, filters) {
     where: {
       id: { in: allIds },
       companyId: { in: scope.companyIds },
+      isArchived: false, // 2026-07-06 — arşivli vaka alarm sayımına girmez
       ...(scope.teamIds && scope.teamIds.length > 0 ? { assignedTeamId: { in: scope.teamIds } } : {}),
       ...(scope.personIds && scope.personIds.length > 0 ? { assignedPersonId: { in: scope.personIds } } : {}),
       ...(filters?.accountId ? { accountId: filters.accountId } : {}),

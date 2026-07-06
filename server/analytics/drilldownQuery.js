@@ -67,7 +67,9 @@ export function validateDrilldownBucket(bucket) {
  * AND-zincirinin basinda; bucket-ozel filtre cakisirsa bos sonuc cikar.
  */
 export function buildDrilldownWhere({ scope, filters, from, to, bucket }) {
-  const and = [{ companyId: { in: scope.companyIds } }];
+  // 2026-07-06 — arşivli vakalar drilldown listesine girmez (aggregator
+  // buildWhereSql paritesi; kart sayısı ile drilldown listesi tutarlı kalır).
+  const and = [{ companyId: { in: scope.companyIds } }, { isArchived: false }];
   if (scope.teamIds && scope.teamIds.length > 0) and.push({ assignedTeamId: { in: scope.teamIds } });
   if (scope.personIds && scope.personIds.length > 0) and.push({ assignedPersonId: { in: scope.personIds } });
   if (filters.productGroups && filters.productGroups.length > 0) {
