@@ -737,6 +737,29 @@ router.post(
   }),
 );
 
+/**
+ * POST /api/cases/bulk-archive — toplu soft-archive (SystemAdmin-only).
+ * Body: { caseIds: string[] (max 100), reason: string (min 3) }
+ * Tekil /:id/archive paritesi: rol + resource policy aynı; idempotent
+ * (zaten arşivli olanlar sayılır, hata üretmez). Cross-tenant id → 403,
+ * hiçbir şey yazılmaz. 2026-07-06 mail döngüsü temizliği ihtiyacından.
+ */
+router.post(
+  '/bulk-archive',
+  requireRole('SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'archive' });
+    const body = req.body ?? {};
+    const actor = requireActor(req);
+    const result = await caseRepository.bulkArchive(
+      { caseIds: body.caseIds, reason: body.reason },
+      { actor, allowedCompanyIds: req.user.allowedCompanyIds },
+    );
+    if (result?.error) return res.status(400).json(result);
+    res.json(result);
+  }),
+);
+
 /** GET /api/cases/by-account?accountId=...&excludeId=...&statusIn=... */
 router.get(
   '/by-account',

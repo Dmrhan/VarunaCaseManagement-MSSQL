@@ -13,6 +13,9 @@ interface ModalProps {
   height?: string;
   /** Body wrapper className'i (varsayılan p-5 py-4 yerine kendi padding/scroll yönetimi) */
   bodyClassName?: string;
+  /** true → modal dikeyde ortalanır (varsayılan üst-hizalı). Toplu aksiyon
+   *  modalları gibi "kaçırılmaması gereken" onay pencereleri için. */
+  centered?: boolean;
 }
 
 const SIZES = {
@@ -34,6 +37,7 @@ export function Modal({
   footer,
   height,
   bodyClassName,
+  centered = false,
 }: ModalProps) {
   // R10.3 (2026-07-04) — ESC katman sahipliği: modal açıkken ESC yalnız
   // modalı kapatır. capture:true → window bubble listener'larından ÖNCE
@@ -60,7 +64,8 @@ export function Modal({
     <div
       className={cn(
         'fixed inset-0 z-50 flex justify-center bg-slate-900/40 p-4 sm:p-8 dark:bg-black/60',
-        fixedHeight ? 'items-center' : 'items-start overflow-y-auto',
+        fixedHeight || centered ? 'items-center' : 'items-start overflow-y-auto',
+        centered && !fixedHeight && 'overflow-y-auto',
       )}
     >
       <div

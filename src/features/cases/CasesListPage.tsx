@@ -4,6 +4,7 @@ import { isSubjectNormalized, normalizeSubject } from '@/lib/subjectNormalizer';
 import { featureFlags } from '@/config/featureFlags';
 import {
   AlertCircle,
+  Archive,
   ArrowDown,
   ArrowUp,
   Boxes,
@@ -70,7 +71,7 @@ import { QuickCaseModal } from './QuickCaseModal';
 
 // Bulk action — kullanıcının açabileceği alan tipi.
 // 'assign' = 2 adımlı atama modalı (takım → kişi).
-type BulkField = 'priority' | 'status' | 'assign';
+type BulkField = 'priority' | 'status' | 'assign' | 'archive';
 
 // Frontline = kişisel KPI'lar; Supervisor+ = global KPI'lar.
 const FRONTLINE_ROLES: UserRole[] = ['Agent', 'Backoffice', 'CSM'];
@@ -711,6 +712,23 @@ export function CasesListPage({
     } else {
       toast({ type: 'success', message: `${result.updated} vaka güncellendi.` });
     }
+    clearSelection();
+    void load();
+    void refreshStats();
+  }
+
+  // Toplu arşiv (SystemAdmin-only) — 2026-07-06 döngü temizliği ihtiyacından.
+  // Soft-archive: geri alınabilir (arşiv görünümünden restore).
+  async function applyBulkArchive(reason: string) {
+    const ids = Array.from(selected);
+    if (ids.length === 0 || reason.trim().length < 3) return;
+    setBulkSubmitting(true);
+    const result = await caseService.bulkArchive(ids, reason.trim());
+    setBulkSubmitting(false);
+    setBulkField(null);
+    if (!result) return; // apiFetch toast gösterdi
+    const suffix = result.alreadyArchived > 0 ? ` (${result.alreadyArchived} zaten arşivliydi)` : '';
+    toast({ type: 'success', message: `${result.archived} vaka arşivlendi.${suffix}` });
     clearSelection();
     void load();
     void refreshStats();
@@ -1814,6 +1832,7 @@ export function CasesListPage({
           onClear={clearSelection}
           onAction={(field) => setBulkField(field)}
           submitting={bulkSubmitting}
+          canArchive={user?.role === 'SystemAdmin'}
         />
       )}
 
@@ -1828,7 +1847,15 @@ export function CasesListPage({
           onApply={(teamId, personId) => void applyBulkAssign(teamId, personId)}
         />
       )}
-      {bulkField && bulkField !== 'assign' && (
+      {bulkField === 'archive' && (
+        <BulkArchiveModal
+          count={selected.size}
+          submitting={bulkSubmitting}
+          onClose={() => setBulkField(null)}
+          onApply={(reason) => void applyBulkArchive(reason)}
+        />
+      )}
+      {bulkField && bulkField !== 'assign' && bulkField !== 'archive' && (
         <BulkActionModal
           field={bulkField}
           count={selected.size}
@@ -1913,11 +1940,14 @@ function BulkActionBar({
   onClear,
   onAction,
   submitting,
+  canArchive,
 }: {
   count: number;
   onClear: () => void;
   onAction: (field: BulkField) => void;
   submitting: boolean;
+  /** SystemAdmin-only: toplu "Arşivle" butonu (tekil arşiv yetki paritesi). */
+  canArchive: boolean;
 }) {
   return (
     <div
@@ -1956,6 +1986,18 @@ function BulkActionBar({
       >
         Durum Değiştir
       </Button>
+      {canArchive && (
+        <Button
+          size="sm"
+          variant="outline"
+          leftIcon={<Archive size={12} />}
+          disabled={submitting}
+          onClick={() => onAction('archive')}
+          className="border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-950/40"
+        >
+          Arşivle
+        </Button>
+      )}
       <span className="h-5 w-px bg-slate-200 dark:bg-ndark-border" />
       <Button
         size="sm"
@@ -1978,7 +2020,7 @@ function BulkActionModal({
   onClose,
   onApply,
 }: {
-  field: Exclude<BulkField, 'assign'>;
+  field: Exclude<BulkField, 'assign' | 'archive'>;
   count: number;
   submitting: boolean;
   onClose: () => void;
@@ -1988,7 +2030,7 @@ function BulkActionModal({
   const [confirmed, setConfirmed] = useState<boolean>(count <= 10);
   const needsConfirm = count > 10 && !confirmed;
 
-  const config: Record<Exclude<BulkField, 'assign'>, { title: string; label: string; options: { value: string; label: string }[] }> = {
+  const config: Record<Exclude<BulkField, 'assign' | 'archive'>, { title: string; label: string; options: { value: string; label: string }[] }> = {
     priority: {
       title: 'Toplu — Öncelik Değiştir',
       label: 'Yeni öncelik',
@@ -2008,7 +2050,8 @@ function BulkActionModal({
       open
       onClose={onClose}
       title={c.title}
-      size="md"
+      size="lg"
+      centered
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={submitting}>
@@ -2056,6 +2099,75 @@ function BulkActionModal({
   );
 }
 
+// Toplu arşiv modalı (SystemAdmin-only) — 2026-07-06 döngü temizliği
+// ihtiyacından. Soft-archive: liste/rapor görünümlerinden kalkar, silinmez;
+// arşiv görünümünden tek tek geri alınabilir. Neden zorunlu (tekil arşiv
+// paritesi, min 3 karakter) — audit'te her vakaya not olarak yazılır.
+function BulkArchiveModal({
+  count,
+  submitting,
+  onClose,
+  onApply,
+}: {
+  count: number;
+  submitting: boolean;
+  onClose: () => void;
+  onApply: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState<string>('');
+  const reasonOk = reason.trim().length >= 3;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Toplu — Arşivle"
+      size="lg"
+      centered
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} disabled={submitting}>
+            Vazgeç
+          </Button>
+          <Button onClick={() => onApply(reason)} disabled={!reasonOk || submitting}>
+            {submitting ? 'Arşivleniyor…' : `${count} Vakayı Arşivle`}
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+          <div className="flex items-center gap-2 font-medium">
+            <Archive size={14} />
+            <span><strong>{count}</strong> vaka arşive taşınacak</span>
+          </div>
+          <p className="mt-1 text-xs">
+            Arşivlenen vakalar listelerden ve raporlardan kalkar ama <strong>silinmez</strong>;
+            arşiv görünümünden tek tek geri alınabilir. Her vakanın geçmişine
+            arşiv nedeni yazılır.
+          </p>
+        </div>
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-ndark-text">
+            Arşiv nedeni <span className="text-rose-600">*</span>
+          </label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            autoFocus
+            rows={2}
+            placeholder="Örn: Otomatik yanıt seli temizliği / mükerrer kayıtlar"
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
+          />
+          {!reasonOk && reason.length > 0 && (
+            <p className="mt-1 text-xs text-rose-600">En az 3 karakter gerekli.</p>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // 2 adımlı atama modalı — önce takım, sonra o takıma bağlı kişiler.
 function BulkAssignModal({
   count,
@@ -2086,7 +2198,8 @@ function BulkAssignModal({
       open
       onClose={onClose}
       title="Toplu — Atama Yap"
-      size="md"
+      size="lg"
+      centered
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={submitting}>
