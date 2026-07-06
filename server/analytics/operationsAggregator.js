@@ -739,7 +739,7 @@ async function queryPatternAlertSummary(scope, filters) {
   if (scope.companyIds.length === 0) return { activeCount: 0, largestSpike: null };
   const alerts = await prisma.patternAlert.findMany({
     where: { companyId: { in: scope.companyIds }, status: 'active' },
-    select: { category: true, caseCount: true, caseIds: true },
+    select: { companyId: true, category: true, detectedAt: true, windowMinutes: true },
   });
   if (alerts.length === 0) return { activeCount: 0, largestSpike: null };
 
@@ -756,37 +756,32 @@ async function queryPatternAlertSummary(scope, filters) {
     (scope.teamIds && scope.teamIds.length > 0) ||
     (scope.personIds && scope.personIds.length > 0) ||
     (filters && typeof filters.accountId === 'string' && filters.accountId);
-  const parseIds = (raw) => {
-    try {
-      const v = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [];
-    } catch {
-      return [];
-    }
-  };
-
-  const withIds = alerts.map((a) => ({ ...a, ids: parseIds(a.caseIds) }));
-  const allIds = [...new Set(withIds.flatMap((a) => a.ids))];
-  if (allIds.length === 0) return { activeCount: 0, largestSpike: null };
-  const scopedRows = await prisma.case.findMany({
-    where: {
-      id: { in: allIds },
-      companyId: { in: scope.companyIds },
-      isArchived: false, // 2026-07-06 — arşivli vaka alarm sayımına girmez
-      ...(narrowed && scope.teamIds && scope.teamIds.length > 0 ? { assignedTeamId: { in: scope.teamIds } } : {}),
-      ...(narrowed && scope.personIds && scope.personIds.length > 0 ? { assignedPersonId: { in: scope.personIds } } : {}),
-      ...(narrowed && filters?.accountId ? { accountId: filters.accountId } : {}),
-    },
-    select: { id: true },
-  });
-  const scopedSet = new Set(scopedRows.map((r) => r.id));
-  const visible = withIds
-    .map((a) => ({ category: a.category, scopedCount: a.ids.filter((id) => scopedSet.has(id)).length }))
-    .filter((a) => a.scopedCount > 0);
-  const largest = visible.reduce((a, b) => (b.scopedCount > (a?.scopedCount ?? -1) ? b : a), null);
+  // Codex #444 P2 — persisted caseIds en fazla 100 id taşır (patternDetect
+  // take:100); kesişim yaklaşımı 100+ vakalık kümeleri kırpar. Bunun yerine
+  // her alarm için TANIM PREDİKATIYLA cap'siz canlı sayım: alarmın tespit
+  // penceresi (detectedAt - windowMinutes) içinde açılan, aynı şirket+kategori
+  // arşivsiz vakalar; daraltılmış görünümde scope filtreleri aynı sorguya
+  // biner. patternDetect'in tetik sorgusuyla birebir aynı predikat.
+  const counted = await Promise.all(alerts.map(async (a) => {
+    const windowStart = new Date(a.detectedAt.getTime() - (a.windowMinutes ?? 60) * 60 * 1000);
+    const liveCount = await prisma.case.count({
+      where: {
+        companyId: a.companyId,
+        category: a.category,
+        createdAt: { gte: windowStart, lte: a.detectedAt },
+        isArchived: false, // 2026-07-06 — arşivli vaka alarm sayımına girmez
+        ...(narrowed && scope.teamIds && scope.teamIds.length > 0 ? { assignedTeamId: { in: scope.teamIds } } : {}),
+        ...(narrowed && scope.personIds && scope.personIds.length > 0 ? { assignedPersonId: { in: scope.personIds } } : {}),
+        ...(narrowed && filters?.accountId ? { accountId: filters.accountId } : {}),
+      },
+    });
+    return { category: a.category, liveCount };
+  }));
+  const visible = counted.filter((a) => a.liveCount > 0);
+  const largest = visible.reduce((a, b) => (b.liveCount > (a?.liveCount ?? -1) ? b : a), null);
   return {
     activeCount: visible.length,
-    largestSpike: largest ? { category: largest.category, caseCount: largest.scopedCount } : null,
+    largestSpike: largest ? { category: largest.category, caseCount: largest.liveCount } : null,
   };
 }
 

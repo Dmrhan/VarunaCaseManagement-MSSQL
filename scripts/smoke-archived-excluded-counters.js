@@ -23,11 +23,12 @@ expectTrue('1. getStats scope baseline exclude (tüm rol sayaçları tek noktada
 const aggr = read('server/analytics/operationsAggregator.js');
 expectTrue('2. operationsAggregator buildWhereSql — raw SQL [isArchived] = 0 (tüm pano metrikleri)',
   /buildWhereSql[\s\S]{0,900}clauses\.push\('\[isArchived\] = 0'\)/.test(aggr));
-expectTrue('3. patternAlert kesişim findMany isArchived:false',
-  /id: \{ in: allIds \},\s*companyId: \{ in: scope\.companyIds \},\s*isArchived: false/.test(aggr));
-expectTrue('3b. Codex #443 P2: şirket-geneli kestirme kalktı — HER görünüm canlı kesişimden sayar',
+expectTrue('3. patternAlert sayımı predikat-bazlı + arşivsiz (Codex #444 P2: caseIds cap 100 — id kesişimi DEĞİL)',
+  /queryPatternAlertSummary[\s\S]{0,2500}createdAt: \{ gte: windowStart, lte: a\.detectedAt \},\s*isArchived: false/.test(aggr)
+  && !/queryPatternAlertSummary[\s\S]{0,3500}parseIds/.test(aggr));
+expectTrue('3b. Codex #443 P2: şirket-geneli kestirme kalktı — HER görünüm canlı sayımdan',
   !/if \(!narrowed\) \{[\s\S]{0,300}activeCount: alerts\.length/.test(aggr)
-  && /queryPatternAlertSummary[\s\S]{0,3500}scopedCount > 0/.test(aggr));
+  && /queryPatternAlertSummary[\s\S]{0,3000}liveCount > 0/.test(aggr));
 
 const drill = read('server/analytics/drilldownQuery.js');
 expectTrue('4. drilldown where — kart sayısı ile liste tutarlı',
@@ -40,9 +41,10 @@ expectTrue('5. bülten snoozed raw SQL [isArchived] = 0 (diğer bülten sorgular
 const pat = read('server/lib/patternInsight.js');
 expectTrue('6. patternInsight tetik vakaları + baseline arşivsiz',
   (pat.match(/isArchived: false/g) ?? []).length >= 3);
-expectTrue('6b. Codex #443 P2: spike CANLI tetik sayısından (kalıcı alert.caseCount DEĞİL)',
+expectTrue('6b. Codex #443+#444 P2: spike CANLI + CAP\'SİZ predikat sayımından',
   pat.includes('const liveTriggerCount = await prisma.case.count')
   && pat.includes('currentPerHour = liveTriggerCount /')
+  && /createdAt: \{ gte: detectWindowStart, lte: detectedAt \},\s*isArchived: false/.test(pat)
   && !pat.includes('currentPerHour = alert.caseCount'));
 
 const det = read('server/cron/patternDetect.js');

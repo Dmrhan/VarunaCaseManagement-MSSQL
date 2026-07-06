@@ -250,11 +250,18 @@ export async function enrichPatternAlert(alert, { allowedCompanyIds }) {
   // Codex #443 P2 — spike/currentPerHour kalıcı alert.caseCount'tan DEĞİL,
   // CANLI (arşivsiz) tetik sayısından türetilir. Tetikler sonradan
   // arşivlendiyse (448'lik temizlik senaryosu) kart bayat "critical spike"
-  // göstermesin. Cap'siz kesin sayı için ayrı count (fetch 200 ile sınırlı).
+  // göstermesin.
+  // Codex #444 P2 — persisted caseIds en fazla 100 id taşır (patternDetect
+  // take:100); id-kesişimi 100+ kümeleri kırpar. Cap'siz kesin sayı için
+  // alarmın TESPİT PENCERESİ predikatıyla sayım (patternDetect ile birebir
+  // aynı sorgu şekli: şirket + kategori + pencere + arşivsiz).
+  const detectedAt = alert.detectedAt instanceof Date ? alert.detectedAt : new Date(alert.detectedAt);
+  const detectWindowStart = new Date(detectedAt.getTime() - (alert.windowMinutes ?? 60) * 60 * 1000);
   const liveTriggerCount = await prisma.case.count({
     where: {
-      id: { in: caseIds },
       companyId: alert.companyId,
+      category: alert.category,
+      createdAt: { gte: detectWindowStart, lte: detectedAt },
       isArchived: false,
     },
   });
