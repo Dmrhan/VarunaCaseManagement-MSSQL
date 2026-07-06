@@ -65,6 +65,10 @@ interface SoftphoneState {
   /** Sağ-dock panel gizli mi (kullanıcı küçülttü). */
   panelCollapsed: boolean;
   setPanelCollapsed: (v: boolean) => void;
+  /** Softphone bir kez açıldı mı — açıldıysa iframe mount kalır (küçültünce register düşmesin). */
+  activated: boolean;
+  /** Softphone panelini aç (header'daki launcher'dan) — activated=true + panelCollapsed=false. */
+  openPanel: () => void;
   /** Embedded panel açık → ana layout sağdan 380px boşluk ayırır (içerik örtülmez). */
   dockReserved: boolean;
   endCall: () => void;
@@ -94,6 +98,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   // butonu görünür, tıklanınca panel + iframe açılır. (İstenirse env/kullanıcı tercihiyle
   // açık başlatılabilir; şimdilik kapalı.) Panel açılınca iframe mount olup register olur.
   const [panelCollapsed, setPanelCollapsed] = useState(true);
+  // Softphone bir kez açıldı mı — açıldıysa iframe HEP mount kalır (küçültünce
+  // register/oturum düşmesin, çağrı gelmeye devam etsin). Header launcher'ı açar.
+  const [activated, setActivated] = useState(false);
   const startedRef = useRef(false);
   const lastIncomingKey = useRef<string | null>(null);
   const dismissedKey = useRef<string | null>(null);
@@ -305,11 +312,15 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     }
   }, [agentStatus]);
 
+  // Softphone panelini aç — header'daki launcher'dan çağrılır. İlk açılışta iframe
+  // mount olup register olur; sonra küçültülse de mount kalır (activated true kalır).
+  const openPanel = useCallback(() => { setActivated(true); setPanelCollapsed(false); }, []);
+
   const value: SoftphoneState = {
     mode: MODE,
     status, agentEmail, agentStatus, error, activeCall, incomingCall, muted,
     connect, refreshStatus, dialNumber, answerCall, iframeUrl, endCall, toggleMute, toggleHold, dismissIncoming, changeStatus, saveAgentEmail,
-    panelCollapsed, setPanelCollapsed,
+    panelCollapsed, setPanelCollapsed, activated, openPanel,
     dockReserved: isEmbedded && status !== 'disabled' && !panelCollapsed,
   };
   return <SoftphoneContext.Provider value={value}>{children}</SoftphoneContext.Provider>;

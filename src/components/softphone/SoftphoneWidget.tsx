@@ -1,37 +1,25 @@
 // AloTech softphone — Varuna İÇİNE gömülü, sağ kenarda TAM YÜKSEKLİK docked panel.
 // embedded: AloTech hosted softphone IFRAME'i — login + cevaplama + ses + durum hepsi
-//   AloTech'in kendi arayüzünde. Panel VARSAYILAN KAPALI (sağ-altta "Softphone" butonu);
-//   tıklanınca açılır ve iframe mount olup register olur. Bir kez açıldıktan sonra iframe
-//   HEP MOUNTED kalır — küçültülünce yalnız GÖRSEL gizlenir (opacity-0), register/oturum
-//   DÜŞMEZ, çağrı gelmeye devam eder. click2call: basit dial. env yoksa gizli.
+//   AloTech'in kendi arayüzünde. Panel VARSAYILAN KAPALI; header'daki "Softphone"
+//   butonu (kullanıcı menüsünün solunda) açar. Bir kez açıldıktan sonra iframe HEP
+//   MOUNTED kalır — küçültülünce yalnız GÖRSEL gizlenir (opacity-0), register/oturum
+//   DÜŞMEZ. click2call: basit dial. env yoksa gizli.
+// NOT: Launcher butonu artık burada DEĞİL — App.tsx header'ında (mail yazarken sağ-alt
+//   buton "Kaydet"i örtmesin diye taşındı). Açma/kapama context.openPanel/setPanelCollapsed.
 import { useState } from 'react';
 import { Phone, PhoneOff, Loader2, ChevronRight } from 'lucide-react';
 import { useSoftphone } from '../../contexts/SoftphoneContext';
 
 export function SoftphoneWidget() {
-  const { mode, status, iframeUrl, activeCall, dialNumber, endCall, panelCollapsed, setPanelCollapsed } = useSoftphone();
+  const { mode, status, iframeUrl, activeCall, dialNumber, endCall, panelCollapsed, setPanelCollapsed, activated } = useSoftphone();
   const [dialInput, setDialInput] = useState('');
-  // Softphone bir kez açıldı mı — açıldıysa iframe MOUNTED kalır (küçültünce logout/register
-  // düşmesin). setActivated yalnız açılışta true olur, bir daha false'a dönmez.
-  const [activated, setActivated] = useState(false);
 
   // AloTech env'leri eksikse (backend configured:false → 'disabled') panel gizlenir.
   if (status === 'disabled') return null;
   const isEmbedded = mode === 'embedded';
 
-  // Kapalıyken sağ-altta launcher — tıklayınca panel açılır (embedded'de iframe mount + register).
-  const launcher = panelCollapsed ? (
-    <button
-      onClick={() => { setActivated(true); setPanelCollapsed(false); }}
-      className="fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-blue-700"
-      title="Softphone'u aç"
-    >
-      <Phone className="h-4 w-4" /> Softphone
-    </button>
-  ) : null;
-
-  // Docked panel çerçeve sınıfları: açık → görünür (z-40); kapalı → GÖRSEL gizli ama DOM'da
-  // kalır (opacity-0 + arka plan + etkileşimsiz) → içindeki iframe mount kalır, register düşmez.
+  // Docked panel çerçevesi: açık → görünür (z-40); kapalı → GÖRSEL gizli ama DOM'da kalır
+  // (opacity-0 + arka plan + etkileşimsiz) → içindeki iframe mount kalır, register düşmez.
   const shellVisible = 'fixed right-0 top-0 z-40 flex h-screen w-[380px] flex-col border-l border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-800';
   const shellHidden = 'pointer-events-none fixed right-0 top-0 -z-10 flex h-screen w-[380px] flex-col opacity-0';
 
@@ -49,34 +37,30 @@ export function SoftphoneWidget() {
     </div>
   );
 
-  // GÖMÜLÜ — iframe bir kez açıldıysa HEP mount; kapalıyken görsel gizli (register düşmez).
+  // GÖMÜLÜ — iframe bir kez açıldıysa (activated) HEP mount; kapalıyken görsel gizli.
   if (isEmbedded) {
+    if (!activated) return null; // header launcher açana kadar hiçbir şey render etme
     return (
-      <>
-        {launcher}
-        {activated && (
-          <div className={panelCollapsed ? shellHidden : shellVisible} aria-hidden={panelCollapsed}>
-            {header}
-            {iframeUrl ? (
-              <iframe
-                title="AloTech Softphone"
-                src={iframeUrl}
-                allow="microphone; autoplay; camera; clipboard-write"
-                className="w-full flex-1 border-0 bg-white"
-              />
-            ) : (
-              <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Softphone yükleniyor…
-              </div>
-            )}
+      <div className={panelCollapsed ? shellHidden : shellVisible} aria-hidden={panelCollapsed}>
+        {header}
+        {iframeUrl ? (
+          <iframe
+            title="AloTech Softphone"
+            src={iframeUrl}
+            allow="microphone; autoplay; camera; clipboard-write"
+            className="w-full flex-1 border-0 bg-white"
+          />
+        ) : (
+          <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Softphone yükleniyor…
           </div>
         )}
-      </>
+      </div>
     );
   }
 
-  // click2call — kapalıyken launcher; açıkken küçük panel (aktif çağrı veya dial).
-  if (panelCollapsed) return launcher;
+  // click2call — kapalıyken hiçbir şey (header launcher açar); açıkken küçük panel.
+  if (panelCollapsed) return null;
   return (
     <div className={shellVisible}>
       {header}

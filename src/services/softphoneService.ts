@@ -17,8 +17,18 @@ export function setAlotechEmail(email: string): void {
 export function clearAlotechEmail(): void {
   try { localStorage.removeItem(ALOTECH_EMAIL_KEY); } catch { /* yoksay */ }
 }
-/** AloTech isteklerine eklenecek agent e-posta header'ı. */
+
+// Softphone modu (VITE build-time). Gömülü modda agent = giriş yapan Varuna kullanıcısı.
+const _SP_MODE = ((import.meta as any).env?.VITE_ALOTECH_SOFTPHONE_MODE as string) || '';
+const IS_EMBEDDED_MODE = _SP_MODE === 'embedded' || _SP_MODE === 'popup';
+
+/** AloTech isteklerine eklenecek agent e-posta header'ı.
+ *  ⚠️ Gömülü modda GÖNDERİLMEZ: agent, giriş yapan Varuna kullanıcısıdır (backend
+ *  `req.user.email` kullanır). Aksi halde localStorage'da kalan eski (click2call)
+ *  e-posta header'ı `req.user.email`'i EZER → o tarayıcıda giren HERKES eski agent'a
+ *  (ör. ege.usluer) login olur. Header yalnız click2call modunda anlamlı. */
 function alotechHeaders(): Record<string, string> {
+  if (IS_EMBEDDED_MODE) return {};
   const e = getAlotechEmail();
   return e ? { 'X-Alotech-Email': e } : {};
 }

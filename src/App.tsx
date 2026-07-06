@@ -20,6 +20,7 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  Phone,
   Settings2,
   ShieldCheck,
   Star,
@@ -190,7 +191,11 @@ export default function App() {
   const { user, signOut } = useAuth();
   // Gömülü softphone (sağ-dock) açıkken ana içeriği sağdan 380px daralt →
   // içerik panelin altında kalmaz, panelin başladığı yerde kesilir.
-  const { dockReserved, incomingCall } = useSoftphone();
+  const {
+    dockReserved, incomingCall,
+    status: spStatus, panelCollapsed: spCollapsed,
+    setPanelCollapsed: setSpCollapsed, openPanel: openSoftphonePanel,
+  } = useSoftphone();
   // Çağrı bitince dedup ref sıfırlanır → aynı numara tekrar arayınca yeniden açılır.
   useEffect(() => { if (!incomingCall) lastPoppedCallerRef.current = null; }, [incomingCall]);
 
@@ -512,6 +517,25 @@ export default function App() {
           >
             {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
           </button>
+          {/* AloTech Softphone launcher — mail yazarken sağ-alttaki buton "Kaydet"i
+              örtmesin diye header'a (kullanıcı menüsünün soluna) taşındı. Açık iken
+              vurgulu; tıklama aç/gizle toggle'ı. */}
+          {user && spStatus !== 'disabled' && (
+            <button
+              type="button"
+              onClick={() => (spCollapsed ? openSoftphonePanel() : setSpCollapsed(true))}
+              title={spCollapsed ? "Softphone'u aç" : "Softphone'u gizle"}
+              aria-pressed={!spCollapsed}
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+                spCollapsed
+                  ? 'text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-card dark:hover:text-ndark-text'
+                  : 'bg-brand-50 text-brand-700 hover:bg-brand-100 dark:bg-brand-900/30 dark:text-brand-300'
+              }`}
+            >
+              <Phone size={16} />
+              <span className="hidden lg:inline">Softphone</span>
+            </button>
+          )}
           {user && (
             <>
               <div className="mx-1 h-6 w-px bg-slate-200 dark:bg-ndark-border" />
