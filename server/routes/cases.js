@@ -417,8 +417,17 @@ async function assertBulkCaseResourcePolicy(req, { caseIds, updates }) {
 // req.params.id okur (koleksiyonda undefined → enforcement açıkken anında
 // 404). assertBulkCaseResourcePolicy deseninin arşiv aksiyonu için karşılığı:
 // istenen id'lerin şirketleri üstünden company-aware policy kontrolü.
+//
+// Codex #438 P1 — tekil arşiv paritesi TAM olmalı: tekil yol
+// assertCaseSecurityFilterAccess'ten geçer; güvenlik filtresiyle kısıtlı bir
+// SystemAdmin görünmeyen vaka id'lerini toplu arşivleyememeli. Vaka başına
+// görünürlük kontrolü eklendi (ilk gizli vakada 404 — route repo'ya inmeden
+// keser, hiçbir şey yazılmaz; görünürlük yardımcısı kendi bayrağını içeride
+// kontrol eder, kapalıyken no-op).
 async function assertBulkCaseArchivePolicy(req, { caseIds }) {
-  if (!isAuthorizationResourceEnforcementEnabled()) return null;
+  const resourceEnabled = isAuthorizationResourceEnforcementEnabled();
+  const securityFilterEnabled = isAuthorizationSecurityFilterEnforcementEnabled();
+  if (!resourceEnabled && !securityFilterEnabled) return null;
   if (!Array.isArray(caseIds) || caseIds.length === 0) return null;
 
   const allowedCompanyIds = Array.isArray(req.user.allowedCompanyIds)
@@ -429,8 +438,12 @@ async function assertBulkCaseArchivePolicy(req, { caseIds }) {
       id: { in: caseIds },
       companyId: { in: allowedCompanyIds },
     },
-    select: { companyId: true },
+    select: { id: true, companyId: true },
   });
+  for (const c of cases) {
+    await assertCaseSecurityFilterAccess(req, { caseId: c.id, companyId: c.companyId });
+  }
+  if (!resourceEnabled) return null;
   const companyIds = Array.from(new Set(cases.map((c) => c.companyId).filter(Boolean)));
   for (const companyId of companyIds) {
     await assertCompanyResourcePolicy(req, {
