@@ -429,6 +429,11 @@ async function assertBulkCaseArchivePolicy(req, { caseIds }) {
   const securityFilterEnabled = isAuthorizationSecurityFilterEnforcementEnabled();
   if (!resourceEnabled && !securityFilterEnabled) return null;
   if (!Array.isArray(caseIds) || caseIds.length === 0) return null;
+  // Codex #439 P2 — üst sınır kısa devresi: guard, repo'nun max-100
+  // validasyonundan ÖNCE koşar; 100'ü aşan ham diziyle sınırsız IN sorgusu +
+  // vaka başına policy kontrolü çalıştırma. Sorgulamadan çekil — repo
+  // kontrollü 400'ü üretir, hiçbir şey yazılmaz.
+  if (caseIds.length > 100) return null;
 
   const allowedCompanyIds = Array.isArray(req.user.allowedCompanyIds)
     ? req.user.allowedCompanyIds
