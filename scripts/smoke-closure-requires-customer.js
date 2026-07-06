@@ -42,6 +42,14 @@ expectTrue('9. vaka değişince state reset (linkedCustomer + picker)',
   panel.includes('setLinkedCustomer(null)') && panel.includes('setCustomerPickerOpen(false)')
   && /setLinkedCustomer\(null\)[\s\S]{0,400}\}, \[item\.id\]\)/.test(panel));
 
+console.log('── QuickCaseModal parite (Codex #445 P2) ──');
+const quick = read('src/features/cases/QuickCaseModal.tsx');
+expectTrue('11. müşterisiz + açılınca-çözüldü canSubmit engeli (SystemAdmin muaf)',
+  /resolveBlockedByCustomerless =\s*resolveEnabled && form\.customerless && !form\.accountId && !isSystemAdmin/.test(quick)
+  && quick.includes('!resolveBlockedByCustomerless &&'));
+expectTrue('12. öz-açıklayıcı uyarı (neden submit edilemiyor)',
+  quick.includes('Müşterisiz vaka çözüldü olarak işaretlenemez'));
+
 console.log('── Döngüsel import guard (extraction) ──');
 const extracted = read('src/features/cases/components/CustomerMatchSuggestionsPanel.tsx');
 expectTrue('10. panel ayrı modülde + export (CaseDetailPage↔StatusTransitionPanel döngüsü yok)',

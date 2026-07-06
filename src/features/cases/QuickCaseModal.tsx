@@ -81,6 +81,7 @@ import {
   type NewCaseInput,
 } from '@/services/caseService';
 import { accountService } from '@/services/accountService';
+import { useAuth } from '@/services/AuthContext';
 import {
   buildClosureSuggestionTelemetry,
   type AppliedClosureSelection,
@@ -225,6 +226,12 @@ export function QuickCaseModal({
   );
   const requireCustomer = selectedCompany?.requireCustomerOnCaseCreate ?? false;
   const projectsEnabled = selectedCompany?.projectsEnabled ?? false;
+  // Codex #445 P2 — kapanış müşteri kapısı paritesi: "müşterisiz aç" +
+  // "açılınca çözüldü işaretle" birlikte, backend transitionStatus'u
+  // reddedip vakayı yarım (açık) bırakıyordu. QuickCaseModal'da da aynı
+  // kural: müşterisiz + resolve-on-create, SystemAdmin değilse engellenir.
+  const { user } = useAuth();
+  const isSystemAdmin = user?.role === 'SystemAdmin';
   const projectsRequired = selectedCompany?.projectsRequired ?? false;
 
   // Categories — flat shape; cascade subCategories
@@ -570,6 +577,11 @@ export function QuickCaseModal({
         : transferReasonText.trim().length === 0 ||
           transferReasonText.trim().length >= MIN_REASON));
 
+  // Codex #445 P2 — müşterisiz + açılınca-çözüldü: backend kapanış kapısını
+  // reddeder → vaka açık kalır. SystemAdmin muaf (backend istisnasıyla aynı).
+  const resolveBlockedByCustomerless =
+    resolveEnabled && form.customerless && !form.accountId && !isSystemAdmin;
+
   const canSubmit =
     phase === 'idle' &&
     !!form.companyId &&
@@ -583,6 +595,7 @@ export function QuickCaseModal({
     (form.origin !== 'Diğer' || !!form.originDescription.trim()) &&
     (!transferEnabled || (!!transferToTeamId && reasonOk)) &&
     (!resolveEnabled || !!resolveNote.trim()) &&
+    !resolveBlockedByCustomerless &&
     // Devret ve Çözümle oluştur mutually exclusive (UI zaten gizler;
     // submit guard belt-and-braces)
     !(transferEnabled && resolveEnabled);
@@ -1456,6 +1469,12 @@ export function QuickCaseModal({
             {transferEnabled && (
               <p className="mt-1 text-[11px] italic text-slate-500 dark:text-ndark-muted">
                 Devret aktif — aynı anda Çözümle oluştur kullanılamaz.
+              </p>
+            )}
+            {resolveBlockedByCustomerless && (
+              <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+                ⚠️ Müşterisiz vaka çözüldü olarak işaretlenemez. Önce müşteri seç
+                ya da bu seçeneği kapat.
               </p>
             )}
             {resolveEnabled && resolveExpanded && (
