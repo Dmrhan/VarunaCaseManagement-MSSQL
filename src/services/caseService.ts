@@ -2813,12 +2813,6 @@ export interface SuggestClosureRequest {
   /** P1.2 — operatörün clarifying cevabı. Verilirse KB'ye çözüm metnine eklenerek
    *  gönderilir (zenginleşmiş re-run) ve tekrar soru sorulmaz. */
   clarifyingAnswers?: string;
-  /** Maliyet kontrolü — drafts (customerReply + engineeringHandoff) pahalı RAG
-   *  analyze akışını tetikler. false → yalnız kapanış ETİKETLERİ üretilir,
-   *  analyze atlanır (token tasarrufu). Çözüm metni yazılırken her debounce'lu
-   *  refresh false göndermeli; ilk giriş + manuel "Yenile" true (veya boş)
-   *  göndererek drafts ister. Verilmezse backend true varsayar (geri uyum). */
-  includeDrafts?: boolean;
 }
 
 export type SuggestClosureField =
@@ -2848,14 +2842,6 @@ export interface SuggestClosureResponse {
   needsClarification?: boolean;
   /** needsClarification iken sorulacak 3 soru (operatör cevabı clarifyingAnswers ile geri gönderilir). */
   clarifyingQuestions?: string[];
-  /** Stage 3 resolution-first — paralel analyze cevabından çıkarılan KB
-   *  draft string'leri. Hem alanlar opsiyonel: analyze fail olduğunda ya da
-   *  KB string boş döndüğünde drafts hiç gönderilmez (frontend persisted
-   *  aiDrafts'a fallback yapar). */
-  drafts?: {
-    engineeringHandoff?: string;
-    customerReplyDraft?: string;
-  };
   meta?: {
     usedEndpoint?: 'suggest-close';
     confidence?: number;
@@ -2863,9 +2849,6 @@ export interface SuggestClosureResponse {
     modelUsed?: string;
     selectedWorkedStepId?: string;
     contextStepsCount?: number;
-    /** 'analyze' = drafts paralel analyze çağrısından geldi. Yoksa drafts
-     *  yok demektir (eski persisted aiDrafts render edilir). */
-    draftsSource?: 'analyze';
     /** Telemetry attribution — AI'nın GERÇEKTEN sınıflandırdığı çözüm metni
      *  (resolutionOverride varsa o; yoksa step'lerden compose). closureSuggestion
      *  telemetry'sinde aiSuggested.resolutionSeen'e taşınır. */

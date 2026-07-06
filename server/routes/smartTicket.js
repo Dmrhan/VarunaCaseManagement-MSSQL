@@ -32,10 +32,7 @@ import {
   mapClassificationToTaxonomy,
   SMART_TICKET_CLASSIFICATION_FIELDS,
 } from '../lib/smartTicketClassification.js';
-import {
-  composeTransferBriefFromSteps,
-  extractAiDrafts,
-} from '../db/solutionStepRepository.js';
+import { composeTransferBriefFromSteps } from '../db/solutionStepRepository.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -136,12 +133,26 @@ router.post('/suggest-classification', async (req, res) => {
       });
     };
 
+    // Faz 3 — pahalı `analyze` fallback'i YALNIZ "KB v2 endpoint yok / deploy
+    // edilmemiş" (HTTP 404) durumunda tetiklenir. Transient hatalar (429 rate-limit,
+    // timeout, 5xx, network) → fallback YAPMA; kullanıcıya hata dön (manuel seçim
+    // kalır). Böylece geçici bir KB sorunu her seferinde pahalı Sonnet analyze
+    // yakmaz. Not: proxy() 404'ü wrapped ok:false (status 404) döner; throw ATMAZ.
+    const isKbV2Unsupported = (v2) => v2?.error?.status === 404;
     try {
       const v2 = await externalKbClient.categorizeV2(setting, v2Body);
       if (v2 && v2.ok === false) {
+        if (!isKbV2Unsupported(v2)) {
+          console.warn(
+            '[smart-ticket/suggest-classification] categorize-v2 transient failure — analyze fallback YOK',
+            v2.error?.code ?? 'unknown',
+            v2.error?.status ?? '',
+          );
+          const cls = classifyKbFailure(v2);
+          return res.status(cls.status).json({ error: cls.code, message: cls.message });
+        }
         console.warn(
-          '[smart-ticket/suggest-classification] categorize-v2 returned ok:false, falling back to analyze',
-          v2.error?.code ?? 'unknown',
+          '[smart-ticket/suggest-classification] categorize-v2 unsupported (404) — analyze fallback',
           v2.error?.status ?? '',
         );
         const a = await analyzeFallback();
@@ -160,32 +171,15 @@ router.post('/suggest-classification', async (req, res) => {
         usedEndpoint = 'categorize-v2';
       }
     } catch (err) {
-      // Defansif: proxy()'nin sözleşmesini kıran bir bug olursa thrown error'u
-      // da yakala ve aynı fallback'i dene.
-      console.warn(
-        '[smart-ticket/suggest-classification] categorize-v2 threw, falling back to analyze',
+      // Faz 3 — categorizeV2 throw'u istisnai (proxy non-2xx/network için throw
+      // atmaz, wrapped döner). Throw = beklenmedik/transient, "deploy-yok" değil
+      // → pahalı analyze fallback'i YAPMA; hata dön.
+      console.error(
+        '[smart-ticket/suggest-classification] categorize-v2 threw — analyze fallback YOK',
         err?.message ?? err,
       );
-      try {
-        const a = await analyzeFallback();
-        if (a && a.ok === false) {
-          console.error(
-            '[smart-ticket/suggest-classification] analyze fallback ok:false',
-            a.error?.code ?? 'unknown',
-          );
-          const cls = pickKbFailure({ error: { message: err?.message } }, a);
-          return res.status(cls.status).json({ error: cls.code, message: cls.message });
-        }
-        kbResponse = a;
-        usedEndpoint = 'analyze';
-      } catch (fallbackErr) {
-        console.error(
-          '[smart-ticket/suggest-classification] both categorize-v2 and analyze failed',
-          fallbackErr?.message ?? fallbackErr,
-        );
-        const cls = classifyKbFailure({ error: { message: fallbackErr?.message } });
-        return res.status(cls.status).json({ error: cls.code, message: cls.message });
-      }
+      const cls = classifyKbFailure({ error: { message: err?.message } });
+      return res.status(cls.status).json({ error: cls.code, message: cls.message });
     }
 
     // Adapter — multi-path adapter zaten categorize-v2'nin top-level
@@ -372,13 +366,6 @@ router.post('/suggest-closure', async (req, res) => {
     // P1.2 — operatörün clarifying cevabı. Verilirse re-run zenginleşir + tekrar sorulmaz.
     const clarifyingAnswers =
       typeof body.clarifyingAnswers === 'string' ? body.clarifyingAnswers.trim() : '';
-    // Maliyet kontrolü — analyze (drafts: customerReply + engineeringHandoff)
-    // pahalı bir RAG akışıdır (~3 Claude çağrısı, Sonnet 8k çıktı). Kapanış
-    // ETİKETLERİ (suggestClose) ucuz ve cache'li; drafts opsiyonel. Çözüm metni
-    // yazılırken her debounce'lu refresh'te drafts üretmek token israfı →
-    // frontend yalnız ilk girişte + manuel "Yenile"de includeDrafts:true gönderir.
-    // Geri uyum: alan hiç verilmezse true (eski davranış korunur).
-    const includeDrafts = body.includeDrafts !== false;
     let companyId = '';
     let description = '';
     let resolution = '';
@@ -502,43 +489,13 @@ router.post('/suggest-closure', async (req, res) => {
     if (openIsSureci) sgBody.open_is_sureci = openIsSureci;
     if (openIslemTipi) sgBody.open_islem_tipi = openIslemTipi;
 
-    // Stage 3 resolution-first — kategorizasyon (suggestClose) ile aynı anda
-    // analyze çağrısı yap → engineeringHandoff + customerReplyDraft draft'larını
-    // current resolution metnine göre yeniden üret. Paralel + analyze bounded:
-    // wall-clock max(suggestClose, min(analyze, ANALYZE_DRAFTS_TIMEOUT_MS)).
-    //
-    // Codex P2 #1 fix — Bounded analyze: KB v2 analyze endpoint'i tipik
-    // ~180sn'ye kadar sürebiliyor (suggestClose çoğunlukla saniyeler içinde).
-    // Eski impl Promise.allSettled iki çağrıyı da bekliyordu → analyze yavaş
-    // olduğunda Stage 3 KB spinner kategoriler hazır olsa bile dakikalarca
-    // kalıyordu (draft'lar optional, categorization core). Çözüm: analyze'a
-    // race-timeout. Timeout kazanırsa drafts undefined → kullanıcı dropdown'ları
-    // hemen alır, draft'ları sonra "Yenile" ile bekleyebilir.
-    //
-    // freeText = description + resolution composition: KB analyze case context
-    // + son çözümü birlikte ister. Eski (Stage 2 opening) aiDrafts persist
-    // davranışı bu route'ta tetiklenmez — yalnız in-memory response döner.
-    const analyzeFreeText = description
-      ? `${description}\n\nÇözüm: ${resolution}`
-      : resolution;
-    const ANALYZE_DRAFTS_TIMEOUT_MS = 8000;
-    const ANALYZE_TIMEOUT_SENTINEL = { ok: false, timedOut: true };
-    // includeDrafts=false ise analyze HİÇ tetiklenmez → token harcaması yok.
-    // (Race-timeout yalnız beklemeyi keserdi; istek sunucuda tamamlanıp token
-    // yakardı. Burada çağrıyı tamamen atlayarak gerçek tasarruf sağlanır.)
-    const analyzeSkipped = { ok: false, skipped: true };
-    const analyzeBounded = includeDrafts
-      ? Promise.race([
-          externalKbClient
-            .analyze(setting, { freeText: analyzeFreeText })
-            .catch((err) => ({ ok: false, thrown: true, error: { message: err?.message } })),
-          new Promise((resolve) => setTimeout(() => resolve(ANALYZE_TIMEOUT_SENTINEL), ANALYZE_DRAFTS_TIMEOUT_MS)),
-        ])
-      : Promise.resolve(analyzeSkipped);
-
-    const [closeSettled, analyzeSettled] = await Promise.allSettled([
+    // Faz 0 — Kapanış YALNIZ etiket üretir. Pahalı analyze/draft çağrısı KALDIRILDI:
+    // analyze 8sn'ye bound'luydu ama ~120-180sn sürüyor → draft gelmiyor, yine de
+    // Sonnet token'ı yanıyordu (race-timeout isteği iptal etmiyordu). Taslaklar
+    // Stage-2'de üretilip persist ediliyor; kapanış ekranı persisted taslakları
+    // gösterir. (bkz. docs/KB_COST_OPTIMIZATION_PLAN.md Faz 0)
+    const [closeSettled] = await Promise.allSettled([
       externalKbClient.suggestClose(setting, sgBody),
-      analyzeBounded,
     ]);
 
     let kbResponse;
@@ -609,36 +566,9 @@ router.post('/suggest-closure', async (req, res) => {
         (typeof upstreamMeta.confidence === 'number' &&
           upstreamMeta.confidence < CLOSE_CLARIFY_THRESHOLD));
 
-    // Stage 3 resolution-first — paralel analyze cevabından drafts'ı çıkar.
-    // analyze rejected veya { ok: false } ise drafts boş kalır; suggestion'lar
-    // yine de döner (kullanıcı kategorileri görür).
-    let drafts;
-    if (analyzeSettled.status === 'fulfilled') {
-      const analyzeRaw = analyzeSettled.value;
-      if (analyzeRaw && analyzeRaw.skipped) {
-        // includeDrafts:false — kasıtlı atlandı, log gürültüsü yok.
-      } else if (analyzeRaw && analyzeRaw.timedOut) {
-        console.warn(
-          `[smart-ticket/suggest-closure] analyze bounded timeout ${ANALYZE_DRAFTS_TIMEOUT_MS}ms (drafts skipped)`,
-        );
-      } else if (analyzeRaw && analyzeRaw.ok === false) {
-        console.warn(
-          '[smart-ticket/suggest-closure] analyze returned ok:false (drafts skipped)',
-          analyzeRaw.error?.code ?? analyzeRaw.error?.message ?? 'unknown',
-        );
-      } else {
-        const analyzeData = analyzeRaw && analyzeRaw.data ? analyzeRaw.data : analyzeRaw;
-        const extracted = extractAiDrafts(analyzeData);
-        if (extracted.engineeringHandoff || extracted.customerReplyDraft) {
-          drafts = extracted;
-        }
-      }
-    } else {
-      console.warn(
-        '[smart-ticket/suggest-closure] analyze rejected (drafts skipped)',
-        analyzeSettled.reason?.message ?? analyzeSettled.reason,
-      );
-    }
+    // Faz 0 — kapanışta analyze/draft üretimi kaldırıldı; drafts alanı dönmez.
+    // Taslaklar Stage-2 persisted (customFields.smartTicket.aiDrafts) üzerinden
+    // gösterilir (bkz. KbDraftCard).
 
     res.json({
       companyId,
@@ -647,7 +577,6 @@ router.post('/suggest-closure', async (req, res) => {
       source: 'external_kb',
       needsClarification,
       ...(needsClarification ? { clarifyingQuestions: CLOSE_CLARIFY_QUESTIONS } : {}),
-      ...(drafts ? { drafts } : {}),
       meta: {
         usedEndpoint: 'suggest-close',
         ...upstreamMeta,
@@ -658,7 +587,6 @@ router.post('/suggest-closure', async (req, res) => {
         resolutionSeen: resolution,
         ...(selectedWorkedStepId ? { selectedWorkedStepId } : {}),
         ...(contextStepsCount > 0 ? { contextStepsCount } : {}),
-        ...(drafts ? { draftsSource: 'analyze' } : {}),
       },
     });
   } catch (err) {
