@@ -413,6 +413,35 @@ async function assertBulkCaseResourcePolicy(req, { caseIds, updates }) {
   return null;
 }
 
+// Codex #437 P2 — bulk-archive koleksiyon route'u: assertCaseResourcePolicy
+// req.params.id okur (koleksiyonda undefined → enforcement açıkken anında
+// 404). assertBulkCaseResourcePolicy deseninin arşiv aksiyonu için karşılığı:
+// istenen id'lerin şirketleri üstünden company-aware policy kontrolü.
+async function assertBulkCaseArchivePolicy(req, { caseIds }) {
+  if (!isAuthorizationResourceEnforcementEnabled()) return null;
+  if (!Array.isArray(caseIds) || caseIds.length === 0) return null;
+
+  const allowedCompanyIds = Array.isArray(req.user.allowedCompanyIds)
+    ? req.user.allowedCompanyIds
+    : [];
+  const cases = await prisma.case.findMany({
+    where: {
+      id: { in: caseIds },
+      companyId: { in: allowedCompanyIds },
+    },
+    select: { companyId: true },
+  });
+  const companyIds = Array.from(new Set(cases.map((c) => c.companyId).filter(Boolean)));
+  for (const companyId of companyIds) {
+    await assertCompanyResourcePolicy(req, {
+      companyId,
+      resourceKey: 'case',
+      action: 'archive',
+    });
+  }
+  return null;
+}
+
 function transitionResourceAction(nextStatus) {
   return nextStatus === 'Çözüldü' || nextStatus === 'İptal Edildi'
     ? 'close'
@@ -731,6 +760,29 @@ router.post(
       req.user.fullName,
       req.user.allowedCompanyIds,
       actorObj,
+    );
+    if (result?.error) return res.status(400).json(result);
+    res.json(result);
+  }),
+);
+
+/**
+ * POST /api/cases/bulk-archive — toplu soft-archive (SystemAdmin-only).
+ * Body: { caseIds: string[] (max 100), reason: string (min 3) }
+ * Tekil /:id/archive paritesi: rol + resource policy aynı; idempotent
+ * (zaten arşivli olanlar sayılır, hata üretmez). Cross-tenant id → 403,
+ * hiçbir şey yazılmaz. 2026-07-06 mail döngüsü temizliği ihtiyacından.
+ */
+router.post(
+  '/bulk-archive',
+  requireRole('SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    const body = req.body ?? {};
+    await assertBulkCaseArchivePolicy(req, { caseIds: body.caseIds });
+    const actor = requireActor(req);
+    const result = await caseRepository.bulkArchive(
+      { caseIds: body.caseIds, reason: body.reason },
+      { actor, allowedCompanyIds: req.user.allowedCompanyIds },
     );
     if (result?.error) return res.status(400).json(result);
     res.json(result);

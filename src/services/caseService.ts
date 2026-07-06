@@ -2154,6 +2154,24 @@ export const caseService = {
     return result;
   },
 
+  /** Toplu soft-archive (SystemAdmin-only) — bulk bar "Arşivle" aksiyonu. */
+  async bulkArchive(
+    caseIds: string[],
+    reason: string,
+  ): Promise<{ archived: number; alreadyArchived: number; requested: number } | undefined> {
+    const result = await apiFetch<{ archived: number; alreadyArchived: number; requested: number }>(
+      `${API_BASE}/bulk-archive`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caseIds, reason }),
+      },
+      'Toplu arşivleme başarısız',
+    );
+    if (result) caseIds.forEach((id) => invalidateCaseDetail(id));
+    return result;
+  },
+
   async findByAccount(
     accountId: string,
     options?: { excludeId?: string; statusIn?: CaseStatus[]; statusNotIn?: CaseStatus[] },

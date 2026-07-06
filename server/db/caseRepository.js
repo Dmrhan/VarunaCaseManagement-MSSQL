@@ -2392,6 +2392,79 @@ export const caseRepository = {
   },
 
   /**
+   * Toplu arşiv (SystemAdmin-only) — 2026-07-06 mail döngüsü olayı sonrası:
+   * 447 çöp vaka ancak DB'den temizlenebildi; liste ekranından toplu
+   * "Arşivle" ihtiyacı doğdu. Sözleşme parite:
+   *  - tekil archive(): reason ≥3, idempotent (zaten arşivli = skip, hata değil)
+   *  - bulkUpdate(): max 100, bulunamayan id → {error} (hiçbir şey yazılmaz),
+   *    scope dışı id → CaseAccessError throw (403)
+   * Dönüş: { archived, alreadyArchived, requested } | { error }
+   */
+  async bulkArchive({ caseIds, reason }, { actor, allowedCompanyIds }) {
+    assertActor(actor, 'caseRepository.bulkArchive');
+    if (!Array.isArray(caseIds) || caseIds.length === 0) {
+      return { error: 'caseIds dizisi gerekli (boş olamaz).' };
+    }
+    if (caseIds.length > 100) {
+      return { error: 'En fazla 100 vaka tek seferde arşivlenebilir.' };
+    }
+    const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+    if (trimmedReason.length < 3) {
+      return { error: 'Arşiv sebebi gerekli (en az 3 karakter).' };
+    }
+
+    const ids = [...new Set(caseIds)];
+    const cases = await prisma.case.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, companyId: true, isArchived: true },
+    });
+    if (cases.length !== ids.length) {
+      const foundIds = new Set(cases.map((c) => c.id));
+      const missing = ids.filter((id) => !foundIds.has(id));
+      return { error: `Bazı vakalar bulunamadı: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ` (+${missing.length - 3})` : ''}` };
+    }
+    if (allowedCompanyIds) {
+      const outsider = cases.find((c) => !allowedCompanyIds.includes(c.companyId));
+      if (outsider) {
+        throw new CaseAccessError('Toplu arşiv: erişiminiz olmayan vaka(lar) listede.');
+      }
+    }
+
+    const targets = cases.filter((c) => !c.isArchived);
+    const alreadyArchived = cases.length - targets.length;
+    if (targets.length === 0) {
+      return { archived: 0, alreadyArchived, requested: ids.length };
+    }
+
+    const now = new Date();
+    await prisma.$transaction([
+      prisma.case.updateMany({
+        where: { id: { in: targets.map((c) => c.id) } },
+        data: {
+          isArchived: true,
+          archivedAt: now,
+          archivedByUserId: actor.userId ?? null,
+          archiveReason: trimmedReason,
+        },
+      }),
+      prisma.caseActivity.createMany({
+        data: targets.map((c) => ({
+          caseId: c.id,
+          companyId: c.companyId,
+          actionType: 'Archived',
+          action: 'Vaka arşivlendi (toplu)',
+          actor: actor.displayName,
+          actorUserId: actor.userId ?? null,
+          note: trimmedReason,
+          at: now,
+        })),
+      }),
+    ]);
+
+    return { archived: targets.length, alreadyArchived, requested: ids.length };
+  },
+
+  /**
    * PR-SD — Arşivli vakayı geri yükle (SystemAdmin-only). Status enum
    * dokunulmaz. Audit: CaseActivity actionType='Restored', actor.
    */
