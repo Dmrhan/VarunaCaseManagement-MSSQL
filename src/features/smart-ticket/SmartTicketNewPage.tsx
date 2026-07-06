@@ -319,13 +319,6 @@ export function SmartTicketNewPage({
   // KB önerisinin current textarea değerinden yeniden istemek için timer.
   const resolutionNoteDirtyRef = useRef(false);
   const resolutionDebounceRef = useRef<number | null>(null);
-  // Stage 3 resolution-first KB drafts override gate: bir kez başarılı
-  // suggest-closure cevabı geldiğinde true olur. KbDraftCard'da "ilk refresh'ten
-  // sonra persisted Stage 2 aiDrafts'a fallback YAPMA" garantisi için bu flag
-  // override (boş object) geçirmeyi tetikler — null closureSuggestion (re-fetch
-  // sırasında) bile stale persisted'i göstermez.
-  const closureRefreshedOnceRef = useRef(false);
-  const [closureRefreshedTick, setClosureRefreshedTick] = useState(0);
   // Stage 3 "Kapanış Dosyaları" — FilesTab'ın aktif upload state'i. "Vakayı
   // Kapat" yalnız aktif upload sırasında bloklanır; opsiyonel dosya eklemek
   // close akışını başka şekilde engellemez (spec: closing should not be
@@ -1228,13 +1221,6 @@ export function SmartTicketNewPage({
       }
       setClosureSuggestion(res);
       closureSuggestedAtRef.current = new Date().toISOString();
-      // Stage 3 resolution-first — bir kez başarılı refresh = persisted
-      // aiDrafts fallback'i kapanır; bundan sonra KbDraftCard yalnız current
-      // KB cevabından (drafts varsa) render eder.
-      if (!closureRefreshedOnceRef.current) {
-        closureRefreshedOnceRef.current = true;
-        setClosureRefreshedTick((t) => t + 1);
-      }
       // P1.2 — AI emin değilse (needsClarification) dropdown'ları pre-fill ETME;
       // operatör soruları cevaplayınca gelen zenginleşmiş öneri pre-fill eder.
       if (!res.needsClarification) {
@@ -2047,7 +2033,6 @@ export function SmartTicketNewPage({
               closureSuggesting={closureSuggesting}
               closureSuggestion={closureSuggestion}
               closureSuggestionError={closureSuggestionError}
-              closureRefreshedOnce={closureRefreshedOnceRef.current && closureRefreshedTick > 0}
               closureFilesUploading={closureFilesUploading}
               onClosureFilesUploadingChange={setClosureFilesUploading}
               onItemUpdated={setCreatedCase}
@@ -2326,7 +2311,6 @@ function Stage3Closure({
   closureSuggesting,
   closureSuggestion,
   closureSuggestionError,
-  closureRefreshedOnce,
   closureFilesUploading,
   onSuggestClosure,
   onApplyAllClosureSuggestions,
@@ -2348,10 +2332,6 @@ function Stage3Closure({
   closureSuggesting: boolean;
   closureSuggestion: import('@/services/caseService').SuggestClosureResponse | null;
   closureSuggestionError: string | null;
-  /** Stage 3 resolution-first: ilk başarılı suggest-closure tamamlandı mı?
-   *  true → KbDraftCard'ı override mode'da kullan (current KB drafts veya
-   *  render yok); false → persisted aiDrafts fallback'i göster. */
-  closureRefreshedOnce: boolean;
   /** Stage 3 "Kapanış Dosyaları" — FilesTab aktif upload halinde mi? true ise
    *  "Vakayı Kapat" disable edilir; parent flag'ı tutar. */
   closureFilesUploading: boolean;
@@ -2648,20 +2628,10 @@ function Stage3Closure({
           </Field>
         </div>
         {/* Stage 3 — KB Teknik Devir Notu + Müşteri Yanıt Taslağı kartları.
-            Faz 0: kapanışta artık taze draft ÜRETİLMİYOR (analyze kaldırıldı).
-            Taslaklar Stage-2'de üretilip persist ediliyor; override yalnız
-            gerçek fresh draft varsa geçer (pratikte yok), yoksa undefined →
-            KbDraftCard persisted Stage-2 aiDrafts'ı gösterir. */}
-        <KbDraftCard
-          item={createdCase}
-          variant="closure"
-          override={
-            // Faz 0 — kapanışta taze draft üretilmiyor. drafts yoksa override
-            // undefined kalır → KbDraftCard persisted Stage-2 aiDrafts'ı gösterir.
-            // (Eskiden boş {} veriliyordu → persisted gizleniyordu; Codex caveat.)
-            closureRefreshedOnce ? closureSuggestion?.drafts : undefined
-          }
-        />
+            Faz 0: kapanışta artık taze draft üretilmiyor (analyze kaldırıldı).
+            Taslaklar Stage-2 import-ai-suggested akışında persist edilir ve
+            kapanışta doğrudan persisted aiDrafts üzerinden gösterilir. */}
+        <KbDraftCard item={createdCase} variant="closure" />
         {/* Kapanış Dosyaları — Step 3'ün son bölümü. Mevcut CaseAttachment akışı
             (caseService.addFile/removeFile/downloadFile + FilesTab component'i)
             aynen yeniden kullanılır. Yüklenen dosyalar normal vaka ek'i olur ve
