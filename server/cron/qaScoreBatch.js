@@ -196,7 +196,8 @@ export async function runScoreCase(caseId) {
  */
 export async function runQaScoreBatch() {
   const candidates = await prisma.case.findMany({
-    where: { status: 'Cozuldu', qaScoredAt: null },
+    // 2026-07-06 — arşivli vakaya QA skoru üretme (AI maliyeti + sayaç kirliliği)
+    where: { status: 'Cozuldu', qaScoredAt: null, isArchived: false },
     select: { id: true },
     take: BATCH_SIZE,
     orderBy: { resolvedAt: 'desc' },

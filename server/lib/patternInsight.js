@@ -220,6 +220,7 @@ export async function enrichPatternAlert(alert, { allowedCompanyIds }) {
     where: {
       id: { in: caseIds.slice(0, MAX_TRIGGER_CASES_FETCH) },
       companyId: alert.companyId, // patternAlert.companyId zaten scope içi
+      isArchived: false, // 2026-07-06 — arşivli tetik vakası analize girmez
     },
     select: {
       id: true,
@@ -298,6 +299,7 @@ export async function enrichPatternAlert(alert, { allowedCompanyIds }) {
       companyId: alert.companyId,
       category: alert.category,
       createdAt: { gte: sevenDaysAgo, lt: windowStart },
+      isArchived: false,
     },
   });
   // 7 gün baseline penceresinden alarm penceresini çıkar

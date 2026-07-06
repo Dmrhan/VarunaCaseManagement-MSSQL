@@ -206,6 +206,7 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
             accountId: c.accountId,
             id: { not: caseId },
             status: { in: [STATUS_DB_RESOLVED_AS, STATUS_DB_CANCELLED_AS] },
+            isArchived: false, // 2026-07-06 — arşivli vaka geçmiş sayımına girmez
           },
         })
       : Promise.resolve(0),
@@ -217,6 +218,7 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
             accountId: c.accountId,
             id: { not: caseId },
             slaViolation: true,
+            isArchived: false,
           },
         })
       : Promise.resolve(0),

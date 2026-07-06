@@ -1394,7 +1394,11 @@ export const caseRepository = {
     if (!Array.isArray(allowedCompanyIds) || allowedCompanyIds.length === 0) {
       return { mode: 'empty' };
     }
-    const scope = { companyId: { in: allowedCompanyIds } };
+    // 2026-07-06 — arşivli vakalar SAYAÇLARA girmez (liste ile tutarlılık).
+    // PR-SD'nin "KPI'da 1-2 arşivli tolere edilir" varsayımı 448 arşivli
+    // temizlik vakasıyla çöktü; scope'a baseline exclude eklendi (tüm
+    // roller/tüm count'lar bu scope'tan türediği için tek nokta yeter).
+    const scope = { companyId: { in: allowedCompanyIds }, isArchived: false };
     const todayRange = buildTodayRange();
     const role = user.role;
     const scoped = (where) => mergeSecurityWhere(where, securityWhere);
