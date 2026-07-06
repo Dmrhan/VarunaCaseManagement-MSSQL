@@ -948,6 +948,15 @@ function buildSmartTicketTransferMerge(prev, transferInput, contextFields) {
 //   - version + capturedAt server-side stamp. Raw KB persist EDİLMEZ
 //     (yalnız iki normalized string + meta).
 const SMART_TICKET_AI_DRAFTS_VERSION = 1;
+
+// Faz 2 (KB maliyet) — analyze idempotency cache sürümü. Aynı case + aynı
+// input (freeText/bildirimNo) için ikinci "AI çözüm adımı öner" tıklaması
+// pahalı Sonnet analyze'ını TEKRAR yakmasın diye request-hash cache kullanılır.
+// Bu sabit hash'e KATILIR (proxy promptVersion/taxonomyVersion): KB prompt'u
+// ya da taksonomi anlamlı değişip eski analyze çıktıları geçersizleşince ELLE
+// bump edilir → tüm mevcut cache'ler otomatik invalidate olur. Route
+// (cases.js /import-ai-suggested) bu sabiti import edip requestHash'e katar.
+export const SMART_TICKET_ANALYSIS_CACHE_VERSION = 1;
 /**
  * PR-D2 — customFields.devops array read/write helper'ları.
  *
@@ -1210,6 +1219,91 @@ export const caseRepository = {
       drafts,
     );
     if (!merged) return { persisted: false };
+    await prisma.case.update({
+      where: { id },
+      data: { customFields: merged },
+    });
+    return { persisted: true };
+  },
+
+  /**
+   * Faz 2 (KB maliyet) — analyze idempotency cache OKUMA. Route analyze'dan
+   * ÖNCE çağırır: verilen requestHash `customFields.smartTicket.analysisCache`
+   * içindekiyle (ve sürümle) eşleşiyorsa cache'lenmiş analyzeResponse dönülür
+   * → pahalı Sonnet analyze ATLANIR. Eşleşme yoksa null (route analyze'a düşer).
+   *
+   * Scope: cross-tenant okumayı engellemek için companyId ∈ allowedCompanyIds
+   * doğrulanır (CaseAccessError). assertCaseInScope'un aksine arşivli case'de
+   * 409 ATMAZ — cache okuması salt optimizasyondur, mevcut davranışı (analyze'a
+   * düşme) bozmamak için sessizce null dönmeyi tercih eder.
+   */
+  async getSmartTicketAnalysisCache(id, requestHash, allowedCompanyIds) {
+    if (!requestHash) return null;
+    const fresh = await prisma.case.findUnique({
+      where: { id },
+      select: { companyId: true, customFields: true },
+    });
+    if (!fresh) return null;
+    if (allowedCompanyIds && !allowedCompanyIds.includes(fresh.companyId)) {
+      throw new CaseAccessError();
+    }
+    const cf = fresh.customFields;
+    const st =
+      cf && typeof cf === 'object' && cf.smartTicket && typeof cf.smartTicket === 'object'
+        ? cf.smartTicket
+        : null;
+    const cache =
+      st && st.analysisCache && typeof st.analysisCache === 'object' ? st.analysisCache : null;
+    if (
+      cache &&
+      cache.version === SMART_TICKET_ANALYSIS_CACHE_VERSION &&
+      cache.hash === requestHash &&
+      cache.analyzeResponse &&
+      typeof cache.analyzeResponse === 'object'
+    ) {
+      return cache.analyzeResponse;
+    }
+    return null;
+  },
+
+  /**
+   * Faz 2 (KB maliyet) — analyze idempotency cache YAZMA. Taze analyze sonrası
+   * route çağırır (best-effort; route try/catch ile non-fatal sarar). Cache
+   * `customFields.smartTicket.analysisCache` altına yazılır; buildSmartTicketAiDraftsMerge
+   * ile AYNI defensive sözleşme: diğer customFields dalları + smartTicket
+   * alt-alanları AYNEN korunur, yalnız analysisCache eklenir/güncellenir.
+   *
+   * Yalnız smartTicket opening'i olan case'lerde cache'lenir (aiDrafts merge
+   * ile tutarlı); klasik vaka → sessiz no-op ({ persisted: false }).
+   */
+  async persistSmartTicketAnalysisCache(id, requestHash, analyzeResponse, allowedCompanyIds) {
+    if (!requestHash || !analyzeResponse || typeof analyzeResponse !== 'object') {
+      return { persisted: false };
+    }
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
+    const fresh = await prisma.case.findUnique({
+      where: { id },
+      select: { customFields: true },
+    });
+    if (!fresh) return null;
+    const existing =
+      fresh.customFields && typeof fresh.customFields === 'object' ? fresh.customFields : {};
+    const existingSt =
+      existing.smartTicket && typeof existing.smartTicket === 'object' ? existing.smartTicket : null;
+    if (!existingSt) return { persisted: false }; // Smart Ticket opening şartı — sessiz no-op.
+    const merged = {
+      ...existing,
+      smartTicket: {
+        ...existingSt,
+        analysisCache: {
+          version: SMART_TICKET_ANALYSIS_CACHE_VERSION,
+          hash: requestHash,
+          capturedAt: new Date().toISOString(),
+          analyzeResponse,
+        },
+      },
+    };
     await prisma.case.update({
       where: { id },
       data: { customFields: merged },

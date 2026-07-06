@@ -1,5 +1,6 @@
 import express, { Router } from 'express';
-import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError } from '../db/caseRepository.js';
+import { createHash } from 'crypto';
+import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError, SMART_TICKET_ANALYSIS_CACHE_VERSION } from '../db/caseRepository.js';
 import { caseEmailRepository } from '../db/caseEmailRepository.js';
 import { externalMailFromAliasRepo } from '../db/externalMailFromAliasRepository.js';
 import { caseEmailSender } from '../lib/caseEmailSender.js';
@@ -2185,36 +2186,90 @@ router.post(
           message: 'analyzeResponse veya freeText/bildirimNo gerekli.',
         });
       }
+      // Faz 2 (KB maliyet) — analyze idempotency. Aynı case + aynı input için
+      // ikinci "AI çözüm adımı öner" tıklaması pahalı Sonnet analyze'ı TEKRAR
+      // yakmasın diye request-hash cache. Hash'e katılan alanlar: cache sürümü
+      // (KB prompt/taxonomy anlamlı değişince ELLE bump → invalidate), companyId
+      // (tenant izolasyonu; cache case'e bağlı ama defansif) ve gerçek input.
+      const requestHash = createHash('sha256')
+        .update(
+          JSON.stringify({
+            v: SMART_TICKET_ANALYSIS_CACHE_VERSION,
+            companyId,
+            freeText,
+            bildirimNo,
+          }),
+        )
+        .digest('hex');
       try {
-        const kbResult = await externalKbClient.analyze(setting, {
-          ...(freeText ? { freeText } : {}),
-          ...(bildirimNo ? { bildirimNo } : {}),
-        });
-        // externalKbClient.proxy() non-2xx HTTP veya network/timeout için
-        // throw atmaz; { ok: false, error, data } wrapped response döner.
-        // Codex P2 (main #447 review) PR #448'de suggest-classification ve
-        // suggest-closure path'leri için aynı pattern fix edilmişti — bu
-        // route O FIX'TE KAPSAMA DIŞINDA KALDI. Sonuç: KB v2 doc'daki ~180sn
-        // analyze çağrısı default 30s timeoutMs ile abort olunca,
-        // analyzeResponse=null → extractor 0 step → 200 OK + importedCount=0
-        // dönülüyordu (sessiz fail). Frontend toast'u "Vaka açıldı" göstedi,
-        // L1 kullanıcı KB önerisinin neden gelmediğini anlayamadı.
-        if (kbResult && kbResult.ok === false) {
-          console.error(
-            '[cases/import-ai-suggested] analyze returned ok:false',
-            kbResult.error?.code ?? 'unknown',
-            kbResult.error?.status ?? '',
-          );
-          const cls = classifyKbFailure(kbResult);
-          return res.status(cls.status).json({
-            error: cls.code,
-            message: cls.message.replace('elle seçimle devam edebilirsiniz', 'manuel adım ekleyebilirsiniz'),
-          });
+        const cached = await caseRepository.getSmartTicketAnalysisCache(
+          req.params.id,
+          requestHash,
+          req.user.allowedCompanyIds,
+        );
+        if (cached) {
+          // Cache hit — Sonnet analyze ATLANIR. aiDrafts persist + step import
+          // aşağıda cached response ile aynen çalışır (idempotent; adım repo'su
+          // dedup eder).
+          analyzeResponse = cached;
         }
-        analyzeResponse = kbResult?.data ?? kbResult ?? null;
-      } catch (err) {
-        const cls = classifyKbFailure({ error: { message: err?.message } });
-        return res.status(cls.status).json({ error: cls.code, message: cls.message });
+      } catch (cacheErr) {
+        // Cache okuması salt optimizasyon — hata olursa yut, analyze'a düş.
+        console.warn(
+          '[cases/import-ai-suggested] analysis cache read failed (non-fatal)',
+          cacheErr?.message ?? cacheErr,
+        );
+      }
+
+      if (!analyzeResponse) {
+        try {
+          const kbResult = await externalKbClient.analyze(setting, {
+            ...(freeText ? { freeText } : {}),
+            ...(bildirimNo ? { bildirimNo } : {}),
+          });
+          // externalKbClient.proxy() non-2xx HTTP veya network/timeout için
+          // throw atmaz; { ok: false, error, data } wrapped response döner.
+          // Codex P2 (main #447 review) PR #448'de suggest-classification ve
+          // suggest-closure path'leri için aynı pattern fix edilmişti — bu
+          // route O FIX'TE KAPSAMA DIŞINDA KALDI. Sonuç: KB v2 doc'daki ~180sn
+          // analyze çağrısı default 30s timeoutMs ile abort olunca,
+          // analyzeResponse=null → extractor 0 step → 200 OK + importedCount=0
+          // dönülüyordu (sessiz fail). Frontend toast'u "Vaka açıldı" göstedi,
+          // L1 kullanıcı KB önerisinin neden gelmediğini anlayamadı.
+          if (kbResult && kbResult.ok === false) {
+            console.error(
+              '[cases/import-ai-suggested] analyze returned ok:false',
+              kbResult.error?.code ?? 'unknown',
+              kbResult.error?.status ?? '',
+            );
+            const cls = classifyKbFailure(kbResult);
+            return res.status(cls.status).json({
+              error: cls.code,
+              message: cls.message.replace('elle seçimle devam edebilirsiniz', 'manuel adım ekleyebilirsiniz'),
+            });
+          }
+          analyzeResponse = kbResult?.data ?? kbResult ?? null;
+          // Faz 2 — taze analyze sonucunu cache'le (best-effort; ana akışı
+          // bloke etmesin). Sonraki aynı-input tıklaması artık cache'ten döner.
+          if (analyzeResponse) {
+            try {
+              await caseRepository.persistSmartTicketAnalysisCache(
+                req.params.id,
+                requestHash,
+                analyzeResponse,
+                req.user.allowedCompanyIds,
+              );
+            } catch (persistErr) {
+              console.warn(
+                '[cases/import-ai-suggested] analysis cache persist failed (non-fatal)',
+                persistErr?.message ?? persistErr,
+              );
+            }
+          }
+        } catch (err) {
+          const cls = classifyKbFailure({ error: { message: err?.message } });
+          return res.status(cls.status).json({ error: cls.code, message: cls.message });
+        }
       }
     }
     // Madde 2 — KB analyze cevabından engineeringHandoff + customerReplyDraft
