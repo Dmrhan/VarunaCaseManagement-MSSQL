@@ -60,6 +60,10 @@ expectTrue('K3.4 delete → archive fallback → asla throw (mail düşürülmez
 expectTrue('K3.5 rollback dönüşü kazanan vakaya işaret eder',
   /caseId: firstEmail\.caseId,\s*action: 'skipped_duplicate_message'/.test(intake.replace(/\n\s*/g, ' '))
   || /skipped_duplicate_message[\s\S]{0,120}duplicateRollback/.test(intake));
+expectTrue('K3.6 Codex #434 P2: FK\'siz ActionItem + CaseNotification rollback\'te elle silinir (çanda ölü link kalmaz)',
+  /actionItem\.deleteMany\(\{ where: \{ caseId: created\.id, companyId \} \}\)/.test(intake)
+  && /caseNotification\.deleteMany\(\{ where: \{ caseId: created\.id \} \}\)/.test(intake)
+  && intake.indexOf('actionItem.deleteMany') < intake.indexOf('prisma.case.delete'));
 
 console.log('── Kontrat ──');
 expectTrue('C.1 poller intakeResult.ok ile \\Seen basar (skip de ok:true → mail tekrar işlenmez)',

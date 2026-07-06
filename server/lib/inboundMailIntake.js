@@ -1072,6 +1072,18 @@ export async function intakeInboundEmail({
   // asla mail düşürmez.
   if (firstEmail.deduped && firstEmail.caseId && firstEmail.caseId !== created.id) {
     const { prisma } = await import('../db/client.js');
+    // Codex #434 P2 — create() içindeki notifyAssignmentTargets çan/aksiyon
+    // merkezi kayıtlarını ÇOKTAN yazdı ve ActionItem.caseId FK'siz
+    // (denormalize, cascade temizlemez). İki dönüş yolunda da (delete VE
+    // arşiv fallback) elle sil; CaseNotification delete'te cascade'li ama
+    // arşiv yolunda kalırdı — onu da burada sil. Temizlik başarısızsa
+    // rollback yine sürer (mail düşürülmez).
+    try {
+      await prisma.actionItem.deleteMany({ where: { caseId: created.id, companyId } });
+      await prisma.caseNotification.deleteMany({ where: { caseId: created.id } });
+    } catch (cleanupErr) {
+      console.warn('[intake] duplicate race — bildirim temizliği başarısız', cleanupErr?.message ?? cleanupErr);
+    }
     let rollback = 'deleted';
     try {
       await prisma.case.delete({ where: { id: created.id } });
