@@ -869,7 +869,11 @@ export async function intakeInboundEmail({
 
   let created;
   try {
-    created = await caseRepository.create(newCaseInput, actor);
+    // Codex #435 P2 — deferAssignmentNotify: atama bildirimleri (çan +
+    // FK'siz ActionItem) fire-and-forget yazıldığı için yarış rollback'i
+    // SONRASINA geç yazım sızabilirdi. Bildirim, dedupe checkpoint'ini
+    // geçince (aşağıda, kazanan yolunda) tetiklenir — kaybeden hiç üretmez.
+    created = await caseRepository.create(newCaseInput, actor, { deferAssignmentNotify: true });
   } catch (err) {
     return {
       ok: false,
@@ -1110,6 +1114,17 @@ export async function intakeInboundEmail({
       match: { confidence: null, accountId: null, reasons: [] },
       meta: { intakedAt, rawSource: RAW_SOURCE, duplicateRollback: rollback },
     };
+  }
+
+  // Codex #435 P2 — dedupe checkpoint geçildi (yarış kaybedilmedi): ertelenen
+  // atama bildirimini ŞİMDİ yaz. create() deferAssignmentNotify:true ile
+  // atlamıştı; kaybeden yukarıda döndüğü için bildirim yalnız KAZANAN vakaya
+  // üretilir — silinmiş vakaya geç ActionItem yazımı sınıf olarak imkânsız.
+  // Bildirim hatası mail düşürmez.
+  try {
+    await caseRepository.notifyAssignmentCreated(created, actor);
+  } catch (notifyErr) {
+    console.warn('[intake] atama bildirimi yazılamadı', notifyErr?.message ?? notifyErr);
   }
 
   // M2.1 + M6.3a — Ekleri ve inline/cid görselleri yeni vakaya bağla.
