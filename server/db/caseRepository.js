@@ -3880,6 +3880,25 @@ export const caseRepository = {
       }
     }
 
+    // 2026-07-06 — Müşteri zorunluluğu (kapanış kapısı). Müşterisiz
+    // (accountId null) vaka ÇÖZÜLDÜ'ye geçemez: müşterisiz çözümler
+    // raporları/analitiği kirletiyor ve müşteri geçmişi kayboluyordu.
+    // Karar: yalnız Cozuldu (IptalEdildi muaf — spam/test meşru müşterisiz);
+    // SystemAdmin istisna (nadir kenar durum kaçış kapısı). Bilinçli SERT
+    // kapı — fail-safe değil. Frontend aynı koşulda müşteri-eşleştirme
+    // adımını gösterir; bu guard authoritative (her arayüzü kapsar).
+    if (
+      dbNext === 'Cozuldu' &&
+      prev.status !== 'Cozuldu' &&
+      !prev.accountId &&
+      actorObject?.role !== 'SystemAdmin'
+    ) {
+      throw new CaseValidationError(
+        'Vaka müşteri eşleştirilmeden çözülemez. Lütfen önce müşteri seçin (öneriler veya elle ekle).',
+        { status: 400, code: 'account_required_for_closure' },
+      );
+    }
+
     // Kapanış analizi zorunluluğu — vaka (açılış kanalı fark etmeksizin:
     // Smart Ticket, mail, telefon…) Cozuldu'ya geçerken "KB ile Analiz Et"
     // en az bir kez çalıştırılmış (closureSuggestion telemetrisi payload'da)
