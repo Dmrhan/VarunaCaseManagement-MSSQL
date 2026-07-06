@@ -22,10 +22,16 @@ console.log('── Backend ──');
 expectTrue('1.1 route SystemAdmin + BULK-aware archive policy (Codex #437 P2: req.params.id okuyan tekil helper DEĞİL)',
   /'\/bulk-archive',\s*requireRole\('SystemAdmin'\)/.test(routes)
   && /bulk-archive'[\s\S]{0,400}assertBulkCaseArchivePolicy\(req, \{ caseIds: body\.caseIds \}\)/.test(routes)
-  && /assertBulkCaseArchivePolicy[\s\S]{0,700}action: 'archive'/.test(routes));
-expectTrue('1.1b bulk policy: şirket-bazlı döngü (assertCompanyResourcePolicy) + enforcement kapalıyken no-op',
-  /assertBulkCaseArchivePolicy[\s\S]{0,200}isAuthorizationResourceEnforcementEnabled\(\)\) return null/.test(routes)
-  && /assertBulkCaseArchivePolicy[\s\S]{0,700}assertCompanyResourcePolicy/.test(routes));
+  && /assertBulkCaseArchivePolicy[\s\S]{0,1600}action: 'archive'/.test(routes));
+expectTrue('1.1b bulk policy: şirket-bazlı döngü (assertCompanyResourcePolicy) + her iki bayrak kapalıyken no-op',
+  /assertBulkCaseArchivePolicy[\s\S]{0,300}!resourceEnabled && !securityFilterEnabled\) return null/.test(routes)
+  && /assertBulkCaseArchivePolicy[\s\S]{0,2400}assertCompanyResourcePolicy/.test(routes));
+expectTrue('1.1c Codex #438 P1: güvenlik filtresi görünürlüğü VAKA BAŞINA (tekil arşiv paritesi) ve resource-policy\'den ÖNCE',
+  /assertBulkCaseArchivePolicy[\s\S]{0,1600}for \(const c of cases\) \{\s*await assertCaseSecurityFilterAccess\(req, \{ caseId: c\.id, companyId: c\.companyId \}\);/.test(routes)
+  && routes.indexOf('assertCaseSecurityFilterAccess(req, { caseId: c.id') < routes.indexOf("action: 'archive'"));
+expectTrue('1.1d Codex #439 P2: guard >100 id\'de sorgulamadan kısa devre (repo 400\'ü üretir)',
+  /assertBulkCaseArchivePolicy[\s\S]{0,800}if \(caseIds\.length > 100\) return null;/.test(routes)
+  && routes.indexOf('if (caseIds.length > 100) return null;') < routes.indexOf('select: { id: true, companyId: true }'));
 expectTrue('1.2 repo: max 100 + reason ≥3 + bulunamayan id reddi (hiçbir şey yazılmaz)',
   repo.includes('En fazla 100 vaka tek seferde arşivlenebilir')
   && /bulkArchive[\s\S]{0,900}Arşiv sebebi gerekli/.test(repo)

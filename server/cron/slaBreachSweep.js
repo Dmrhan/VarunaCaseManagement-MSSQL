@@ -15,6 +15,9 @@ export async function runSlaBreachSweep() {
       slaViolation: false,
       slaResolutionDueAt: { lt: now, not: null },
       status: { notIn: ['Cozuldu', 'IptalEdildi'] },
+      // 2026-07-06 — arşivli vaka SLA ihlali İŞARETLENMEZ (arşivdeki 441
+      // "Açık" temizlik vakası sweep'te ihlal damgalanıp sayaçları şişirmesin)
+      isArchived: false,
     },
     data: { slaViolation: true },
   });

@@ -220,6 +220,7 @@ export async function enrichPatternAlert(alert, { allowedCompanyIds }) {
     where: {
       id: { in: caseIds.slice(0, MAX_TRIGGER_CASES_FETCH) },
       companyId: alert.companyId, // patternAlert.companyId zaten scope içi
+      isArchived: false, // 2026-07-06 — arşivli tetik vakası analize girmez
     },
     select: {
       id: true,
@@ -242,7 +243,28 @@ export async function enrichPatternAlert(alert, { allowedCompanyIds }) {
     return emptyInsight(alert);
   }
 
+  // missingCases artık arşivlenen tetik vakalarını da kapsar (silinmiş/scope
+  // dışı + arşivli) — "kayıp" semantiği aynı: analize giremeyen tetikler.
   const missingCases = caseIds.length - cases.length;
+
+  // Codex #443 P2 — spike/currentPerHour kalıcı alert.caseCount'tan DEĞİL,
+  // CANLI (arşivsiz) tetik sayısından türetilir. Tetikler sonradan
+  // arşivlendiyse (448'lik temizlik senaryosu) kart bayat "critical spike"
+  // göstermesin.
+  // Codex #444 P2 — persisted caseIds en fazla 100 id taşır (patternDetect
+  // take:100); id-kesişimi 100+ kümeleri kırpar. Cap'siz kesin sayı için
+  // alarmın TESPİT PENCERESİ predikatıyla sayım (patternDetect ile birebir
+  // aynı sorgu şekli: şirket + kategori + pencere + arşivsiz).
+  const detectedAt = alert.detectedAt instanceof Date ? alert.detectedAt : new Date(alert.detectedAt);
+  const detectWindowStart = new Date(detectedAt.getTime() - (alert.windowMinutes ?? 60) * 60 * 1000);
+  const liveTriggerCount = await prisma.case.count({
+    where: {
+      companyId: alert.companyId,
+      category: alert.category,
+      createdAt: { gte: detectWindowStart, lte: detectedAt },
+      isArchived: false,
+    },
+  });
 
   // commonThread — dominance
   const anaFirmaIds = cases.map((c) => c.accountProject?.anaFirmaAccountId ?? null);
@@ -298,12 +320,13 @@ export async function enrichPatternAlert(alert, { allowedCompanyIds }) {
       companyId: alert.companyId,
       category: alert.category,
       createdAt: { gte: sevenDaysAgo, lt: windowStart },
+      isArchived: false,
     },
   });
   // 7 gün baseline penceresinden alarm penceresini çıkar
   const baselinePeriodHours = 7 * 24 - (alert.windowMinutes ?? 60) / 60;
   const baselinePerHour = baselinePeriodHours > 0 ? baselineCount / baselinePeriodHours : 0;
-  const currentPerHour = alert.caseCount / ((alert.windowMinutes ?? 60) / 60);
+  const currentPerHour = liveTriggerCount / ((alert.windowMinutes ?? 60) / 60);
   const isNew = baselinePerHour === 0;
   const spike = isNew ? null : currentPerHour / baselinePerHour;
 
