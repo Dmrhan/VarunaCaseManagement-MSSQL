@@ -132,8 +132,10 @@ function shape(row) {
  * @param {string} [params.headersJson]
  * @param {string} [params.source='imap_intake']
  *
- * @returns {Promise<{ id: string, deduped: boolean }>}
+ * @returns {Promise<{ id: string, caseId: string, deduped: boolean }>}
  *   deduped=true → companyId+messageId zaten varmış, yeni satır oluşmadı.
+ *   caseId = satırın bağlı olduğu vaka (deduped'te KAZANAN vakanın id'si —
+ *   çağıran kendi caseId'siyle karşılaştırıp yarışı kaybettiğini anlar).
  */
 async function appendInbound(params) {
   const {
@@ -151,17 +153,26 @@ async function appendInbound(params) {
   if (messageId) {
     const existing = await prisma.caseEmail.findUnique({
       where: { companyId_messageId: { companyId, messageId } },
-      select: { id: true },
+      select: { id: true, caseId: true },
     });
-    if (existing) return { id: existing.id, deduped: true };
+    if (existing) return { id: existing.id, caseId: existing.caseId, deduped: true };
   }
 
   const now = new Date();
   const receivedAtFinal = receivedAt instanceof Date ? receivedAt : now;
 
   // Atomic: CaseEmail + Case K4 update tek transaction.
-  const result = await prisma.$transaction(async (tx) => {
-    const row = await tx.caseEmail.create({
+  //
+  // Yarış guard'ı (2026-07-06 mükerrer vaka olayı): iki poller (ör. prod
+  // sunucu + ikinci bir process) aynı UNSEEN maili eşzamanlı işlerse
+  // yukarıdaki check-then-insert boşluğunda İKİSİ de buraya düşer; unique
+  // ihlalini (P2002) exception olarak fırlatmak yerine kazanan satırı
+  // okuyup deduped sinyali döneriz — çağıran (intake) kaybettiğini anlayıp
+  // açtığı yetim vakayı geri alır.
+  let result;
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      const row = await tx.caseEmail.create({
       data: {
         caseId,
         companyId,
@@ -214,9 +225,21 @@ async function appendInbound(params) {
     });
 
     return row;
-  });
+    });
+  } catch (err) {
+    // P2002 = companyId+messageId unique ihlali → yarışı başka process kazandı;
+    // kazanan satırı dön (exception değil, temiz deduped sinyali).
+    if (err?.code === 'P2002' && messageId) {
+      const winner = await prisma.caseEmail.findUnique({
+        where: { companyId_messageId: { companyId, messageId } },
+        select: { id: true, caseId: true },
+      });
+      if (winner) return { id: winner.id, caseId: winner.caseId, deduped: true };
+    }
+    throw err;
+  }
 
-  return { id: result.id, deduped: false };
+  return { id: result.id, caseId, deduped: false };
 }
 
 /**
