@@ -845,6 +845,28 @@ export async function intakeInboundEmail({
     assignedTeamName: routedTeamName,
   };
 
+  // Yarış guard'ı katman 1 (2026-07-06 mükerrer vaka olayı) — vaka yaratmadan
+  // ÖNCE ucuz kontrol: bu messageId'yi başka bir process (ikinci poller,
+  // retry) zaten vakaya bağladıysa hiç vaka açma. \Seen flag'i tek başına
+  // yetmez: iki poller aynı UNSEEN listesini eşzamanlı çeker.
+  if (parsed.messageId) {
+    const { prisma } = await import('../db/client.js');
+    const alreadyIntaken = await prisma.caseEmail.findUnique({
+      where: { companyId_messageId: { companyId, messageId: parsed.messageId } },
+      select: { caseId: true },
+    });
+    if (alreadyIntaken) {
+      console.info(`[intake] duplicate messageId — vaka açılmadı, mevcut vakaya işaret: ${alreadyIntaken.caseId}`);
+      return {
+        ok: true,
+        caseId: alreadyIntaken.caseId,
+        action: 'skipped_duplicate_message',
+        match: { confidence: null, accountId: null, reasons: [] },
+        meta: { intakedAt, rawSource: RAW_SOURCE },
+      };
+    }
+  }
+
   let created;
   try {
     created = await caseRepository.create(newCaseInput, actor);
@@ -1039,6 +1061,43 @@ export async function intakeInboundEmail({
   } catch (err) {
     // CaseEmail yazımı fail → vaka açık kalır. Loglanır; ek bilgi yok.
     console.warn('[inbound] caseEmail.appendInbound failed', err?.message ?? err);
+  }
+
+  // Yarış guard'ı katman 2 (2026-07-06 mükerrer vaka olayı) — appendInbound
+  // deduped döndü ve satır BAŞKA vakaya bağlıysa yarışı kaybettik: bu maili
+  // eşzamanlı işleyen diğer process vakasını + mail satırını yazdı bile.
+  // Açtığımız yetim vakayı (UNV-1000594 vakası: mail'siz, "Müşteri yok"
+  // rozetli çöp) geri al ve kazanana işaret et. Silme cascade'lidir (44
+  // child tablo onDelete: Cascade); yine de olmadı → arşive düşür, intake
+  // asla mail düşürmez.
+  if (firstEmail.deduped && firstEmail.caseId && firstEmail.caseId !== created.id) {
+    const { prisma } = await import('../db/client.js');
+    let rollback = 'deleted';
+    try {
+      await prisma.case.delete({ where: { id: created.id } });
+    } catch {
+      rollback = 'archived';
+      try {
+        await prisma.case.update({
+          where: { id: created.id },
+          data: {
+            isArchived: true,
+            archivedAt: new Date(),
+            archiveReason: 'Intake yarış mükerreri — otomatik geri alma (kazanan: ' + firstEmail.caseId + ')',
+          },
+        });
+      } catch {
+        rollback = 'failed';
+      }
+    }
+    console.warn(`[intake] duplicate race — yetim vaka geri alındı (${rollback}): ${created.caseNumber ?? created.id}, kazanan vaka: ${firstEmail.caseId}`);
+    return {
+      ok: true,
+      caseId: firstEmail.caseId,
+      action: 'skipped_duplicate_message',
+      match: { confidence: null, accountId: null, reasons: [] },
+      meta: { intakedAt, rawSource: RAW_SOURCE, duplicateRollback: rollback },
+    };
   }
 
   // M2.1 + M6.3a — Ekleri ve inline/cid görselleri yeni vakaya bağla.
