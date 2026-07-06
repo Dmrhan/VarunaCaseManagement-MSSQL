@@ -23,8 +23,11 @@ expectTrue('1. getStats scope baseline exclude (tüm rol sayaçları tek noktada
 const aggr = read('server/analytics/operationsAggregator.js');
 expectTrue('2. operationsAggregator buildWhereSql — raw SQL [isArchived] = 0 (tüm pano metrikleri)',
   /buildWhereSql[\s\S]{0,900}clauses\.push\('\[isArchived\] = 0'\)/.test(aggr));
-expectTrue('3. patternAlert daraltılmış kesişim findMany isArchived:false',
+expectTrue('3. patternAlert kesişim findMany isArchived:false',
   /id: \{ in: allIds \},\s*companyId: \{ in: scope\.companyIds \},\s*isArchived: false/.test(aggr));
+expectTrue('3b. Codex #443 P2: şirket-geneli kestirme kalktı — HER görünüm canlı kesişimden sayar',
+  !/if \(!narrowed\) \{[\s\S]{0,300}activeCount: alerts\.length/.test(aggr)
+  && /queryPatternAlertSummary[\s\S]{0,3500}scopedCount > 0/.test(aggr));
 
 const drill = read('server/analytics/drilldownQuery.js');
 expectTrue('4. drilldown where — kart sayısı ile liste tutarlı',
@@ -36,7 +39,11 @@ expectTrue('5. bülten snoozed raw SQL [isArchived] = 0 (diğer bülten sorgular
 
 const pat = read('server/lib/patternInsight.js');
 expectTrue('6. patternInsight tetik vakaları + baseline arşivsiz',
-  (pat.match(/isArchived: false/g) ?? []).length >= 2);
+  (pat.match(/isArchived: false/g) ?? []).length >= 3);
+expectTrue('6b. Codex #443 P2: spike CANLI tetik sayısından (kalıcı alert.caseCount DEĞİL)',
+  pat.includes('const liveTriggerCount = await prisma.case.count')
+  && pat.includes('currentPerHour = liveTriggerCount /')
+  && !pat.includes('currentPerHour = alert.caseCount'));
 
 const det = read('server/cron/patternDetect.js');
 expectTrue('7. patternDetect groupBy + tetik id fetch arşivsiz (sahte spike yok)',

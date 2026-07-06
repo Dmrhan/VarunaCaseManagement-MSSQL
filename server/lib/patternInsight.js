@@ -243,7 +243,21 @@ export async function enrichPatternAlert(alert, { allowedCompanyIds }) {
     return emptyInsight(alert);
   }
 
+  // missingCases artık arşivlenen tetik vakalarını da kapsar (silinmiş/scope
+  // dışı + arşivli) — "kayıp" semantiği aynı: analize giremeyen tetikler.
   const missingCases = caseIds.length - cases.length;
+
+  // Codex #443 P2 — spike/currentPerHour kalıcı alert.caseCount'tan DEĞİL,
+  // CANLI (arşivsiz) tetik sayısından türetilir. Tetikler sonradan
+  // arşivlendiyse (448'lik temizlik senaryosu) kart bayat "critical spike"
+  // göstermesin. Cap'siz kesin sayı için ayrı count (fetch 200 ile sınırlı).
+  const liveTriggerCount = await prisma.case.count({
+    where: {
+      id: { in: caseIds },
+      companyId: alert.companyId,
+      isArchived: false,
+    },
+  });
 
   // commonThread — dominance
   const anaFirmaIds = cases.map((c) => c.accountProject?.anaFirmaAccountId ?? null);
@@ -305,7 +319,7 @@ export async function enrichPatternAlert(alert, { allowedCompanyIds }) {
   // 7 gün baseline penceresinden alarm penceresini çıkar
   const baselinePeriodHours = 7 * 24 - (alert.windowMinutes ?? 60) / 60;
   const baselinePerHour = baselinePeriodHours > 0 ? baselineCount / baselinePeriodHours : 0;
-  const currentPerHour = alert.caseCount / ((alert.windowMinutes ?? 60) / 60);
+  const currentPerHour = liveTriggerCount / ((alert.windowMinutes ?? 60) / 60);
   const isNew = baselinePerHour === 0;
   const spike = isNew ? null : currentPerHour / baselinePerHour;
 

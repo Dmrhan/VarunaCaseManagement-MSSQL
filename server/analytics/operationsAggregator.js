@@ -745,9 +745,13 @@ async function queryPatternAlertSummary(scope, filters) {
 
   // Codex R1 P2 (PR #418) — kapsam takım/kişi/müşteri ile DARALTILMIŞSA
   // alarm yalnız tetikleyici vakalarından EN AZ BİRİ scoped kümede ise
-  // sayılır; sayı da scoped kesişim adedidir. Aksi halde daraltılmış pano
-  // şirket genelindeki alakasız kümeyi gösterir (kapsam-dışı aggregate
-  // sızıntısı). Şirket-geneli görünümde davranış değişmez.
+  // sayılır; sayı da scoped kesişim adedidir.
+  //
+  // Codex #443 P2 — şirket-geneli kestirme KALDIRILDI: kalıcı
+  // PatternAlert.caseCount snapshot'ı, tetik vakaları sonradan arşivlenince
+  // bayatlıyor (448'lik temizlik sonrası pano hâlâ sel alarmını gösterirdi).
+  // Artık HER görünümde canlı (arşivsiz) kesişimden sayılır; scope
+  // daraltmaları varsa ek filtre olarak biner.
   const narrowed =
     (scope.teamIds && scope.teamIds.length > 0) ||
     (scope.personIds && scope.personIds.length > 0) ||
@@ -761,14 +765,6 @@ async function queryPatternAlertSummary(scope, filters) {
     }
   };
 
-  if (!narrowed) {
-    const largest = alerts.reduce((a, b) => (b.caseCount > (a?.caseCount ?? -1) ? b : a), null);
-    return {
-      activeCount: alerts.length,
-      largestSpike: largest ? { category: largest.category, caseCount: largest.caseCount } : null,
-    };
-  }
-
   const withIds = alerts.map((a) => ({ ...a, ids: parseIds(a.caseIds) }));
   const allIds = [...new Set(withIds.flatMap((a) => a.ids))];
   if (allIds.length === 0) return { activeCount: 0, largestSpike: null };
@@ -777,9 +773,9 @@ async function queryPatternAlertSummary(scope, filters) {
       id: { in: allIds },
       companyId: { in: scope.companyIds },
       isArchived: false, // 2026-07-06 — arşivli vaka alarm sayımına girmez
-      ...(scope.teamIds && scope.teamIds.length > 0 ? { assignedTeamId: { in: scope.teamIds } } : {}),
-      ...(scope.personIds && scope.personIds.length > 0 ? { assignedPersonId: { in: scope.personIds } } : {}),
-      ...(filters?.accountId ? { accountId: filters.accountId } : {}),
+      ...(narrowed && scope.teamIds && scope.teamIds.length > 0 ? { assignedTeamId: { in: scope.teamIds } } : {}),
+      ...(narrowed && scope.personIds && scope.personIds.length > 0 ? { assignedPersonId: { in: scope.personIds } } : {}),
+      ...(narrowed && filters?.accountId ? { accountId: filters.accountId } : {}),
     },
     select: { id: true },
   });
