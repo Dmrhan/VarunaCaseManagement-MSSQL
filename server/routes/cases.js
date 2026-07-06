@@ -413,6 +413,35 @@ async function assertBulkCaseResourcePolicy(req, { caseIds, updates }) {
   return null;
 }
 
+// Codex #437 P2 — bulk-archive koleksiyon route'u: assertCaseResourcePolicy
+// req.params.id okur (koleksiyonda undefined → enforcement açıkken anında
+// 404). assertBulkCaseResourcePolicy deseninin arşiv aksiyonu için karşılığı:
+// istenen id'lerin şirketleri üstünden company-aware policy kontrolü.
+async function assertBulkCaseArchivePolicy(req, { caseIds }) {
+  if (!isAuthorizationResourceEnforcementEnabled()) return null;
+  if (!Array.isArray(caseIds) || caseIds.length === 0) return null;
+
+  const allowedCompanyIds = Array.isArray(req.user.allowedCompanyIds)
+    ? req.user.allowedCompanyIds
+    : [];
+  const cases = await prisma.case.findMany({
+    where: {
+      id: { in: caseIds },
+      companyId: { in: allowedCompanyIds },
+    },
+    select: { companyId: true },
+  });
+  const companyIds = Array.from(new Set(cases.map((c) => c.companyId).filter(Boolean)));
+  for (const companyId of companyIds) {
+    await assertCompanyResourcePolicy(req, {
+      companyId,
+      resourceKey: 'case',
+      action: 'archive',
+    });
+  }
+  return null;
+}
+
 function transitionResourceAction(nextStatus) {
   return nextStatus === 'Çözüldü' || nextStatus === 'İptal Edildi'
     ? 'close'
@@ -748,8 +777,8 @@ router.post(
   '/bulk-archive',
   requireRole('SystemAdmin'),
   asyncRoute(async (req, res) => {
-    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'archive' });
     const body = req.body ?? {};
+    await assertBulkCaseArchivePolicy(req, { caseIds: body.caseIds });
     const actor = requireActor(req);
     const result = await caseRepository.bulkArchive(
       { caseIds: body.caseIds, reason: body.reason },

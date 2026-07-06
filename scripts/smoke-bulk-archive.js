@@ -19,9 +19,13 @@ const svc = readFileSync('src/services/caseService.ts', 'utf8');
 const modal = readFileSync('src/components/ui/Modal.tsx', 'utf8');
 
 console.log('── Backend ──');
-expectTrue('1.1 route SystemAdmin + archive resource policy (tekil parite)',
+expectTrue('1.1 route SystemAdmin + BULK-aware archive policy (Codex #437 P2: req.params.id okuyan tekil helper DEĞİL)',
   /'\/bulk-archive',\s*requireRole\('SystemAdmin'\)/.test(routes)
-  && /bulk-archive'[\s\S]{0,400}action: 'archive'/.test(routes));
+  && /bulk-archive'[\s\S]{0,400}assertBulkCaseArchivePolicy\(req, \{ caseIds: body\.caseIds \}\)/.test(routes)
+  && /assertBulkCaseArchivePolicy[\s\S]{0,700}action: 'archive'/.test(routes));
+expectTrue('1.1b bulk policy: şirket-bazlı döngü (assertCompanyResourcePolicy) + enforcement kapalıyken no-op',
+  /assertBulkCaseArchivePolicy[\s\S]{0,200}isAuthorizationResourceEnforcementEnabled\(\)\) return null/.test(routes)
+  && /assertBulkCaseArchivePolicy[\s\S]{0,700}assertCompanyResourcePolicy/.test(routes));
 expectTrue('1.2 repo: max 100 + reason ≥3 + bulunamayan id reddi (hiçbir şey yazılmaz)',
   repo.includes('En fazla 100 vaka tek seferde arşivlenebilir')
   && /bulkArchive[\s\S]{0,900}Arşiv sebebi gerekli/.test(repo)
