@@ -311,7 +311,67 @@ export interface DrilldownResponse {
   durationMs: number;
 }
 
+// Performans Panosu (FAZ 1) — kişi/takım koçluk metrikleri.
+// Her metrik birim + hesap taşır (backend tek kaynak); UI uydurmaz.
+export interface PersonMetric {
+  key: string;
+  label: string;
+  value: number | null;
+  unit: string;
+  formula: string;
+  sampleSize: number;
+  insufficient: boolean;
+}
+export interface PersonPerformance {
+  id: string;
+  name: string;
+  sampleSize: number;
+  metrics: {
+    resolved: PersonMetric;
+    medianHours: PersonMetric;
+    p90Hours: PersonMetric;
+    reopenRatePct: PersonMetric;
+    slaCompliancePct: PersonMetric;
+    escalationRatePct: PersonMetric;
+    transferRatePct: PersonMetric;
+    openWip: PersonMetric;
+  };
+}
+export interface PeopleTeamBenchmark {
+  resolved: number | null;
+  medianHours: number | null;
+  reopenRatePct: number | null;
+  slaCompliancePct: number | null;
+  openWip: number | null;
+}
+export interface PeoplePerformanceRequest {
+  from: string;
+  to: string;
+  productGroups?: string[];
+  caseTypes?: string[];
+}
+export interface PeoplePerformanceResponse {
+  people: PersonPerformance[];
+  teamBenchmark: PeopleTeamBenchmark;
+  meta: { formulaVersion: string; minSampleAgent: number; unitNote: string; durationMs: number };
+  scope: { kind: string; companyIds: string[]; teamIds: string[] | null; personIds: string[] | null; narrative?: string };
+}
+
 export const analyticsService = {
+  async peoplePerformance(
+    body: PeoplePerformanceRequest,
+  ): Promise<PeoplePerformanceResponse | undefined> {
+    return apiFetch<PeoplePerformanceResponse>(
+      '/api/analytics/people-performance',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      'Performans panosu yüklenemedi',
+    );
+  },
+
   async getAIUsage(period: AIUsagePeriod): Promise<AIUsageReport | undefined> {
     return apiFetch<AIUsageReport>(
       `/api/analytics/ai-usage?period=${period}`,
