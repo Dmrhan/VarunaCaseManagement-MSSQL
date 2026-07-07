@@ -48,5 +48,13 @@ ok('3.2 rol gate Supervisor/Admin/SystemAdmin + reports section',
 ok('3.3 sol nav menü öğesi (Gauge + Performans)',
   /handleNavSelect\('analytics-people-performance'\)/.test(app) && app.includes('<Gauge size={16} />'));
 
+console.log('── Codex #454 fix\'leri ──');
+ok('4.1 P2: to-tarihi gün-sonu (ertesi gün dışlayıcı) gönderilir — bugün dahil + aynı-gün geçerli',
+  /rangeEndIso = \(day: string\)/.test(page)
+  && /d\.setUTCDate\(d\.getUTCDate\(\) \+ 1\)/.test(page)
+  && /peoplePerformance\(\{ from: rangeStartIso\(dateFrom\), to: rangeEndIso\(dateTo\) \}\)/.test(page));
+ok('4.2 P2: view authorizationRegistry\'de kayıtlı (deny policy gizleyebilsin)',
+  /reports\.peoplePerformance'[\s\S]{0,140}viewKey: 'analytics-people-performance'/.test(read('server/lib/authorizationRegistry.js')));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

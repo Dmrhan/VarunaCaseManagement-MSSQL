@@ -23,6 +23,15 @@ import {
 
 const DAY = 86400000;
 const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+// Codex #454 P2 — backend `resolvedAt < to` kullanır; gün sonunu kapsamak ve
+// aynı-gün seçimini (from<to) geçerli kılmak için ops panosuyla aynı desen:
+// başlangıç = günün 00:00'ı, bitiş = ERTESİ günün 00:00'ı (dışlayıcı).
+const rangeStartIso = (day: string) => new Date(`${day}T00:00:00.000Z`).toISOString();
+const rangeEndIso = (day: string) => {
+  const d = new Date(`${day}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString();
+};
 
 function formatMetric(m: PersonMetric): string {
   if (m.value === null) return '—';
@@ -172,7 +181,7 @@ export function PeoplePerformancePage() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const out = await analyticsService.peoplePerformance({ from: dateFrom, to: dateTo });
+    const out = await analyticsService.peoplePerformance({ from: rangeStartIso(dateFrom), to: rangeEndIso(dateTo) });
     setLoading(false);
     if (!out) { setError('Performans verisi yüklenemedi.'); return; }
     setData(out);
