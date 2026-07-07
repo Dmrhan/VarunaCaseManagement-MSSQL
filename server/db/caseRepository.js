@@ -4204,12 +4204,20 @@ export const caseRepository = {
    *
    * SLA değiştirilmez (kuralı: aktarım SLA sayacını duraklatmaz/sıfırlamaz).
    */
-  async transferCase(id, input, allowedCompanyIds) {
+  async transferCase(id, input, allowedCompanyIds, actorRole = null, actorPersonId = null) {
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
 
     const c = await prisma.case.findUnique({ where: { id } });
     if (!c) return null;
+
+    // L1 Agent tab-visibility (F3) — Agent rolündeki kullanıcı, sadece
+    // kendine atanmış vakayı devredebilir. assertCaseResourcePolicy'nin
+    // yerine geçmez, ona ek sert bir ownership guard'ıdır (policy sistemi
+    // kapalıysa bile bu kontrol çalışır).
+    if (actorRole === 'Agent' && c.assignedPersonId !== actorPersonId) {
+      throw new CaseAccessError('Bu vakayı devretme yetkiniz yok — yalnız size atanmış vakaları devredebilirsiniz.');
+    }
 
     // Kapalı vakalar aktarılamaz
     if (c.status === 'Cozuldu' || c.status === 'IptalEdildi') {
@@ -5214,7 +5222,11 @@ async function notifyAssignmentTargets({
     const normalizeEmail = (value) =>
       typeof value === 'string' ? value.trim().toLowerCase() : '';
 
-    const personEmails = new Set();
+    // Kişisel atama (assignedPersonId) ve takım yayılımı (assignedTeamId)
+    // kaynaklı e-postalar AYRI tutulur — takım yayılımından gelen Agent
+    // alıcılar aşağıda filtrelenir, kişisel atama filtrelenmez (bkz. altta).
+    const personalEmails = new Set();
+    const teamBroadcastEmails = new Set();
 
     if (assignedPersonId) {
       const assignedPerson = await prisma.person.findUnique({
@@ -5222,7 +5234,7 @@ async function notifyAssignmentTargets({
         select: { email: true },
       });
       const assignedEmail = normalizeEmail(assignedPerson?.email);
-      if (assignedEmail) personEmails.add(assignedEmail);
+      if (assignedEmail) personalEmails.add(assignedEmail);
     }
 
     if (assignedTeamId) {
@@ -5232,19 +5244,26 @@ async function notifyAssignmentTargets({
       });
       for (const member of teamMembers) {
         const email = normalizeEmail(member.email);
-        if (email) personEmails.add(email);
+        if (email) teamBroadcastEmails.add(email);
       }
     }
 
+    const personEmails = new Set([...personalEmails, ...teamBroadcastEmails]);
     if (personEmails.size === 0) return;
 
+    // role — takım yayılımından gelen Agent alıcıları filtrelemek için.
+    // User.role kullanılır (UserCompany.role DEĞİL — o alan rol
+    // değişikliklerinde senkronize edilmiyor, bkz. adminRepository.js
+    // updateSystemRole: "UserCompany.role'e dokunulmaz; sadece User.role
+    // güncellenir". UserCompany.role'e bakmak, terfi/görev değişikliği
+    // sonrası bayat bir role göre yanlış filtreleme yapardı.
     const users = await prisma.user.findMany({
       where: {
         email: { in: [...personEmails] },
         isActive: true,
         companies: { some: { companyId, isActive: true } },
       },
-      select: { id: true, email: true },
+      select: { id: true, email: true, role: true },
     });
     if (users.length === 0) return;
 
@@ -5272,6 +5291,12 @@ async function notifyAssignmentTargets({
       if (!user.id) continue;
       if (actorUserId && user.id === actorUserId) continue;
       if (watcherUserIds.has(user.id)) continue;
+      const email = normalizeEmail(user.email);
+      const isPersonalTarget = personalEmails.has(email);
+      // Takım yayılımından gelen (kişisel atama olmayan) Agent alıcı → atla.
+      // Kişisel atama her zaman önceliklidir (aynı kişi hem kendine atanmış
+      // hem takım üyesi olabilir — bu durumda bildirim almaya devam eder).
+      if (!isPersonalTarget && teamBroadcastEmails.has(email) && user.role === 'Agent') continue;
       recipients.add(user.id);
     }
     if (recipients.size === 0) return;

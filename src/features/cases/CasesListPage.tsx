@@ -105,7 +105,12 @@ const PRIORITY_STRIPE: Record<CasePriority, string> = {
 const BULK_STATUSES: CaseStatus[] = ['Açık', 'İncelemede', '3rdPartyBekleniyor', 'Eskalasyon', 'YenidenAcildi'];
 
 interface CasesListPageProps {
-  onSelectCase: (caseId: string) => void;
+  /** narrowScopeConfirmed: true ise CaseDetailPage'e "dar kapsamlı" bir
+   *  navigasyondan geldiği bildirilir (Backoffice/Supervisor Devret/Üstlen
+   *  görünürlüğü için). Açık/Kapalı sekmesi satır tıklaması ve az önce
+   *  üstlenilen/oluşturulan vakaya yönlendirme bunu true gönderir; Tümü
+   *  sekmesi ve diğer her yol varsayılan (false/undefined) bırakır. */
+  onSelectCase: (caseId: string, narrowScopeConfirmed?: boolean) => void;
   onShowCustomer?: (accountId: string) => void;
   onOpenCustomerSearch?: () => void;
   /** App seviyesinden gelen account ID — varsa QuickCaseModal pre-fill ile açılır */
@@ -439,6 +444,9 @@ export function CasesListPage({
           unassigned: effectiveQueueFilter === 'unassigned' ? true : undefined,
           priorities: effectiveQueueFilter === 'critical' ? ['Critical'] : filters.priorities,
           roleDefaultView: roleDefaultViewOff ? 'off' : undefined,
+          // F1/F2 — "later" sekmesi ayrı endpoint kullandığı için buraya hiç
+          // düşmüyor; sadece all/open/closed backend'e bildirilir.
+          inboxTab: inboxTab === 'all' || inboxTab === 'open' || inboxTab === 'closed' ? inboxTab : undefined,
         },
         { page: p, pageSize, sortBy: sortKey, sortDir },
       );
@@ -781,7 +789,7 @@ export function CasesListPage({
       // detaya gitmek zorundaydı. Toast + arka plan refresh aynen
       // korunuyor; load()/refreshStats() arka planda çalışır, ekran
       // doğrudan Case Detail olarak açılır.
-      onSelectCase(updated.id);
+      onSelectCase(updated.id, true);
       void load();
       void refreshStats();
     } else {
@@ -794,12 +802,16 @@ export function CasesListPage({
    * oluşturduğu kayıt dahil hiçbir havuz vakasını claim edemez (backend
    * caseRepository.js claim() aynı kuralı uygular — "atama takım liderinizde"
    * hatası). Buton burada gizlenmezse kullanıcı her tıklamada 403 alır;
-   * görünürlük backend kuralıyla birebir eşleşmeli. */
+   * görünürlük backend kuralıyla birebir eşleşmeli.
+   * Tümü sekmesi salt-okunur kuralı — Backoffice/Supervisor "Tümü" sekmesinde
+   * (inboxTab==='all') hiçbir kaydı üstleyemez; bu sekme geniş arama/danışma
+   * amaçlı, işlem amaçlı değil (CaseDetailPage'deki aynı kuralla tutarlı). */
   const canClaimCase = (c: { status: CaseStatus; assignedPersonId?: string | null }) =>
     !!user?.personId &&
     !c.assignedPersonId &&
     !CLOSED_STATUSES.includes(c.status) &&
-    !(user?.role === 'Agent' && !!myTeamId && !canSeeTeamPool);
+    !(user?.role === 'Agent' && !!myTeamId && !canSeeTeamPool) &&
+    !(['Supervisor', 'Backoffice'].includes(user?.role ?? '') && inboxTab === 'all');
 
   // Role-aware KPI cards — backend tek truth source (GET /api/cases/stats).
   // Mode rol bazlı: personal (Agent/Backoffice/CSM), team (Supervisor),
@@ -1580,7 +1592,7 @@ export function CasesListPage({
                   return (
                   <tr
                     key={c.id}
-                    onClick={() => onSelectCase(c.id)}
+                    onClick={() => onSelectCase(c.id, inboxTab === 'open' || inboxTab === 'closed')}
                     className={`cursor-pointer text-sm ${rowBg}`}
                   >
                     <Td className={cn('w-10 border-l-[3px]', PRIORITY_STRIPE[c.priority as CasePriority] ?? 'border-l-slate-200 dark:border-l-slate-600')}>
@@ -1800,7 +1812,7 @@ export function CasesListPage({
           setNewOpen(false);
           setNewPrefill(null);
           void load();
-          onSelectCase(c.id);
+          onSelectCase(c.id, true);
           toast({
             type: 'success',
             title: 'Vaka oluşturuldu',
@@ -1821,7 +1833,7 @@ export function CasesListPage({
         prefillAccountId={quickPrefillAccount}
         onCreated={(c) => {
           void load();
-          onSelectCase(c.id);
+          onSelectCase(c.id, true);
         }}
       />
 
