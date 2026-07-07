@@ -21,8 +21,9 @@ ok('1.1 personDetail metodu + endpoint + tipler',
   && /interface PersonDetailResponse/.test(svc) && /interface ExpertiseTopic/.test(svc));
 
 console.log('── Profil ekranı (6 bölüm) ──');
-ok('2.1 günlük süre trendi SVG (7g yürüyen çizgi + hacim çubuk)',
-  /function TrendChart/.test(prof) && prof.includes('rollingMedianHours') && /<svg/.test(prof));
+ok('2.1 günlük süre trendi — Operasyon Panosu TrendLine (recharts) reuse (tasarım bütünlüğü)',
+  /function TrendChart/.test(prof) && prof.includes('rollingMedianHours')
+  && /import \{ TrendLine \}/.test(prof) && /<TrendLine /.test(prof));
 ok('2.2 uzmanlık parmak izi + uzman/sağlam etiketi + konu-içi hız',
   /Uzmanlık parmak izi/.test(prof) && /'Uzman'|Uzman</.test(prof) && /ekipten %\{e\.fasterPct\} hızlı/.test(prof));
 ok('2.3 en çok karşılaştığı sorunlar + çalıştığı ürün',

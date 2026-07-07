@@ -25,11 +25,12 @@ ok('0.1 uzmanlık/ürün/sorun KB etiketleriyle (category/subCategory DEĞİL)',
   /businessProcessLabel'\)/.test(pdet) && /platformLabel'\)/.test(pdet) && /operationTypeLabel'\)/.test(pdet)
   && /Kullanıcı kararı 2026-07-07: uzmanlık analizi KB/.test(pdet));
 console.log('── İnsancıl dil (kaba ifade YOK) ──');
-ok('0.1b trend grafiği düzgün — HTML legend/y-ekseni + non-scaling stroke, SVG içinde <text> YOK (font/indicator fix)',
-  /Tipik süre \(7g\)/.test(prof) && /Günlük çözülen/.test(prof)
-  && /vectorEffect="non-scaling-stroke"/.test(prof) && /fmtHoursShort/.test(prof)
-  // eski scaled SVG <text> (12 gün önce / bugün) kaldırıldı
-  && !/<text [^>]*>\{pts\.length\} gün önce<\/text>/.test(prof));
+ok('0.1b trend grafiği Operasyon Panosu TrendLine (recharts) bileşenini REUSE eder (tasarım bütünlüğü)',
+  /import \{ TrendLine \} from '@\/components\/charts\/TrendLine'/.test(prof)
+  && /<TrendLine series=\{series\} xLabels=\{xLabels\}/.test(prof)
+  && /Tipik çözüm süresi \(sa\)/.test(prof)
+  // elle yazılmış SVG grafiği kaldırıldı (kendi <polyline>/<rect> çizimi yok)
+  && !/vectorEffect="non-scaling-stroke"/.test(prof));
 ok('0.2 Etkinlik&Katkı + sinyal etiketleri insancıl — kaba ifade kaldırıldı',
   !/sıcak-patates|sadece kolay iş mi seçiyor|gerçekten çalışıyor mu/.test(pdet)
   && !/kaytarma|Gizlenme deseni|gerçekten çalışıyor mu/.test(prof)
