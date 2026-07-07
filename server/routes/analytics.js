@@ -4,6 +4,7 @@ import { prisma } from '../db/client.js';
 import { checkAccountInScope } from '../analytics/accountScopeGuard.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { computeOperationsOverview, computePeoplePerformanceOverview } from '../analytics/operationsAggregator.js';
+import { computePersonDetail } from '../analytics/personDetailAggregator.js';
 import { computeMonthlyBulletin } from '../analytics/bulletinAggregator.js';
 import { enrichPatternAlert } from '../lib/patternInsight.js';
 import { generatePatternHypothesis } from '../lib/patternHypothesisAi.js';
@@ -869,6 +870,39 @@ router.post('/people-performance', requireSupervisorAnalytics, async (req, res) 
   } catch (err) {
     console.error('[analytics:people-performance]', err);
     res.status(500).json({ error: 'internal', message: err?.message ?? 'Performans verisi hesaplanamadı' });
+  }
+});
+
+/**
+ * POST /api/analytics/person-detail — Performans Panosu FAZ 2a.
+ * Kişi uzmanlık profili drill-down: uzmanlık parmak izi + en çok karşılaştığı
+ * sorunlar + ürün + en uzun işler + çözüm imzası + günlük süre trendi.
+ * Supervisor+. Tüm sorgular scope.companyIds ile scoped — scope dışı personId
+ * verilse aggregator boş döner (cross-company sızıntı yok). PII: başlık dışında
+ * müşteri PII'si payload'a girmez.
+ */
+router.post('/person-detail', requireSupervisorAnalytics, async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    if (typeof body.personId !== 'string' || !body.personId) {
+      return res.status(400).json({ error: 'invalid_input', message: 'personId gerekli.' });
+    }
+    const validation = validateOverviewBody(body);
+    if (validation.error) {
+      return res.status(400).json({ error: 'invalid_input', message: validation.error });
+    }
+    const { from, to } = validation;
+    const scope = deriveAnalyticsScope(req.user, body);
+    const payload = await computePersonDetail({
+      personId: body.personId,
+      allowedCompanyIds: scope.companyIds,
+      from: from.toISOString(),
+      to: to.toISOString(),
+    });
+    res.json(payload);
+  } catch (err) {
+    console.error('[analytics:person-detail]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Kişi profili hesaplanamadı' });
   }
 });
 
