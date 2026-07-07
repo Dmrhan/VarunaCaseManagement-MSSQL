@@ -34,8 +34,8 @@ ok('1.5 günlük trend: gün başına count+median + 7g yürüyen (dalgalanma yu
 
 console.log('── Güvenlik + sözleşme ──');
 ok('2.1 tüm sorgular scope: companyId IN + assignedPersonId + isArchived=0',
-  /function resolvedWhere/.test(aggr)
-  && /\[companyId\] IN \(\$\{companyList\}\) AND \[assignedPersonId\] = \$\{pIdx\}/.test(aggr)
+  /function scopeParts\(companyIds, teamIds, personId/.test(aggr)
+  && /\[assignedPersonId\] = \$\{pIdx\}/.test(aggr)
   && /\[isArchived\] = 0/.test(aggr));
 ok('2.2 fasterPct sıfıra-yakın ekip medyanında clamp (sunulabilir)',
   /Math\.max\(-99, Math\.min\(99,/.test(aggr));
@@ -50,6 +50,19 @@ ok('3.1 POST /person-detail Supervisor+ + personId zorunlu',
 ok('3.2 scope.companyIds ile korunuyor (cross-company sızıntı yok) + import',
   /computePersonDetail\(\{[\s\S]{0,120}allowedCompanyIds: scope\.companyIds/.test(routes)
   && /import \{ computePersonDetail \}/.test(routes));
+
+console.log('── Codex #455 fix\'leri ──');
+ok('4.1 P1: isim sorgusu scope\'lu (companyId + team) — scope-dışı personId ismi sızmaz',
+  /async function queryPersonName\(companyIds, teamIds, personId\)/.test(aggr)
+  && /queryPersonName[\s\S]{0,700}\[companyId\] IN \(\$\{companyList\}\)/.test(aggr)
+  && /queryPersonName[\s\S]{0,900}\[assignedPersonName\] IS NOT NULL/.test(aggr));
+ok('4.2 P2: teamIds honore edilir (scopeParts/teamScopeParts assignedTeamId IN) + route iletir',
+  /function scopeParts\(companyIds, teamIds/.test(aggr)
+  && /\[assignedTeamId\] IN \(\$\{teamList\}\)/.test(aggr)
+  && /teamIds: scope\.teamIds/.test(routes));
+ok('4.3 P2: person.resolved = TÜM kategoriler (top-8 kırpması değil)',
+  /queryExpertise[\s\S]{0,2000}return \{ items, total \}/.test(aggr)
+  && /resolved: expertiseRes\.total/.test(aggr));
 
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

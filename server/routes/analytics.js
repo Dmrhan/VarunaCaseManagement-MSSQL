@@ -896,6 +896,7 @@ router.post('/person-detail', requireSupervisorAnalytics, async (req, res) => {
     const payload = await computePersonDetail({
       personId: body.personId,
       allowedCompanyIds: scope.companyIds,
+      teamIds: scope.teamIds, // Codex #455 P2 — daraltılmış takım kapsamını onore et
       from: from.toISOString(),
       to: to.toISOString(),
     });
