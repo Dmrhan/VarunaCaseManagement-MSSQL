@@ -185,6 +185,7 @@ export function PersonProfileView({
   from,
   to,
   teams,
+  companies,
   onBack,
   onSelectCase,
 }: {
@@ -193,27 +194,28 @@ export function PersonProfileView({
   from: string;
   to: string;
   teams?: string[];
+  companies?: string[];
   onBack: () => void;
   onSelectCase?: (id: string) => void;
 }) {
   const [data, setData] = useState<PersonDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [engagement, setEngagement] = useState<EngagementResponse | null>(null);
-  const teamKey = teams?.join(',') ?? '';
+  const scopeKey = `${teams?.join(',') ?? ''}|${companies?.join(',') ?? ''}`;
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
     setEngagement(null);
-    void analyticsService.personDetail(personId, from, to, teams).then((out) => {
+    void analyticsService.personDetail(personId, from, to, teams, companies).then((out) => {
       if (alive) { setData(out ?? null); setLoading(false); }
     });
-    void analyticsService.personEngagement(personId, from, to, teams).then((out) => {
+    void analyticsService.personEngagement(personId, from, to, teams, companies).then((out) => {
       if (alive) setEngagement(out ?? null);
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [personId, from, to, teamKey]);
+  }, [personId, from, to, scopeKey]);
 
   const sig = data?.solutionSignature;
 

@@ -64,6 +64,14 @@ ok('3.5 takım filtresi dropdown (Tüm takımlar + lookupService.teams) → team
   && /<option value="">Tüm takımlar<\/option>/.test(page)
   && /teamId \? \{ teams: \[teamId\] \}/.test(page)
   && /teams=\{teamsFilter\}/.test(page));
+ok('3.6 şirket filtresi dropdown (>1 şirkette) + takım cascade + companies scope',
+  /aria-label="Şirket filtresi"/.test(page) && /companyOptions\.length > 1/.test(page)
+  && /<option value="">Tüm şirketler<\/option>/.test(page)
+  && /companyId \? \{ companies: \[companyId\] \}/.test(page)
+  // cascade: seçili şirketin takımları + şirket değişince takım sıfırlanır
+  && /!companyId \|\| t\.companyId === companyId/.test(page)
+  && /setCompanyId\(e\.target\.value\); setTeamId\(''\)/.test(page)
+  && /companies=\{companiesFilter\}/.test(page));
 
 if (process.env.SMOKE_LIVE === '1') {
   console.log('── CANLI ──');

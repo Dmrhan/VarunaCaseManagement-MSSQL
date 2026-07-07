@@ -367,6 +367,8 @@ export interface PeopleTeamSummary {
 export interface PeoplePerformanceRequest {
   from: string;
   to: string;
+  companies?: string[];
+  teams?: string[];
   productGroups?: string[];
   caseTypes?: string[];
 }
@@ -437,13 +439,14 @@ export const analyticsService = {
     from: string,
     to: string,
     teams?: string[],
+    companies?: string[],
   ): Promise<EngagementResponse | undefined> {
     return apiFetch<EngagementResponse>(
       '/api/analytics/person-engagement',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ personId, from, to, ...(teams?.length ? { teams } : {}) }),
+        body: JSON.stringify({ personId, from, to, ...(teams?.length ? { teams } : {}), ...(companies?.length ? { companies } : {}) }),
       },
       'Etkinlik verisi yüklenemedi',
     );
@@ -454,13 +457,14 @@ export const analyticsService = {
     from: string,
     to: string,
     teams?: string[],
+    companies?: string[],
   ): Promise<PersonDetailResponse | undefined> {
     return apiFetch<PersonDetailResponse>(
       '/api/analytics/person-detail',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ personId, from, to, ...(teams?.length ? { teams } : {}) }),
+        body: JSON.stringify({ personId, from, to, ...(teams?.length ? { teams } : {}), ...(companies?.length ? { companies } : {}) }),
       },
       'Kişi profili yüklenemedi',
     );

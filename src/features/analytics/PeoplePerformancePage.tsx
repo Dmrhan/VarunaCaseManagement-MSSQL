@@ -293,26 +293,36 @@ export function PeoplePerformancePage({ onSelectCase }: { onSelectCase?: (id: st
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ id: string; name: string } | null>(null);
+  const [companyId, setCompanyId] = useState<string>(''); // '' = tüm şirketler
   const [teamId, setTeamId] = useState<string>(''); // '' = tüm takımlar
 
-  // Aktif takımlar (dropdown) — lookup bootstrap, isme göre sıralı.
-  const teamOptions = useMemo(
-    () => lookupService.teams().slice().sort((a, b) => a.name.localeCompare(b.name, 'tr')),
+  // Şirketler (dropdown) — tek şirketliyse gizlenir (gürültü olmasın).
+  const companyOptions = useMemo(
+    () => lookupService.companies().slice().sort((a, b) => a.name.localeCompare(b.name, 'tr')),
     [],
   );
+  // Aktif takımlar; şirket seçiliyse o şirketin takımları (cascade).
+  const teamOptions = useMemo(
+    () => lookupService.teams()
+      .filter((t) => !companyId || t.companyId === companyId)
+      .slice().sort((a, b) => a.name.localeCompare(b.name, 'tr')),
+    [companyId],
+  );
   const teamsFilter = useMemo(() => (teamId ? [teamId] : undefined), [teamId]);
+  const companiesFilter = useMemo(() => (companyId ? [companyId] : undefined), [companyId]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     const out = await analyticsService.peoplePerformance({
       from: rangeStartIso(dateFrom), to: rangeEndIso(dateTo),
+      ...(companyId ? { companies: [companyId] } : {}),
       ...(teamId ? { teams: [teamId] } : {}),
     });
     setLoading(false);
     if (!out) { setError('Performans verisi yüklenemedi.'); return; }
     setData(out);
-  }, [dateFrom, dateTo, teamId]);
+  }, [dateFrom, dateTo, companyId, teamId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -327,6 +337,7 @@ export function PeoplePerformancePage({ onSelectCase }: { onSelectCase?: (id: st
         from={rangeStartIso(dateFrom)}
         to={rangeEndIso(dateTo)}
         teams={teamsFilter}
+        companies={companiesFilter}
         onBack={() => setSelected(null)}
         onSelectCase={onSelectCase}
       />
@@ -345,6 +356,17 @@ export function PeoplePerformancePage({ onSelectCase }: { onSelectCase?: (id: st
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {companyOptions.length > 1 && (
+            <select
+              value={companyId}
+              onChange={(e) => { setCompanyId(e.target.value); setTeamId(''); setSelected(null); }}
+              aria-label="Şirket filtresi"
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+            >
+              <option value="">Tüm şirketler</option>
+              {companyOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          )}
           <select
             value={teamId}
             onChange={(e) => { setTeamId(e.target.value); setSelected(null); }}
