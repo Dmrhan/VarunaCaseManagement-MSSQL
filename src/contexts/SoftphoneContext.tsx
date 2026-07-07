@@ -234,34 +234,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     return () => { alive = false; clearInterval(t); };
   }, [status]);
 
-  // Gelen çağrı zili — Web Audio ile programatik (dosyasız, on-prem dostu).
-  // Çağrı çalarken periyodik bip; cevaplanınca/reddedilince (incomingCall değişince) durur.
-  useEffect(() => {
-    if (!incomingCall || incomingCall.status !== 'ringing') return;
-    let stopped = false;
-    let ctx: AudioContext | null = null;
-    try {
-      ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    } catch { return; }
-    const beep = () => {
-      if (stopped || !ctx) return;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = 480;
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      const t0 = ctx.currentTime;
-      gain.gain.setValueAtTime(0.0001, t0);
-      gain.gain.exponentialRampToValueAtTime(0.22, t0 + 0.05);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.85);
-      osc.start(t0);
-      osc.stop(t0 + 0.9);
-    };
-    beep();
-    const iv = setInterval(beep, 2000);
-    return () => { stopped = true; clearInterval(iv); void ctx?.close().catch(() => {}); };
-  }, [incomingCall]);
+  // NOT: Varuna içi gelen-çağrı "bip" zili KALDIRILDI (kullanıcı isteği) — AloTech
+  // softphone'unun kendi zili yeterli; Varuna sadece görsel bildirim (banner) gösterir.
 
   const dialNumber = useCallback(async (number: string, opts?: { caseId?: string; name?: string }) => {
     if (status !== 'ready') { notify({ type: 'error', title: 'AloTech hazır değil', message: 'Bağlantı bekleniyor.' }); return; }

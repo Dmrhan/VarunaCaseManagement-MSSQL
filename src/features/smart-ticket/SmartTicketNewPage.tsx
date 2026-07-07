@@ -676,6 +676,13 @@ export function SmartTicketNewPage({
   const projectRequirementSatisfied =
     !projectsEnabled || !projectsRequired || !form.accountId || !!form.accountProjectId;
 
+  // Akıllı Tanımlar (açılış taksonomisi) — SEÇİLEBİLİR (item'ı olan) alanların HEPSİ
+  // ZORUNLU (kullanıcı isteği: hepsi zorunlu). Admin'in item tanımlamadığı alan zorunlu
+  // sayılmaz — aksi halde o alan seçilemeyeceği için hiç vaka açılamazdı.
+  // Taxonomiler YÜKLENİRKEN sağlanmış sayılmaz (item'lar bilinmeden buton aktifleşmesin).
+  const taxonomyRequirementSatisfied =
+    !taxonomiesLoading &&
+    TAXONOMY_FIELDS.every((f) => (taxonomies?.[f.key]?.length ?? 0) === 0 || !!form[f.key]);
   const canCreate =
     stage === 'opening' &&
     !!form.companyId &&
@@ -686,6 +693,8 @@ export function SmartTicketNewPage({
     // 2026-07-02 — Öncelik + Talep Türü ZORUNLU. Kullanıcı seçmezse advance yok.
     !!form.priority &&
     !!form.requestType &&
+    // Akıllı Tanımlar — item'ı olan alanların hepsi seçili olmadan buton pasif.
+    taxonomyRequirementSatisfied &&
     !creating;
 
   const canSuggest =
@@ -1466,9 +1475,10 @@ export function SmartTicketNewPage({
       closure.resolutionType ||
       closure.permanentPrevention
     );
-    if (!closureSuggestion && !hasAnyClosureField) {
+    // KB analizine basmak YETMEZ — en az bir kapanış etiketi SEÇİLMİŞ olmalı.
+    if (!hasAnyClosureField) {
       setClosureError(
-        'Vaka çözülmeden önce KB kapanış analizi yapılmalı (veya kapanış etiketleri elle seçilmeli).',
+        'Vaka çözülmeden önce en az bir kapanış etiketi seçilmeli (kök neden grubu / detay / çözüm tipi / kalıcı önleme).',
       );
       return;
     }
@@ -1938,6 +1948,7 @@ export function SmartTicketNewPage({
                     return (
                       <Field
                         key={f.key}
+                        required={items.length > 0}
                         label={
                           <span className="inline-flex items-center gap-1.5">
                             <Icon size={11} className="text-brand-500" />
@@ -1947,7 +1958,9 @@ export function SmartTicketNewPage({
                         hint={
                           isFromSuggestion && suggested
                             ? `KB önerisi (${suggested.matchedBy}, %${Math.round(suggested.confidence * 100)})`
-                            : undefined
+                            : items.length > 0 && !form[f.key]
+                              ? 'Zorunlu'
+                              : undefined
                         }
                       >
                         <Select

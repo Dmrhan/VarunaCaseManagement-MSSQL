@@ -436,24 +436,33 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   const requiredChecklistPending =
     item.checklistItems?.filter((it) => it.required && !it.checked) ?? [];
 
-  // Kapanış analizi zorunluluğu — backend'deki smart_ticket_closure_required
-  // guard'ının aynası. Vaka (açılış kanalı fark etmeksizin) Çözüldü'ye
-  // geçerken "KB ile Analiz Et" en az bir kez çalıştırılmış (kbSuggestion
-  // alınmış) VEYA en az bir kapanış etiketi elle seçilmiş olmalı. 4 alanın
-  // dolu olması şart değil — AI kararsız kalıp boş bırakabilir; boş kalması
-  // istenir (gelişim verisi). Daha önce analiz edilmiş vaka muaf.
+  // Kapanış ETİKET zorunluluğu — backend'deki smart_ticket_closure_required
+  // guard'ının aynası. Vaka (açılış kanalı fark etmeksizin) Çözüldü'ye geçerken
+  // 4 sınıftan (kök neden grubu / detay / çözüm tipi / kalıcı önleme) EN AZ BİRİ
+  // SEÇİLMİŞ olmalı. "KB ile Analiz Et"e basmak TEK BAŞINA YETMEZ (butona basılıp
+  // etiket boş kalırsa kapatılamaz); ama KB analizi etiketleri otomatik doldurup
+  // bu şartı sağlayabilir. 4 alanın hepsi dolu olmak zorunda değil. Daha önce
+  // ETİKETLENMİŞ vaka muaf (bare KB analizi muafiyet saymaz).
   const prevClosureCf = (
     item.customFields as {
-      smartTicket?: { closure?: { rootCauseGroup?: string; rootCauseGroupLabel?: string; closureSuggestion?: unknown } };
+      smartTicket?: {
+        closure?: {
+          rootCauseGroup?: string; rootCauseGroupLabel?: string;
+          rootCauseDetail?: string; resolutionType?: string; permanentPrevention?: string;
+          closureSuggestion?: unknown;
+        };
+      };
     } | undefined
   )?.smartTicket?.closure;
+  // Muafiyet, zorunlulukla HİZALI: 4 sınıftan herhangi biri daha önce set edilmişse muaf.
   const closureAlreadyAnalyzed = !!(
-    prevClosureCf?.rootCauseGroup || prevClosureCf?.rootCauseGroupLabel || prevClosureCf?.closureSuggestion
+    prevClosureCf?.rootCauseGroup || prevClosureCf?.rootCauseGroupLabel ||
+    prevClosureCf?.rootCauseDetail || prevClosureCf?.resolutionType || prevClosureCf?.permanentPrevention
   );
-  const kbAnalysisPending =
+  // KB analizine basmak (kbSuggestion) YETMEZ — en az bir kapanış etiketi SEÇİLMİŞ olmalı.
+  const closureLabelsPending =
     kbEnabled !== false &&
     !closureAlreadyAnalyzed &&
-    !kbSuggestion &&
     !(closureRcg || closureRcd || closureRt || closurePp);
 
   function applyDisabled(): boolean {
@@ -461,7 +470,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     if (customerGateActive) return true; // müşterisiz Çözüldü engeli (SystemAdmin muaf)
     if (pending === 'Çözüldü' && !resolutionNote.trim()) return true;
     if (pending === 'Çözüldü' && requiredChecklistPending.length > 0) return true;
-    if (pending === 'Çözüldü' && kbAnalysisPending) return true;
+    if (pending === 'Çözüldü' && closureLabelsPending) return true;
     if (pending === 'İptalEdildi' && !cancelReason.trim()) return true;
     if (pending === '3rdPartyBekleniyor' && !thirdPartyId) return true;
     if (pending === 'Eskalasyon' && (!escalationLevel || !escalationReason.trim())) return true;
@@ -774,17 +783,17 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
               <div className="rounded-md border border-brand-100 bg-brand-50/40 p-3 dark:border-brand-900/30 dark:bg-brand-950/20">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-xs font-medium text-brand-700 dark:text-brand-200">
-                    Kapanış Bilgileri (Kök Neden){closureAlreadyAnalyzed ? '' : ' — KB analizi zorunlu'}
+                    Kapanış Bilgileri (Kök Neden){closureAlreadyAnalyzed ? '' : ' — etiket seçimi zorunlu'}
                   </span>
                     {closureTaxLoading && (
                       <span className="text-[11px] text-slate-500">yükleniyor…</span>
                     )}
                   </div>
-                  {kbAnalysisPending && (
+                  {closureLabelsPending && (
                     <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-                      Vakayı çözmeden önce çözüm notunu yazıp{' '}
-                      <strong>KB ile Analiz Et</strong> butonuna bir kez basın (veya etiketleri
-                      elle seçin). AI&apos;ın boş bıraktığı alanlar boş kalabilir.
+                      Vakayı çözmeden önce <strong>en az bir kapanış etiketi</strong> seçin (kök
+                      neden grubu / detay / çözüm tipi / kalıcı önleme). İpucu: çözüm notunu yazıp{' '}
+                      <strong>KB ile Analiz Et</strong> ile etiketleri otomatik doldurabilirsiniz.
                     </div>
                   )}
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -848,7 +857,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                   <p className="mt-2 text-[11px] text-slate-500 dark:text-ndark-muted">
                     {closureAlreadyAnalyzed
                       ? 'Bu vaka daha önce analiz edilmiş; alanlar boş bırakılırsa mevcut etiketler korunur.'
-                      : 'Vaka kapatmadan önce KB analizi zorunludur; AI\'ın boş bıraktığı alanlar boş kalabilir.'}{' '}
+                      : 'Vaka kapatmadan önce en az bir kapanış etiketi seçilmelidir; KB analizi etiketleri otomatik doldurabilir.'}{' '}
                     Kapanışla aynı transaction içinde
                     <code className="ml-1 font-mono">customFields.smartTicket.closure</code> alanına
                     yazılır; mevcut Smart Ticket açılış bilgileri korunur.

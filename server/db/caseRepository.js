@@ -3924,20 +3924,27 @@ export const caseRepository = {
         .catch(() => false))
     ) {
       const prevClosure = prev.customFields?.smartTicket?.closure;
+      // Kapanış SINIFLANDIRMA zorunluluğu: "KB ile Analiz Et"e basmak YETMEZ — en az bir
+      // kapanış etiketi (kök neden grubu / detay / çözüm tipi / kalıcı önleme) SEÇİLMİŞ
+      // olmalı. Daha önce ETİKETLENMİŞ vaka muaf; ama bare KB analizi (closureSuggestion)
+      // artık muafiyet saymaz — etiket şart.
+      // Muafiyet, zorunlulukla (hasAnyLabel) HİZALI olmalı: 4 sınıftan HERHANGİ biri
+      // daha önce set edilmişse vaka "etiketlenmiş" sayılır (yalnız rootCauseGroup değil).
       const alreadyAnalyzed = !!(
         prevClosure?.rootCauseGroup ||
         prevClosure?.rootCauseGroupLabel ||
-        prevClosure?.closureSuggestion
+        prevClosure?.rootCauseDetail ||
+        prevClosure?.resolutionType ||
+        prevClosure?.permanentPrevention
       );
       if (!alreadyAnalyzed) {
         const cl = payload.smartTicketClosure ?? {};
         const hasAnyLabel = !!(
           cl.rootCauseGroup || cl.rootCauseDetail || cl.resolutionType || cl.permanentPrevention
         );
-        const hasKbAnalysis = !!cl.closureSuggestion;
-        if (!hasAnyLabel && !hasKbAnalysis) {
+        if (!hasAnyLabel) {
           throw new CaseValidationError(
-            'Vaka çözülmeden önce "KB ile Analiz Et" ile kapanış analizi yapılmalı (veya kapanış etiketleri elle seçilmeli).',
+            'Vaka çözülmeden önce en az bir kapanış etiketi seçilmeli (kök neden grubu / detay / çözüm tipi / kalıcı önleme).',
             { status: 400, code: 'smart_ticket_closure_required' },
           );
         }
