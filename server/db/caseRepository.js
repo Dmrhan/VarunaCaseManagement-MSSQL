@@ -1454,12 +1454,28 @@ export const caseRepository = {
           where: scoped({ ...scope, assignedPersonId: personId, snoozeUntil: { gt: new Date() }, status: { in: STATS_OPEN_STATUSES } }),
         }),
         // transferredByMeCount: "Yönlendirdiklerim" kartı — CaseTransfer
-        // üzerinden distinct caseId sayısı (Case.isArchived/status'tan
-        // bağımsız; listTransferredByMe ile aynı kontrat).
-        prisma.caseTransfer.groupBy({
-          by: ['caseId'],
-          where: { transferredBy: user.id, companyId: { in: allowedCompanyIds } },
-        }).then((rows) => rows.length),
+        // sadece transferredBy+companyId ile filtrelenirse, authorization
+        // security filter (securityWhere) altında GİZLİ olan Case'ler de
+        // sayıma dahil olur (kart sayısı ≠ tıklayınca görünen liste sayısı,
+        // ve gizli vakaların VARLIĞI sızdırılmış olur). listTransferredByMe
+        // ile AYNI görünürlük kontratı: önce distinct caseId'leri topla,
+        // sonra securityWhere ile görünür Case sayısını say (Case.isArchived
+        // filtresi YOK — listTransferredByMe de filtrelemiyor).
+        (async () => {
+          const transferredCaseIds = (
+            await prisma.caseTransfer.groupBy({
+              by: ['caseId'],
+              where: { transferredBy: user.id, companyId: { in: allowedCompanyIds } },
+            })
+          ).map((r) => r.caseId);
+          if (transferredCaseIds.length === 0) return 0;
+          return prisma.case.count({
+            where: mergeSecurityWhere(
+              { id: { in: transferredCaseIds }, companyId: { in: allowedCompanyIds } },
+              securityWhere,
+            ),
+          });
+        })(),
         // unassigned chip: liste görünürlüğüyle tutarlı havuz sayısı.
         // L1 Agent (agentBlockedFromPool) hiç sahipsiz kayıt görmediği için
         // sorgu bile atılmadan 0 sabitlenir.
