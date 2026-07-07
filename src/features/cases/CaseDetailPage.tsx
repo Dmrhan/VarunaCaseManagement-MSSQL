@@ -302,9 +302,14 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
   // veya e-posta/bildirim gibi başka bir yoldan açılan, kendi takımının
   // havuz vakası bile olsa varsayılan olarak salt-okunurdur.
   const isOwnCase = !!item && item.assignedPersonId === user?.personId;
+  // Agent dahil — L2/L3/takım lideri Agent'lar (canSeeTeamPool=true) sıradan
+  // L1'in aksine claimBlockedByTeamPool'dan etkilenmiyordu, bu yüzden "Tümü"
+  // gibi dar-kapsam-kanıtlanmamış bir yerden kendi takımıyla ilgisiz bir
+  // havuz vakasını üstleyebiliyorlardı. Sıradan L1 için bu satır zaten
+  // aşağıdaki claimBlockedByTeamPool ile örtüşüyor (zararsız).
   const wideViewReadOnly =
     !!item &&
-    ['Backoffice', 'Supervisor'].includes(user?.role ?? '') &&
+    ['Agent', 'Backoffice', 'Supervisor'].includes(user?.role ?? '') &&
     !isOwnCase &&
     !narrowScopeConfirmedByNav;
 
