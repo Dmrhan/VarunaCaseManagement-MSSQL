@@ -24,6 +24,7 @@ import {
   Settings2,
   ShieldCheck,
   Star,
+  Gauge,
   Sun,
 } from 'lucide-react';
 import { CasesListPage } from './features/cases/CasesListPage';
@@ -39,6 +40,7 @@ import { RootCauseReportPage } from './features/analytics/RootCauseReportPage';
 import { AIUsagePage } from './features/analytics/AIUsagePage';
 import { PatternsPage } from './features/analytics/PatternsPage';
 import { QAScoresPage } from './features/analytics/QAScoresPage';
+import { PeoplePerformancePage } from './features/analytics/PeoplePerformancePage';
 import { MyCalendarPage } from './features/my/MyCalendarPage';
 import { MyHomePage } from './features/my/MyHomePage';
 import { WatcherInboxPage } from './features/my/WatcherInboxPage';
@@ -96,7 +98,7 @@ import { accountService } from './services/accountService';
 import { SOFTPHONE_ANSWERED_EVENT, SOFTPHONE_INCOMING_EVENT, useSoftphone } from './contexts/SoftphoneContext';
 import { CaseTaggingReviewPage } from './features/analytics/CaseTaggingReviewPage';
 
-type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'case-report-studio' | 'monthly-bulletin' | 'root-cause-report' | 'tagging-review' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | AdminView;
+type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'analytics-people-performance' | 'case-report-studio' | 'monthly-bulletin' | 'root-cause-report' | 'tagging-review' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | AdminView;
 
 interface NavItem {
   key: View;
@@ -385,6 +387,7 @@ export default function App() {
   const showKbViewer = !!user && canShowView('kb-viewer', true);
   const showAiUsage = !!user && canShowView('analytics-ai-usage', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showQaScores = !!user && canShowView('analytics-qa-scores', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
+  const showPeoplePerformance = !!user && canShowView('analytics-people-performance', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showPatterns = !!user && canShowView('analytics-patterns', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showCaseReportStudio = !!user && canShowView('case-report-studio', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   // Aylık Bülten — CS ekibi müşteriye gönderir; supervisor/admin/CSM görür
@@ -394,6 +397,7 @@ export default function App() {
   const showReportsSection = sidebarExpanded && (
     showAiUsage ||
     showQaScores ||
+    showPeoplePerformance ||
     showPatterns ||
     showCaseReportStudio ||
     showMonthlyBulletin ||
@@ -870,6 +874,25 @@ export default function App() {
               </button>
             )}
 
+            {/* Performans Panosu — Supervisor / Admin / SystemAdmin */}
+            {showPeoplePerformance && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('analytics-people-performance')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'analytics-people-performance'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="Performans Panosu"
+              >
+                <Gauge size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">Performans</span>}
+              </button>
+            )}
+
             {/* Örüntü Alarmları — Supervisor / Admin / SystemAdmin (active count badge) */}
             {showPatterns && (
               <button
@@ -1052,6 +1075,11 @@ export default function App() {
             />
           )}
           {view === 'analytics-qa-scores' && <QAScoresPage />}
+          {(view === 'analytics-people-performance' || (isDetail && caseDetailOrigin === 'analytics-people-performance')) && (
+            <div className={isDetail ? 'hidden' : 'contents'}>
+              <PeoplePerformancePage onSelectCase={openCase} />
+            </div>
+          )}
           {view === 'case-report-studio' && <CaseReportStudioPage />}
           {view === 'monthly-bulletin' && <MonthlyBulletinPage />}
           {(view === 'root-cause-report' || (isDetail && caseDetailOrigin === 'root-cause-report')) && (

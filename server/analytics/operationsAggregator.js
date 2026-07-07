@@ -14,6 +14,9 @@ import {
   isInsufficientSample,
   minSampleNote,
   roundInt,
+  roundPct,
+  roundHours,
+  safePct,
   MIN_SAMPLE,
 } from './metricFormulas.js';
 
@@ -942,6 +945,165 @@ async function queryByTeam(scope, filters, from, to, baseWhere) {
     count: Number(r.cnt),
     avgTtrHours: r.avg_ttr_hours == null ? null : Math.round(Number(r.avg_ttr_hours) * 10) / 10,
   }));
+}
+
+// ===================================================================
+// Performans Panosu — FAZ 1a: kişi bazında metrik motoru
+// ===================================================================
+// queryByTeam deseninin kişi kırılımı. Her metrik { value, unit, formula,
+// sampleSize } SÖZLEŞMESİYLE döner — birim ve hesap UI'da uydurulmaz, tek
+// kaynak backend. Oran/medyan metrikleri MIN_SAMPLE.agentPerformance (20)
+// altında null (guardrail — az örneklemle "performans" gürültüdür).
+// Tüm oranların paydası = dönemde ÇÖZÜLEN iş (kişinin bitirdiği iş);
+// WIP anlık (dönemden bağımsız). Arşivli vakalar baseWhere ile zaten dışarıda.
+
+const AGENT_MIN_KIND = 'agentPerformance';
+
+async function queryByPerson(scope, filters, from, to, baseWhere) {
+  if (scope.companyIds.length === 0) return [];
+
+  // 1) Dönemde çözülen işlerden kişi-bazlı agregat + medyan/P90
+  //    (PERCENTILE_CONT window func → PARTITION BY kişi, dış GROUP BY'da MIN
+  //     ile partition-sabiti değer alınır).
+  const p1 = withParam(baseWhere, from);
+  const p2 = withParam(p1, to);
+  const mainSql = `
+    SELECT [assignedPersonId] AS id, MAX([assignedPersonName]) AS name,
+      COUNT(*) AS resolved_cnt,
+      MIN(median_h) AS median_h,
+      MIN(p90_h)    AS p90_h,
+      SUM(CASE WHEN [status] = 'YenidenAcildi' THEN 1 ELSE 0 END) AS reopened_cnt,
+      SUM(CASE WHEN [slaViolation] = 1 THEN 1 ELSE 0 END)         AS sla_breach_cnt,
+      SUM(CASE WHEN [escalationLevel] <> 'Yok' THEN 1 ELSE 0 END) AS escalated_cnt,
+      SUM(CASE WHEN [transferCount] > 0 THEN 1 ELSE 0 END)        AS transferred_cnt
+    FROM (
+      SELECT [assignedPersonId], [assignedPersonName], [status], [slaViolation], [escalationLevel], [transferCount],
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(DATEDIFF(SECOND, [createdAt], [resolvedAt]) AS float) / 3600.0)
+          OVER (PARTITION BY [assignedPersonId]) AS median_h,
+        PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY CAST(DATEDIFF(SECOND, [createdAt], [resolvedAt]) AS float) / 3600.0)
+          OVER (PARTITION BY [assignedPersonId]) AS p90_h
+      FROM [Case]
+      WHERE ${baseWhere.sql}
+        AND [resolvedAt] >= @P${p1.idx} AND [resolvedAt] < @P${p2.idx}
+        AND [assignedPersonId] IS NOT NULL
+        AND [resolvedAt] > [createdAt]
+    ) x
+    GROUP BY [assignedPersonId]
+    ORDER BY resolved_cnt DESC;
+  `;
+  const mainRows = await prisma.$queryRawUnsafe(mainSql, ...p2.params);
+
+  // 2) Anlık açık iş (WIP) — dönemden bağımsız. İsim de çekilir çünkü
+  //    Codex #453 P2: dönemde 0 çözen ama açık iş taşıyan (aşırı yüklü) kişi
+  //    sadece burada görünür; ismi mainRows'ta olmayabilir.
+  const w1 = withArrayParam(baseWhere, OPEN_STATUS_DB_VALUES);
+  const wipSql = `
+    SELECT [assignedPersonId] AS id, MAX([assignedPersonName]) AS name, COUNT(*) AS open_cnt
+    FROM [Case]
+    WHERE ${baseWhere.sql}
+      AND [status] IN (${w1.list})
+      AND [assignedPersonId] IS NOT NULL
+    GROUP BY [assignedPersonId];
+  `;
+  const wipRows = await prisma.$queryRawUnsafe(wipSql, ...w1.params);
+  const wip = new Map(wipRows.map((r) => [r.id, { name: r.name, open: Number(r.open_cnt) }]));
+
+  // Kişi kümesi = dönemde çözenler ∪ şu an açık işi olanlar. Codex #453 P2 —
+  // salt-WIP kişiler resolved:0 ile eklenir; oran/medyan metrikleri zaten
+  // örneklem<20 → guardrail null. Yük dengesi sinyali eksik kalmaz.
+  const out = mainRows.map((r) => ({
+    id: r.id,
+    name: r.name ?? r.id,
+    resolved: Number(r.resolved_cnt),
+    medianHours: r.median_h == null ? null : Number(r.median_h),
+    p90Hours: r.p90_h == null ? null : Number(r.p90_h),
+    reopened: Number(r.reopened_cnt),
+    slaBreached: Number(r.sla_breach_cnt),
+    escalated: Number(r.escalated_cnt),
+    transferred: Number(r.transferred_cnt),
+    openWip: wip.get(r.id)?.open ?? 0,
+  }));
+  const seen = new Set(out.map((r) => r.id));
+  for (const [id, v] of wip) {
+    if (seen.has(id)) continue;
+    out.push({
+      id, name: v.name ?? id, resolved: 0,
+      medianHours: null, p90Hours: null, reopened: 0, slaBreached: 0,
+      escalated: 0, transferred: 0, openWip: v.open,
+    });
+  }
+  return out;
+}
+
+// Ham satır → yöneticinin dilinde metrik sözleşmesi. Her metrik birim + hesap
+// (formula) taşır; oran/medyan az örneklemde value=null + insufficient=true.
+function shapePersonMetrics(row) {
+  const n = row.resolved;
+  const enough = !isInsufficientSample(n, AGENT_MIN_KIND);
+  const m = (key, label, value, unit, formula, insufficient = false) => ({
+    key, label, value, unit, formula, sampleSize: n, insufficient,
+  });
+  const ratio = (key, label, value, formula) =>
+    enough ? m(key, label, value, '%', formula) : m(key, label, null, '%', formula, true);
+  return {
+    id: row.id,
+    name: row.name,
+    sampleSize: n,
+    metrics: {
+      resolved: m('resolved', 'Çözülen iş', n, 'vaka', 'dönemde çözüme ulaşan'),
+      medianHours: enough
+        ? m('medianHours', 'Tipik çözüm süresi', roundHours(row.medianHours), 'saat', 'ortadaki vaka · açılış→çözüm')
+        : m('medianHours', 'Tipik çözüm süresi', null, 'saat', 'ortadaki vaka · açılış→çözüm', true),
+      p90Hours: enough
+        ? m('p90Hours', 'Yavaş uç', roundHours(row.p90Hours), 'saat', 'en yavaş %10 eşiği')
+        : m('p90Hours', 'Yavaş uç', null, 'saat', 'en yavaş %10 eşiği', true),
+      reopenRatePct: ratio('reopenRatePct', 'Yeniden açılma oranı', safePct(row.reopened, n), 'yeniden açılan ÷ çözülen'),
+      slaCompliancePct: enough
+        ? m('slaCompliancePct', 'Zamanında çözüm', roundPct(100 - safePct(row.slaBreached, n)), '%', 'söz verilen sürede çözülen')
+        : m('slaCompliancePct', 'Zamanında çözüm', null, '%', 'söz verilen sürede çözülen', true),
+      escalationRatePct: ratio('escalationRatePct', 'Eskalasyon oranı', safePct(row.escalated, n), 'üst kademeye çıkan ÷ çözülen'),
+      transferRatePct: ratio('transferRatePct', 'Devir oranı', safePct(row.transferred, n), 'en az bir kez devredilen ÷ çözülen'),
+      openWip: m('openWip', 'Elindeki açık iş', row.openWip, 'vaka', 'şu an açık durumda taşıdığı'),
+    },
+  };
+}
+
+function medianOf(values) {
+  const a = values.filter((v) => v != null).sort((x, y) => x - y);
+  if (a.length === 0) return null;
+  const mid = Math.floor(a.length / 2);
+  return a.length % 2 ? a[mid] : Math.round(((a[mid - 1] + a[mid]) / 2) * 10) / 10;
+}
+
+/**
+ * Performans Panosu FAZ 1a — kişi bazlı performans + ekip benchmark (bağlam).
+ * teamBenchmark = kişiler arası ortanca; UI "ekip ortancasına göre" çipleri
+ * bundan türetir (tek kaynak backend). computeOperationsOverview ile aynı
+ * scope/filters/buildWhereSql zincirini kullanır.
+ */
+export async function computePeoplePerformanceOverview({ scope, filters }) {
+  const t0 = Date.now();
+  const meta = {
+    formulaVersion: FORMULA_VERSION,
+    minSampleAgent: MIN_SAMPLE.agentPerformance,
+    unitNote: 'birim ve hesap her metrikte gömülü (value/unit/formula) — UI uydurmaz',
+  };
+  if (scope.companyIds.length === 0) {
+    return { people: [], teamBenchmark: {}, meta: { ...meta, durationMs: Date.now() - t0 } };
+  }
+  const from = new Date(filters.from);
+  const to = new Date(filters.to);
+  const baseWhere = buildWhereSql(scope, filters);
+  const rows = await queryByPerson(scope, filters, from, to, baseWhere);
+  const people = rows.map(shapePersonMetrics);
+  const teamBenchmark = {
+    resolved: medianOf(people.map((p) => p.metrics.resolved.value)),
+    medianHours: medianOf(people.map((p) => p.metrics.medianHours.value)),
+    reopenRatePct: medianOf(people.map((p) => p.metrics.reopenRatePct.value)),
+    slaCompliancePct: medianOf(people.map((p) => p.metrics.slaCompliancePct.value)),
+    openWip: medianOf(people.map((p) => p.metrics.openWip.value)),
+  };
+  return { people, teamBenchmark, meta: { ...meta, durationMs: Date.now() - t0 } };
 }
 
 async function queryByCategory(scope, filters, from, to, baseWhere) {

@@ -1465,7 +1465,8 @@ async function autoPopulateIfEmpty(companyId) {
   if (existing > 0) return 0;
 
   const [caseCount, slaCount, checklistCount, categoryCount] = await Promise.all([
-    prisma.case.count({ where: { companyId } }),
+    // Review fix — arşivli vakalar bu sayaca dahil olmamalı.
+    prisma.case.count({ where: { companyId, isArchived: false } }),
     prisma.sLAPolicy.count({ where: { companyId } }),
     prisma.checklistTemplate.count({ where: { companyId } }),
     prisma.categoryDef.count({
@@ -1523,7 +1524,8 @@ async function autoPopulateIfEmpty(companyId) {
  */
 async function refreshSystemCounts(companyId) {
   const [caseCount, slaCount, checklistCount, categoryCount] = await Promise.all([
-    prisma.case.count({ where: { companyId } }),
+    // Review fix — arşivli vakalar bu sayaca dahil olmamalı.
+    prisma.case.count({ where: { companyId, isArchived: false } }),
     prisma.sLAPolicy.count({ where: { companyId } }),
     prisma.checklistTemplate.count({ where: { companyId } }),
     prisma.categoryDef.count({

@@ -3,7 +3,8 @@ import crypto from 'node:crypto';
 import { prisma } from '../db/client.js';
 import { checkAccountInScope } from '../analytics/accountScopeGuard.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
-import { computeOperationsOverview } from '../analytics/operationsAggregator.js';
+import { computeOperationsOverview, computePeoplePerformanceOverview } from '../analytics/operationsAggregator.js';
+import { computePersonDetail } from '../analytics/personDetailAggregator.js';
 import { computeMonthlyBulletin } from '../analytics/bulletinAggregator.js';
 import { enrichPatternAlert } from '../lib/patternInsight.js';
 import { generatePatternHypothesis } from '../lib/patternHypothesisAi.js';
@@ -826,6 +827,83 @@ router.post('/cases/overview', requireOverviewAnalytics, async (req, res) => {
       error: 'internal',
       message: err?.message ?? 'Operasyon ozeti hesaplanamadi',
     });
+  }
+});
+
+/**
+ * POST /api/analytics/people-performance — Performans Panosu FAZ 1a.
+ * Kişi bazlı performans (yöneticinin dilinde metrikler + birim/hesap gömülü)
+ * + ekip benchmark (bağlam). Supervisor+ (requireOverviewAnalytics ile aynı
+ * rol kapısı; kişi-kendi görünümü FAZ 1b). from/to overview ile aynı
+ * validation + scope zinciri — body scope'u genişletemez.
+ */
+router.post('/people-performance', requireSupervisorAnalytics, async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    const validation = validateOverviewBody(body);
+    if (validation.error) {
+      return res.status(400).json({ error: 'invalid_input', message: validation.error });
+    }
+    const { from, to } = validation;
+    const scope = deriveAnalyticsScope(req.user, body);
+    // Codex #453 P2 — dashboard slice filtreleri iletilir (yoksa kişi kartları
+    // filtreli panonun geri kalanıyla çelişir). statuses BİLİNÇLİ hariç: kişi
+    // metrikleri çözülen-bazlı + WIP kendi açık-durum mantığını taşır; status
+    // filtresi ikisini de yanlış kısıtlar.
+    const filters = {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      productGroups: sanitizeStringArray(body.productGroups),
+      caseTypes: sanitizeStringArray(body.caseTypes),
+    };
+    const payload = await computePeoplePerformanceOverview({ scope, filters });
+    res.json({
+      ...payload,
+      scope: {
+        kind: scope.scopeKind,
+        companyIds: scope.companyIds,
+        teamIds: scope.teamIds,
+        personIds: scope.personIds,
+        narrative: describeScope(scope),
+      },
+    });
+  } catch (err) {
+    console.error('[analytics:people-performance]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Performans verisi hesaplanamadı' });
+  }
+});
+
+/**
+ * POST /api/analytics/person-detail — Performans Panosu FAZ 2a.
+ * Kişi uzmanlık profili drill-down: uzmanlık parmak izi + en çok karşılaştığı
+ * sorunlar + ürün + en uzun işler + çözüm imzası + günlük süre trendi.
+ * Supervisor+. Tüm sorgular scope.companyIds ile scoped — scope dışı personId
+ * verilse aggregator boş döner (cross-company sızıntı yok). PII: başlık dışında
+ * müşteri PII'si payload'a girmez.
+ */
+router.post('/person-detail', requireSupervisorAnalytics, async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    if (typeof body.personId !== 'string' || !body.personId) {
+      return res.status(400).json({ error: 'invalid_input', message: 'personId gerekli.' });
+    }
+    const validation = validateOverviewBody(body);
+    if (validation.error) {
+      return res.status(400).json({ error: 'invalid_input', message: validation.error });
+    }
+    const { from, to } = validation;
+    const scope = deriveAnalyticsScope(req.user, body);
+    const payload = await computePersonDetail({
+      personId: body.personId,
+      allowedCompanyIds: scope.companyIds,
+      teamIds: scope.teamIds, // Codex #455 P2 — daraltılmış takım kapsamını onore et
+      from: from.toISOString(),
+      to: to.toISOString(),
+    });
+    res.json(payload);
+  } catch (err) {
+    console.error('[analytics:person-detail]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Kişi profili hesaplanamadı' });
   }
 });
 
