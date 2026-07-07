@@ -20,6 +20,7 @@ import {
   type PersonMetric,
   type PersonPerformance,
 } from '@/services/analyticsService';
+import { PersonProfileView } from './PersonProfileView';
 
 const DAY = 86400000;
 const isoDate = (d: Date) => d.toISOString().slice(0, 10);
@@ -120,20 +121,21 @@ function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
 }
 
-function PersonCard({ p, bench }: { p: PersonPerformance; bench: PeoplePerformanceResponse['teamBenchmark'] }) {
+function PersonCard({ p, bench, onOpen }: { p: PersonPerformance; bench: PeoplePerformanceResponse['teamBenchmark']; onOpen: () => void }) {
   const m = p.metrics;
   return (
     <Card>
       <CardBody className="!p-0">
-        <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-3 dark:border-ndark-border">
+        <button type="button" onClick={onOpen} className="flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3 text-left hover:bg-slate-50 dark:border-ndark-border dark:hover:bg-ndark-card">
+          <span className="sr-only">{p.name} profilini aç</span>
           <div className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-gradient-to-br from-brand-600 to-brand-700 text-sm font-bold text-white">
             {initials(p.name)}
           </div>
-          <div className="min-w-0">
-            <h3 className="truncate text-sm font-semibold text-slate-900 dark:text-ndark-text">{p.name}</h3>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold text-slate-900 dark:text-ndark-text">{p.name}</span>
             <span className="text-[11px] text-slate-500 dark:text-ndark-muted">{p.sampleSize} vaka çözdü · bu dönem</span>
-          </div>
-        </div>
+          </span>
+        </button>
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-3">
           <MetricCell metric={m.resolved} chip={contextChip(m.resolved.value, bench.resolved, false)} />
           <MetricCell metric={m.medianHours} chip={contextChip(m.medianHours.value, bench.medianHours, true)} />
@@ -171,12 +173,13 @@ function TeamSummary({ data }: { data: PeoplePerformanceResponse }) {
   );
 }
 
-export function PeoplePerformancePage() {
+export function PeoplePerformancePage({ onSelectCase }: { onSelectCase?: (id: string) => void }) {
   const [dateFrom, setDateFrom] = useState(() => isoDate(new Date(Date.now() - 30 * DAY)));
   const [dateTo, setDateTo] = useState(() => isoDate(new Date()));
   const [data, setData] = useState<PeoplePerformanceResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<{ id: string; name: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -190,6 +193,20 @@ export function PeoplePerformancePage() {
   useEffect(() => { void load(); }, [load]);
 
   const people = useMemo(() => data?.people ?? [], [data]);
+
+  // Kişi kartına tıklanınca uzmanlık profili (drill-down) açılır.
+  if (selected) {
+    return (
+      <PersonProfileView
+        personId={selected.id}
+        personName={selected.name}
+        from={rangeStartIso(dateFrom)}
+        to={rangeEndIso(dateTo)}
+        onBack={() => setSelected(null)}
+        onSelectCase={onSelectCase}
+      />
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -243,7 +260,7 @@ export function PeoplePerformancePage() {
               Kişi koçluk kartları — ekip ortancasına göre
             </p>
             <div className="grid gap-4 md:grid-cols-2">
-              {people.map((p) => <PersonCard key={p.id} p={p} bench={data!.teamBenchmark} />)}
+              {people.map((p) => <PersonCard key={p.id} p={p} bench={data!.teamBenchmark} onOpen={() => setSelected({ id: p.id, name: p.name })} />)}
             </div>
           </div>
         </>
