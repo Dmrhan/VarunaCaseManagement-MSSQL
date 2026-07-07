@@ -48,6 +48,8 @@ ok('2.7 CaseActivity sinyalleri arşivli vakayı hariç tutar (Codex #457 R2 —
   && /EXISTS \(SELECT 1 FROM \[Case\] c WHERE c\.\[id\]=t\.\[caseId\] AND c\.\[isArchived\] = 0\)/.test(agg));
 ok('2.8 devir tenant filtresi CaseTransfer\'a doğrudan (Codex #457 R3 — companyId,transferredAt index)',
   /t\.\[fromPersonId\] = \$\{trPIdx\} AND t\.\[companyId\] IN \(\$\{trCC\}\)/.test(agg));
+ok('2.9 idle vaka en az 7 gündür var olmalı — taze/aktivitesiz vaka watch\'ı şişirmez (Codex #457 R3)',
+  /c\.\[createdAt\] <= \$\{idleSIdx\}/.test(agg));
 
 console.log('── UI (PersonProfileView) ──');
 ok('3.1 EngagementSection + verdict banner (4 durum) + anti-toksik caption',

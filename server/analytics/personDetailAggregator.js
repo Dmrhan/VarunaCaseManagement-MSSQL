@@ -313,11 +313,15 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
   idleParams.push(personId); const idlePIdx = `@P${idleParams.length}`;
   idleParams.push(staleCutoff); const idleSIdx = `@P${idleParams.length}`;
   const idleTC = teamClause(idleParams, teamIds, 'c.[assignedTeamId]');
+  // Codex #457 R3: vaka EN AZ 7 gündür var olmalı — aktivite kaydı olmayan
+  // (seed/import/direct-DB) taze vaka NOT EXISTS ile yanlışlıkla "idle" sayılıp
+  // hassas "watch" verdict'ini şişirmesin. createdAt <= staleCutoff kapısı.
   const idle = await prisma.$queryRawUnsafe(
     `SELECT COUNT(*) AS c FROM [Case] c
      WHERE c.[companyId] IN (${idleCC}) AND c.[assignedPersonId] = ${idlePIdx}
        AND c.[isArchived]=0 AND c.[status] IN (${OPEN_LIST})
        AND c.[status] <> 'ThirdPartyWaiting' AND c.[pendingCustomerReply] = 0
+       AND c.[createdAt] <= ${idleSIdx}
        AND (c.[snoozeUntil] IS NULL OR c.[snoozeUntil] <= ${idleSIdx})
        AND NOT EXISTS (SELECT 1 FROM [CaseActivity] a WHERE a.[caseId]=c.[id] AND a.[at] > ${idleSIdx})${idleTC}`,
     ...idleParams);
