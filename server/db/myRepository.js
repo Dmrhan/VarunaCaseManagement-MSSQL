@@ -464,7 +464,12 @@ export async function getDashboard({ user }) {
   }
 
   const companyScope = { companyId: { in: allowedCompanyIds } };
-  const personScope = personId ? { ...companyScope, assignedPersonId: personId } : null;
+  // Review fix — arşivli vakalar hiçbir Ana Sayfa kartına/sayacına dahil
+  // olmamalı (caseRepository.getStats()'taki scope ile aynı kural). SADECE
+  // Case modeli sorgularında kullanılır — CaseReminder/CaseCallLog/
+  // PatternAlert'te isArchived alanı yok, onlar plain companyScope kullanır.
+  const caseScope = { ...companyScope, isArchived: false };
+  const personScope = personId ? { ...caseScope, assignedPersonId: personId } : null;
 
   // Paralel sorgu seti — single round-trip esprisi (15 paralel query).
   const [
@@ -548,10 +553,13 @@ export async function getDashboard({ user }) {
       : Promise.resolve(0),
     personScope
       ? prisma.caseCallLog.findMany({
+          // NOT: companyScope burada spread edilemez — CaseCallLog'da
+          // isArchived alanı yok (Case'e özgü). Arşiv dışlama, ilişkili
+          // case üzerinden uygulanır.
           where: {
-            ...companyScope,
+            companyId: { in: allowedCompanyIds },
             nextFollowupDate: { gte: today0, lte: today23 },
-            case: { assignedPersonId: personId },
+            case: { assignedPersonId: personId, isArchived: false },
           },
           select: { id: true },
           take: 100,
@@ -631,7 +639,7 @@ export async function getDashboard({ user }) {
     // her sütunu bağımsız ortalardı (farklı semantik).
     prisma.case.aggregate({
       where: {
-        ...companyScope,
+        ...caseScope,
         qaScoredAt: { gte: day30Ago },
         AND: [
           { qaEmpathyScore: { not: null } },
@@ -649,7 +657,7 @@ export async function getDashboard({ user }) {
 
     // dailySummary
     prisma.case.count({
-      where: { ...companyScope, createdAt: { gte: today0, lte: today23 } },
+      where: { ...caseScope, createdAt: { gte: today0, lte: today23 } },
     }),
     personScope
       ? prisma.case.findMany({
