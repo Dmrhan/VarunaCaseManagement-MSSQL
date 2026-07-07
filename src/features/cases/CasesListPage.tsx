@@ -414,6 +414,30 @@ export function CasesListPage({
     // aynı anda tazelensin diye bu tetikleyiciyi paylaşıyor.
   }, [caseStats, poolVisiblePersonal, myTeamId, sameLevelTeamIds]);
 
+  // Supervisor "Bana Atananlar" kartı — team-mode stats response'unda
+  // assignedToMe alanı yok (o sadece personal mode'da var), bu yüzden
+  // poolCount ile aynı teknik: mevcut liste endpoint'i limit=1 ile çağrılıp
+  // gerçek '@odata.count' okunuyor. caseStats'a bağımlı olduğu için
+  // refreshStats() her çağrıldığında (Üstlen/Kaydet/Yenile sonrası) diğer
+  // KPI'larla birlikte anlık tazelenir.
+  const [mySupervisorAssignedCount, setMySupervisorAssignedCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadMySupervisorAssignedCount() {
+      if (caseStats?.mode === 'team' && user?.personId) {
+        const { total } = await caseService.list(
+          { personId: user.personId, statuses: OPEN_STATUSES },
+          { page: 1, pageSize: 1 },
+        );
+        if (!cancelled) setMySupervisorAssignedCount(total);
+      } else {
+        setMySupervisorAssignedCount(null);
+      }
+    }
+    void loadMySupervisorAssignedCount();
+    return () => { cancelled = true; };
+  }, [caseStats, user?.personId]);
+
   // targetPage: undefined = mevcut page state'i kullan; sayı = o sayfayı yükle.
   const load = async (targetPage?: number, queueFilter?: QuickQueueFilter) => {
     const p = targetPage ?? page;
@@ -942,8 +966,8 @@ export function CasesListPage({
           setInboxTab('open');
           setQuickFilter(null);
         }),
-        tile('team.escalation', 'Eskale Edildi', s.teamEscalation, 'amber', <AlertCircle size={16} />, () => {
-          setFilters({ ...initialFilters, teamScope: true, statuses: ['Eskalasyon'] });
+        tile('team.assignedToMe', 'Bana Atananlar', mySupervisorAssignedCount ?? 0, 'blue', <User size={16} />, () => {
+          setFilters({ ...initialFilters, personId: user?.personId ?? undefined });
           setQuickQueueFilter('all');
           setInboxTab('open');
           setQuickFilter(null);
