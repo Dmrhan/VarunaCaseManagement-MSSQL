@@ -87,7 +87,8 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
       : Promise.resolve([]),
 
     // 2) Snooze — assignedPersonId = me.personId. personId yoksa skip.
-    //    Kapalı/iptal vakalarda snooze hedefi yok; gizle.
+    //    Kapalı/iptal vakalarda snooze hedefi yok; gizle. Arşivli de aynı
+    //    şekilde gizli — arşivlenmiş vaka hiçbir yerde görünmemeli.
     want('snooze') && personId
       ? prisma.case.findMany({
           where: {
@@ -95,6 +96,7 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
             assignedPersonId: personId,
             snoozeUntil: { not: null, ...dateRange },
             status: { notIn: CLOSED_CASE_STATUSES },
+            isArchived: false,
           },
           select: {
             id: true,
@@ -119,6 +121,7 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
             slaResponseDueAt: { not: null, ...dateRange },
             slaViolation: false,
             status: { notIn: CLOSED_CASE_STATUSES },
+            isArchived: false,
           },
           select: {
             id: true,
@@ -142,6 +145,7 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
             slaResolutionDueAt: { not: null, ...dateRange },
             slaViolation: false,
             status: { notIn: CLOSED_CASE_STATUSES },
+            isArchived: false,
           },
           select: {
             id: true,
@@ -164,7 +168,7 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
           where: {
             ...companyScope,
             nextFollowupDate: { not: null, ...dateRange },
-            case: { assignedPersonId: personId, status: { notIn: CLOSED_CASE_STATUSES } },
+            case: { assignedPersonId: personId, status: { notIn: CLOSED_CASE_STATUSES }, isArchived: false },
           },
           include: {
             case: { select: { id: true, caseNumber: true, accountName: true, priority: true } },
