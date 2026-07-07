@@ -37,10 +37,15 @@ ok('2.4 dokunulmayan iş beklemeleri HARİÇ (müşteri/3.taraf/erteleme)',
 ok('2.5 PII-free — customerContact/customerCompany/exampleTitles payload\'a girmez',
   !/exampleTitles/.test(agg) && !/customerContact/.test(agg) && !/customerCompanyName/.test(agg));
 ok('2.6 team scope engagement sinyallerine de uygulanır (Codex #457 P2 — çapraz-takım sızıntısı yok)',
-  /function teamClause/.test(agg) && /const teamJoin = hasTeam\(teamIds\)/.test(agg)
+  /function teamClause/.test(agg)
   && /teamClause\(p, teamIds, 'cs\.\[assignedTeamId\]'\)/.test(agg)
   && /teamClause\(idleParams, teamIds, 'c\.\[assignedTeamId\]'\)/.test(agg)
-  && /teamClause\(trParams, teamIds, 'c\.\[assignedTeamId\]'\)/.test(agg));
+  // devir kaynak-takımıyla (t.[fromTeamId]), güncel assignment ile DEĞİL (Codex #457 R2)
+  && /teamClause\(trParams, teamIds, 't\.\[fromTeamId\]'\)/.test(agg));
+ok('2.7 CaseActivity sinyalleri arşivli vakayı hariç tutar (Codex #457 R2 — Case join + isArchived=0)',
+  /const caseJoin = 'JOIN \[Case\] cs ON cs\.\[id\] = ca\.\[caseId\]'/.test(agg)
+  && (agg.match(/cs\.\[isArchived\] = 0/g) || []).length >= 3
+  && /EXISTS \(SELECT 1 FROM \[Case\] c WHERE c\.\[id\]=t\.\[caseId\][\s\S]{0,60}c\.\[isArchived\] = 0\)/.test(agg));
 
 console.log('── UI (PersonProfileView) ──');
 ok('3.1 EngagementSection + verdict banner (4 durum) + anti-toksik caption',

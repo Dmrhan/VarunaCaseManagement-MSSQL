@@ -223,7 +223,6 @@ function teamClause(params, teamIds, aliasCol) {
   const list = teamIds.map((t) => { params.push(t); return `@P${params.length}`; }).join(', ');
   return ` AND ${aliasCol} IN (${list})`;
 }
-const hasTeam = (teamIds) => Array.isArray(teamIds) && teamIds.length > 0;
 
 export async function computePersonEngagement({ personId, allowedCompanyIds, teamIds, from, to, asOf }) {
   const t0 = Date.now();
@@ -243,9 +242,10 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
   const s = scopeParts(companyIds, teamIds, personId, fromD, toD); // resolved-in-period (kişi)
   const tb = teamScopeParts(companyIds, teamIds, fromD, toD);      // resolved-in-period (ekip)
 
-  // Team scope varsa CaseActivity sinyalleri de aynı takıma kısıtlanır: Case'e
-  // join + assignedTeamId IN (...). (Codex #457 P2 — resolved/hard-share ile parite.)
-  const teamJoin = hasTeam(teamIds) ? 'JOIN [Case] cs ON cs.[id] = ca.[caseId]' : '';
+  // CaseActivity sinyalleri Case'e HER ZAMAN join olur: (1) arşivli vaka aktivitesi
+  // sayılmasın — cs.[isArchived]=0 (Codex #457 P2, dosyanın geri kalanıyla parite);
+  // (2) team scope varsa aynı takıma kısıtla — assignedTeamId IN (resolved/hard-share ile parite).
+  const caseJoin = 'JOIN [Case] cs ON cs.[id] = ca.[caseId]';
 
   // 1) Aktif dokunuş/gün — CaseActivity (actorUserId=kişi) / aktif gün
   let activityPerDay = null, teamActivityPerDay = null;
@@ -258,8 +258,8 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
     const tc = teamClause(p, teamIds, 'cs.[assignedTeamId]');
     const a = await prisma.$queryRawUnsafe(
       `SELECT COUNT(*) AS c, COUNT(DISTINCT CAST(ca.[at] AS date)) AS d
-       FROM [CaseActivity] ca ${teamJoin}
-       WHERE ca.[actorUserId] = ${uidIdx} AND ca.[companyId] IN (${cList})
+       FROM [CaseActivity] ca ${caseJoin}
+       WHERE ca.[actorUserId] = ${uidIdx} AND ca.[companyId] IN (${cList}) AND cs.[isArchived] = 0
          AND ca.[at] >= ${fIdx} AND ca.[at] < ${tIdx}${tc}`,
       ...p);
     const c = Number(a[0].c), d = Number(a[0].d);
@@ -272,8 +272,8 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
     const team = await prisma.$queryRawUnsafe(
       `SELECT AVG(perday) AS avg FROM (
          SELECT ca.[actorUserId], CAST(COUNT(*) AS float)/NULLIF(COUNT(DISTINCT CAST(ca.[at] AS date)),0) AS perday
-         FROM [CaseActivity] ca JOIN [User] u ON u.[id]=ca.[actorUserId] ${teamJoin}
-         WHERE u.[personId] IS NOT NULL AND ca.[companyId] IN (${tcList})
+         FROM [CaseActivity] ca JOIN [User] u ON u.[id]=ca.[actorUserId] ${caseJoin}
+         WHERE u.[personId] IS NOT NULL AND ca.[companyId] IN (${tcList}) AND cs.[isArchived] = 0
            AND ca.[at] >= ${tfIdx} AND ca.[at] < ${ttIdx}${ttc}
          GROUP BY ca.[actorUserId]) x`,
       ...tp);
@@ -289,8 +289,8 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
     p.push(toD); const tIdx = `@P${p.length}`;
     const tc = teamClause(p, teamIds, 'cs.[assignedTeamId]');
     const r = await prisma.$queryRawUnsafe(
-      `SELECT COUNT(*) AS c FROM [CaseActivity] ca ${teamJoin}
-       WHERE ca.[actorUserId] = ${uidIdx} AND ca.[companyId] IN (${cList})
+      `SELECT COUNT(*) AS c FROM [CaseActivity] ca ${caseJoin}
+       WHERE ca.[actorUserId] = ${uidIdx} AND ca.[companyId] IN (${cList}) AND cs.[isArchived] = 0
          AND ca.[action] LIKE N'%üstlenildi%' AND ca.[at] >= ${fIdx} AND ca.[at] < ${tIdx}${tc}`,
       ...p);
     claims = Number(r[0].c);
@@ -300,8 +300,8 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
     const ttc = teamClause(tp, teamIds, 'cs.[assignedTeamId]');
     const team = await prisma.$queryRawUnsafe(
       `SELECT AVG(CAST(c AS float)) AS avg FROM (
-         SELECT ca.[actorUserId], COUNT(*) AS c FROM [CaseActivity] ca JOIN [User] u ON u.[id]=ca.[actorUserId] ${teamJoin}
-         WHERE u.[personId] IS NOT NULL AND ca.[companyId] IN (${tcList}) AND ca.[action] LIKE N'%üstlenildi%'
+         SELECT ca.[actorUserId], COUNT(*) AS c FROM [CaseActivity] ca JOIN [User] u ON u.[id]=ca.[actorUserId] ${caseJoin}
+         WHERE u.[personId] IS NOT NULL AND ca.[companyId] IN (${tcList}) AND cs.[isArchived] = 0 AND ca.[action] LIKE N'%üstlenildi%'
            AND ca.[at] >= ${tfIdx} AND ca.[at] < ${ttIdx}${ttc}
          GROUP BY ca.[actorUserId]) x`,
       ...tp);
@@ -335,16 +335,20 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
   const resolved = Number(hard[0].total);
 
   // 5) Hızlı devretme — kişinin devir-çıkışı / (çözülen + devir)
+  // Codex #457 P2: team scope DEVİR-ANINDAKİ kaynak takıma göre (t.[fromTeamId]),
+  // case'in güncel assignedTeamId'sine göre DEĞİL — yoksa L2→L3 devri L2 profilinde
+  // eksik sayılır (tam ölçmek istediğimiz "sıcak patates" kaçar). EXISTS Case
+  // arşivli hariç (resolved denominator'ı ile parite).
   const trParams = [...companyIds]; const trCC = companyIds.map((_, i) => `@P${i + 1}`).join(', ');
   trParams.push(personId); const trPIdx = `@P${trParams.length}`;
   trParams.push(fromD); const trFIdx = `@P${trParams.length}`;
   trParams.push(toD); const trTIdx = `@P${trParams.length}`;
-  const trTC = teamClause(trParams, teamIds, 'c.[assignedTeamId]');
+  const trTC = teamClause(trParams, teamIds, 't.[fromTeamId]');
   const tr = await prisma.$queryRawUnsafe(
     `SELECT COUNT(*) AS c FROM [CaseTransfer] t
      WHERE t.[fromPersonId] = ${trPIdx}
-       AND t.[transferredAt] >= ${trFIdx} AND t.[transferredAt] < ${trTIdx}
-       AND EXISTS (SELECT 1 FROM [Case] c WHERE c.[id]=t.[caseId] AND c.[companyId] IN (${trCC})${trTC})`,
+       AND t.[transferredAt] >= ${trFIdx} AND t.[transferredAt] < ${trTIdx}${trTC}
+       AND EXISTS (SELECT 1 FROM [Case] c WHERE c.[id]=t.[caseId] AND c.[companyId] IN (${trCC}) AND c.[isArchived] = 0)`,
     ...trParams);
   const transferOut = Number(tr[0].c);
   const transferOutPct = (resolved + transferOut) > 0 ? Math.round((transferOut / (resolved + transferOut)) * 100) : null;
