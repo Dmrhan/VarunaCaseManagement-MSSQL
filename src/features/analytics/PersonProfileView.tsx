@@ -20,44 +20,88 @@ function formatDuration(hours: number): string {
   return `${hours} saat`;
 }
 
-// Günlük çözüm-süresi trendi — SVG (7g yürüyen median çizgi + günlük hacim çubuk).
+// Süre etiketi — saat/gün (yöneticinin dili).
+function fmtHoursShort(h: number): string {
+  if (h >= 48) return `${Math.round(h / 24)} gün`;
+  return `${Math.round(h * 10) / 10} sa`;
+}
+
+// Günlük çözüm-süresi trendi. SVG SADECE grafik çizer (çizgi/alan/çubuk) —
+// tüm metin/eksen/legend HTML (app fontu, ölçeklenmez). preserveAspectRatio="none"
+// + non-scaling-stroke ile çizgi her genişlikte keskin. Y-ölçeği medyan aralığına
+// göre (dibe yapışmaz); endpoint noktası + değeri HTML overlay.
 function TrendChart({ data }: { data: PersonDetailResponse['dailyTrend'] }) {
   const pts = data.filter((d) => d.rollingMedianHours != null);
   if (pts.length < 2) {
-    return <p className="py-6 text-center text-xs text-slate-400 dark:text-ndark-dim">Trend için yeterli gün yok.</p>;
+    return <p className="py-8 text-center text-xs text-slate-400 dark:text-ndark-dim">Trend için yeterli gün yok.</p>;
   }
-  const W = 720, H = 150, padL = 36, padR = 12, padT = 10, padB = 22;
-  const plotW = W - padL - padR, plotH = H - padT - padB;
-  const maxDur = Math.max(...pts.map((d) => d.rollingMedianHours ?? 0), 1);
-  const maxVol = Math.max(...data.map((d) => d.resolvedCount), 1);
-  const x = (i: number) => padL + plotW * (i / (pts.length - 1));
-  const y = (v: number) => padT + plotH * (1 - v / maxDur);
-  const line = pts.map((d, i) => `${i ? 'L' : 'M'} ${x(i).toFixed(1)} ${y(d.rollingMedianHours ?? 0).toFixed(1)}`).join(' ');
-  const area = `${line} L ${x(pts.length - 1).toFixed(1)} ${padT + plotH} L ${padL} ${padT + plotH} Z`;
+  const meds = pts.map((d) => d.rollingMedianHours as number);
+  const maxVol = Math.max(...pts.map((d) => d.resolvedCount), 1);
+  const loRaw = Math.min(...meds), hiRaw = Math.max(...meds);
+  // Y aralığı: medyan varyasyonunu görünür kıl (düz veriyi bile ortalar), %30 pad.
+  const span = Math.max(hiRaw - loRaw, hiRaw * 0.25, 0.1);
+  const lo = Math.max(0, loRaw - span * 0.3);
+  const hi = hiRaw + span * 0.3;
+  const nx = (i: number) => (i / (pts.length - 1)) * 100;
+  const ny = (v: number) => (1 - (v - lo) / (hi - lo || 1)) * 100;
+  const linePts = pts.map((d, i) => `${nx(i).toFixed(2)},${ny(d.rollingMedianHours as number).toFixed(2)}`).join(' ');
   const last = pts[pts.length - 1];
+  const lastX = nx(pts.length - 1), lastY = ny(last.rollingMedianHours as number);
+  const mid = (hi + lo) / 2;
+
   return (
-    <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 480, display: 'block' }} role="img" aria-label="Günlük çözüm süresi trendi">
-        <defs>
-          <linearGradient id="pp-trend" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#7c3aed" stopOpacity="0.18" />
-            <stop offset="100%" stopColor="#7c3aed" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        {[0, 0.5, 1].map((g) => (
-          <line key={g} x1={padL} y1={y(maxDur * g)} x2={W - padR} y2={y(maxDur * g)} stroke="#eef2f7" strokeWidth={1} />
-        ))}
-        {data.map((d, i) => {
-          const bh = (plotH * (d.resolvedCount / maxVol)) * 0.85;
-          const bx = padL + plotW * (i / Math.max(data.length - 1, 1));
-          return bh > 0 ? <rect key={i} x={bx - 3} y={padT + plotH - bh} width={6} height={bh} rx={2} fill="#bfdbfe" opacity={0.7} /> : null;
-        })}
-        <path d={area} fill="url(#pp-trend)" />
-        <path d={line} fill="none" stroke="#6d28d9" strokeWidth={2.2} strokeLinejoin="round" strokeLinecap="round" />
-        <circle cx={x(pts.length - 1)} cy={y(last.rollingMedianHours ?? 0)} r={4} fill="#6d28d9" stroke="#fff" strokeWidth={2} />
-        <text x={W - padR} y={H - 6} textAnchor="end" fontSize={10} fill="#94a3b8">bugün</text>
-        <text x={padL} y={H - 6} textAnchor="start" fontSize={10} fill="#94a3b8">{pts.length} gün önce</text>
-      </svg>
+    <div>
+      {/* Legend + endpoint değeri */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-4 text-[11px] text-slate-500 dark:text-ndark-muted">
+          <span className="inline-flex items-center gap-1.5"><span className="h-[3px] w-4 rounded-full bg-violet-600" /> Tipik süre (7g)</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2 rounded-sm bg-sky-300" /> Günlük çözülen</span>
+        </div>
+        <span className="inline-flex items-baseline gap-1 rounded-md bg-violet-50 px-2 py-1 text-[11px] font-medium text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
+          bugün <b className="tabular-nums">{fmtHoursShort(last.rollingMedianHours as number)}</b>
+        </span>
+      </div>
+
+      {/* Y-ekseni + çizim alanı */}
+      <div className="flex gap-2">
+        <div className="flex h-[150px] w-12 flex-none flex-col justify-between py-[2px] text-right text-[10px] tabular-nums text-slate-400 dark:text-ndark-dim">
+          <span>{fmtHoursShort(hi)}</span>
+          <span>{fmtHoursShort(mid)}</span>
+          <span>{fmtHoursShort(lo)}</span>
+        </div>
+        <div className="relative h-[150px] flex-1">
+          <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" className="overflow-visible" aria-label="Günlük çözüm süresi trendi">
+            <defs>
+              <linearGradient id="pp-trend" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#7c3aed" stopOpacity="0.16" />
+                <stop offset="100%" stopColor="#7c3aed" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            {/* yatay ızgara */}
+            {[0, 50, 100].map((gy) => (
+              <line key={gy} x1="0" y1={gy} x2="100" y2={gy} className="stroke-slate-100 dark:stroke-ndark-border" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+            ))}
+            {/* günlük hacim çubukları */}
+            {pts.map((d, i) => {
+              const bh = (d.resolvedCount / maxVol) * 72;
+              const bx = nx(i);
+              return bh > 0 ? <rect key={i} x={bx - 0.9} y={100 - bh} width={1.8} height={bh} fill="#bfdbfe" opacity={0.75} vectorEffect="non-scaling-stroke" /> : null;
+            })}
+            {/* alan + çizgi */}
+            <polygon points={`0,100 ${linePts} 100,100`} fill="url(#pp-trend)" />
+            <polyline points={linePts} fill="none" stroke="#6d28d9" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          </svg>
+          {/* endpoint noktası (HTML — ölçeklenmez, yuvarlak kalır) */}
+          <span className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-violet-700 shadow-sm dark:border-ndark-card"
+            style={{ left: `${lastX}%`, top: `${lastY}%` }} />
+        </div>
+      </div>
+
+      {/* X-ekseni */}
+      <div className="mt-1.5 flex justify-between pl-14 text-[10.5px] text-slate-400 dark:text-ndark-dim">
+        <span>{pts.length} gün önce</span>
+        <span>bugün</span>
+      </div>
     </div>
   );
 }
