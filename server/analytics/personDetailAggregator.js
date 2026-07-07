@@ -318,9 +318,11 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
   idleParams.push(personId); const idlePIdx = `@P${idleParams.length}`;
   idleParams.push(staleCutoff); const idleSIdx = `@P${idleParams.length}`;
   const idleTC = teamClause(idleParams, teamIds, 'c.[assignedTeamId]');
-  // Codex #457 R3: vaka EN AZ 7 gündür var olmalı — aktivite kaydı olmayan
-  // (seed/import/direct-DB) taze vaka NOT EXISTS ile yanlışlıkla "idle" sayılıp
-  // hassas "watch" verdict'ini şişirmesin. createdAt <= staleCutoff kapısı.
+  // Staleness çoklu "sayaç sıfırlayan" olaydan ölçülür — hepsi cutoff'tan eski olmalı:
+  //  · createdAt (Codex #457 R3: aktivitesiz seed/import taze vaka idle sayılmasın)
+  //  · lastEmailInboundAt (Codex #457 R5: müşteri BUGÜN yanıtlayınca appendInbound
+  //    CaseActivity YARATMAZ; top ajanda bugün düşen vaka "7+ gün idle" sayılmasın)
+  //  · son CaseActivity (NOT EXISTS)  — hepsi birlikte gerçek ihmali gösterir.
   const idle = await prisma.$queryRawUnsafe(
     `SELECT COUNT(*) AS c FROM [Case] c
      WHERE c.[companyId] IN (${idleCC}) AND c.[assignedPersonId] = ${idlePIdx}
@@ -329,6 +331,7 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
        AND NOT (c.[pendingCustomerReply] = 0 AND c.[lastEmailOutboundAt] IS NOT NULL)
        AND c.[createdAt] <= ${idleSIdx}
        AND (c.[snoozeUntil] IS NULL OR c.[snoozeUntil] <= ${idleSIdx})
+       AND (c.[lastEmailInboundAt] IS NULL OR c.[lastEmailInboundAt] <= ${idleSIdx})
        AND NOT EXISTS (SELECT 1 FROM [CaseActivity] a WHERE a.[caseId]=c.[id] AND a.[at] > ${idleSIdx})${idleTC}`,
     ...idleParams);
   const idleOwned = Number(idle[0].c);

@@ -54,6 +54,8 @@ ok('2.10 idle sinyali TERS DEĞİL — top-ajanda (pendingCustomerReply=1) dahil
   /NOT \(c\.\[pendingCustomerReply\] = 0 AND c\.\[lastEmailOutboundAt\] IS NOT NULL\)/.test(agg)
   // eski ters filtre (düz `pendingCustomerReply = 0`) kalmadı
   && !/\bAND c\.\[pendingCustomerReply\] = 0\b/.test(agg));
+ok('2.11 idle staleness inbound e-postadan da ölçülür — bugün gelen müşteri yanıtı idle şişirmez (Codex #457 R5)',
+  /c\.\[lastEmailInboundAt\] IS NULL OR c\.\[lastEmailInboundAt\] <= \$\{idleSIdx\}/.test(agg));
 
 console.log('── UI (PersonProfileView) ──');
 ok('3.1 EngagementSection + verdict banner (4 durum) + anti-toksik caption',
