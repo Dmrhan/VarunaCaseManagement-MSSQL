@@ -4,7 +4,7 @@ import { prisma } from '../db/client.js';
 import { checkAccountInScope } from '../analytics/accountScopeGuard.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { computeOperationsOverview, computePeoplePerformanceOverview } from '../analytics/operationsAggregator.js';
-import { computePersonDetail } from '../analytics/personDetailAggregator.js';
+import { computePersonDetail, computePersonEngagement } from '../analytics/personDetailAggregator.js';
 import { computeMonthlyBulletin } from '../analytics/bulletinAggregator.js';
 import { enrichPatternAlert } from '../lib/patternInsight.js';
 import { generatePatternHypothesis } from '../lib/patternHypothesisAi.js';
@@ -904,6 +904,38 @@ router.post('/person-detail', requireSupervisorAnalytics, async (req, res) => {
   } catch (err) {
     console.error('[analytics:person-detail]', err);
     res.status(500).json({ error: 'internal', message: err?.message ?? 'Kişi profili hesaplanamadı' });
+  }
+});
+
+/**
+ * POST /api/analytics/person-engagement — Performans Panosu FAZ 2c (HASSAS).
+ * Etkinlik & Katkı: gizlenme tespiti — 5 davranış sinyali (dokunuş/gün,
+ * üstlenme, dokunulmayan iş, zor iş payı, hızlı devir) + muhafazakâr verdict
+ * (tek skor DEĞİL). Supervisor+; scope.companyIds + teamIds ile korunuyor.
+ */
+router.post('/person-engagement', requireSupervisorAnalytics, async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    if (typeof body.personId !== 'string' || !body.personId) {
+      return res.status(400).json({ error: 'invalid_input', message: 'personId gerekli.' });
+    }
+    const validation = validateOverviewBody(body);
+    if (validation.error) {
+      return res.status(400).json({ error: 'invalid_input', message: validation.error });
+    }
+    const { from, to } = validation;
+    const scope = deriveAnalyticsScope(req.user, body);
+    const payload = await computePersonEngagement({
+      personId: body.personId,
+      allowedCompanyIds: scope.companyIds,
+      teamIds: scope.teamIds,
+      from: from.toISOString(),
+      to: to.toISOString(),
+    });
+    res.json(payload);
+  } catch (err) {
+    console.error('[analytics:person-engagement]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Etkinlik verisi hesaplanamadı' });
   }
 });
 

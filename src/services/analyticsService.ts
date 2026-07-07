@@ -394,7 +394,39 @@ export interface PersonDetailResponse {
   meta: { minSampleAgent?: number; durationMs: number };
 }
 
+// FAZ 2c — Etkinlik & Katkı (gizlenme tespiti). HASSAS.
+export interface EngagementSignal {
+  key: string;
+  label: string;
+  value: number | null;
+  teamValue: number | null;
+  unit: string;
+  tone: 'good' | 'warn' | 'flat';
+  hint: string;
+}
+export interface EngagementResponse {
+  signals: EngagementSignal[];
+  verdict: { read: 'active' | 'mixed' | 'watch' | 'inconclusive'; concerns: number; resolved: number; signalCount: number } | null;
+  meta: { minSampleAgent?: number; durationMs: number };
+}
+
 export const analyticsService = {
+  async personEngagement(
+    personId: string,
+    from: string,
+    to: string,
+  ): Promise<EngagementResponse | undefined> {
+    return apiFetch<EngagementResponse>(
+      '/api/analytics/person-engagement',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personId, from, to }),
+      },
+      'Etkinlik verisi yüklenemedi',
+    );
+  },
+
   async personDetail(
     personId: string,
     from: string,

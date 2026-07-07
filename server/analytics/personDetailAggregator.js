@@ -17,6 +17,9 @@
 import { prisma } from '../db/client.js';
 import { MIN_SAMPLE } from './metricFormulas.js';
 
+// Açık durum DB değerleri (FAZ 2c Etkinlik & Katkı — WIP/dokunulmayan iş için).
+const OPEN_STATUS_DB = ['Acik', 'Incelemede', 'ThirdPartyWaiting', 'Eskalasyon', 'YenidenAcildi'];
+
 // Kişi-scoped WHERE + params: company + (varsa) team + person + resolved period.
 // Dönüş: { where, params, companyList } — companyList ek sorgular için.
 function scopeParts(companyIds, teamIds, personId, from, to) {
@@ -193,6 +196,160 @@ async function queryPersonName(companyIds, teamIds, personId) {
   where += ` AND [assignedPersonId] = @P${params.length} AND [isArchived] = 0 AND [assignedPersonName] IS NOT NULL`;
   const rows = await prisma.$queryRawUnsafe(`SELECT TOP 1 [assignedPersonName] AS name FROM [Case] WHERE ${where};`, ...params);
   return rows[0]?.name ?? null;
+}
+
+// ===================================================================
+// FAZ 2c — Etkinlik & Katkı (gizlenme tespiti). HASSAS.
+// ===================================================================
+// "Gerçekten çalışıyor mu, gizlenmiş mi" sorusu TEK SKORA İNDİRGENMEZ
+// (oyunlanır + sessiz uzmanı haksız yakalar). 5 davranış sinyali BİRLİKTE +
+// sonuçla (çözülen iş) eşli. Gizlenme = birden çok sinyal birlikte düşük +
+// çözülmüş sonuç yok. "Dokunulmayan iş" müşteri/3.taraf/snooze beklemesini
+// HARİÇ tutar (top kişide değilse sayılmaz). Pozitif çerçeve: yük adil mi.
+const OPEN_LIST = OPEN_STATUS_DB.map((s) => `'${s}'`).join(', ');
+
+function companyClause(companyIds, alias = '') {
+  const col = alias ? `${alias}.[companyId]` : '[companyId]';
+  const list = companyIds.map((_, i) => `@P${i + 1}`).join(', ');
+  return `${col} IN (${list})`;
+}
+
+export async function computePersonEngagement({ personId, allowedCompanyIds, teamIds, from, to, asOf }) {
+  const t0 = Date.now();
+  const companyIds = Array.isArray(allowedCompanyIds) ? allowedCompanyIds : [];
+  if (companyIds.length === 0 || !personId) {
+    return { signals: [], verdict: null, meta: { durationMs: Date.now() - t0 } };
+  }
+  const fromD = new Date(from), toD = new Date(to);
+  const now = asOf instanceof Date ? asOf : new Date();
+  const staleCutoff = new Date(now.getTime() - 7 * 86400000);
+
+  // Kişinin User.id'si (aktivite/claim actorUserId ile eşleşir) — scope'lu.
+  const uRow = await prisma.$queryRawUnsafe(
+    `SELECT TOP 1 [id] AS uid FROM [User] WHERE [personId] = @P1`, personId);
+  const uid = uRow[0]?.uid ?? null;
+
+  const s = scopeParts(companyIds, teamIds, personId, fromD, toD); // resolved-in-period (kişi)
+  const tb = teamScopeParts(companyIds, teamIds, fromD, toD);      // resolved-in-period (ekip)
+
+  // 1) Aktif dokunuş/gün — CaseActivity (actorUserId=kişi) / aktif gün
+  let activityPerDay = null, teamActivityPerDay = null;
+  if (uid) {
+    const cc = await companyClause(companyIds);
+    const a = await prisma.$queryRawUnsafe(
+      `SELECT COUNT(*) AS c, COUNT(DISTINCT CAST([at] AS date)) AS d
+       FROM [CaseActivity] WHERE [actorUserId] = @P${companyIds.length + 1} AND ${cc}
+         AND [at] >= @P${companyIds.length + 2} AND [at] < @P${companyIds.length + 3}`,
+      ...companyIds, uid, fromD, toD);
+    const c = Number(a[0].c), d = Number(a[0].d);
+    activityPerDay = d > 0 ? Math.round((c / d) * 10) / 10 : 0;
+    // Ekip: kişi başına dokunuş/gün ortalaması
+    const team = await prisma.$queryRawUnsafe(
+      `SELECT AVG(perday) AS avg FROM (
+         SELECT ca.[actorUserId], CAST(COUNT(*) AS float)/NULLIF(COUNT(DISTINCT CAST(ca.[at] AS date)),0) AS perday
+         FROM [CaseActivity] ca JOIN [User] u ON u.[id]=ca.[actorUserId]
+         WHERE u.[personId] IS NOT NULL AND ${companyClause(companyIds, 'ca')}
+           AND ca.[at] >= @P${companyIds.length + 1} AND ca.[at] < @P${companyIds.length + 2}
+         GROUP BY ca.[actorUserId]) x`,
+      ...companyIds, fromD, toD);
+    teamActivityPerDay = team[0].avg == null ? null : Math.round(Number(team[0].avg) * 10) / 10;
+  }
+
+  // 2) Havuzdan üstlenme — kişinin "Vaka üstlenildi" aktivite sayısı
+  let claims = null, teamClaims = null;
+  if (uid) {
+    const cc = await companyClause(companyIds);
+    const r = await prisma.$queryRawUnsafe(
+      `SELECT COUNT(*) AS c FROM [CaseActivity] WHERE [actorUserId]=@P${companyIds.length + 1} AND ${cc}
+         AND [action] LIKE N'%üstlenildi%' AND [at] >= @P${companyIds.length + 2} AND [at] < @P${companyIds.length + 3}`,
+      ...companyIds, uid, fromD, toD);
+    claims = Number(r[0].c);
+    const team = await prisma.$queryRawUnsafe(
+      `SELECT AVG(CAST(c AS float)) AS avg FROM (
+         SELECT ca.[actorUserId], COUNT(*) AS c FROM [CaseActivity] ca JOIN [User] u ON u.[id]=ca.[actorUserId]
+         WHERE u.[personId] IS NOT NULL AND ${companyClause(companyIds, 'ca')} AND ca.[action] LIKE N'%üstlenildi%'
+           AND ca.[at] >= @P${companyIds.length + 1} AND ca.[at] < @P${companyIds.length + 2}
+         GROUP BY ca.[actorUserId]) x`,
+      ...companyIds, fromD, toD);
+    teamClaims = team[0].avg == null ? null : Math.round(Number(team[0].avg));
+  }
+
+  // 3) Dokunulmayan iş (top sende) — açık, 7g+ hareketsiz, BEKLEME HARİÇ
+  const idleParams = [...companyIds, personId, staleCutoff];
+  const idleCC = companyIds.map((_, i) => `@P${i + 1}`).join(', ');
+  const idle = await prisma.$queryRawUnsafe(
+    `SELECT COUNT(*) AS c FROM [Case] c
+     WHERE c.[companyId] IN (${idleCC}) AND c.[assignedPersonId] = @P${companyIds.length + 1}
+       AND c.[isArchived]=0 AND c.[status] IN (${OPEN_LIST})
+       AND c.[status] <> 'ThirdPartyWaiting' AND c.[pendingCustomerReply] = 0
+       AND (c.[snoozeUntil] IS NULL OR c.[snoozeUntil] <= @P${companyIds.length + 2})
+       AND NOT EXISTS (SELECT 1 FROM [CaseActivity] a WHERE a.[caseId]=c.[id] AND a.[at] > @P${companyIds.length + 2})`,
+    ...idleParams);
+  const idleOwned = Number(idle[0].c);
+
+  // 4) Zor iş payı — çözülenlerden eskalasyon/yüksek öncelik %
+  const hard = await prisma.$queryRawUnsafe(
+    `SELECT COUNT(*) AS total, SUM(CASE WHEN [escalationLevel] <> 'Yok' OR [priority] IN ('High','Critical') THEN 1 ELSE 0 END) AS hard
+     FROM [Case] WHERE ${s.where}`, ...s.params);
+  const hardTeam = await prisma.$queryRawUnsafe(
+    `SELECT COUNT(*) AS total, SUM(CASE WHEN [escalationLevel] <> 'Yok' OR [priority] IN ('High','Critical') THEN 1 ELSE 0 END) AS hard
+     FROM [Case] WHERE ${tb.where}`, ...tb.params);
+  const pct = (r) => Number(r.total) > 0 ? Math.round((Number(r.hard) / Number(r.total)) * 100) : null;
+  const hardSharePct = pct(hard[0]), teamHardSharePct = pct(hardTeam[0]);
+  const resolved = Number(hard[0].total);
+
+  // 5) Hızlı devretme — kişinin devir-çıkışı / (çözülen + devir)
+  const trParams = [...companyIds, personId, fromD, toD];
+  const trCC = companyIds.map((_, i) => `@P${i + 1}`).join(', ');
+  const tr = await prisma.$queryRawUnsafe(
+    `SELECT COUNT(*) AS c FROM [CaseTransfer] t
+     WHERE t.[fromPersonId] = @P${companyIds.length + 1}
+       AND t.[transferredAt] >= @P${companyIds.length + 2} AND t.[transferredAt] < @P${companyIds.length + 3}
+       AND EXISTS (SELECT 1 FROM [Case] c WHERE c.[id]=t.[caseId] AND c.[companyId] IN (${trCC}))`,
+    ...trParams);
+  const transferOut = Number(tr[0].c);
+  const transferOutPct = (resolved + transferOut) > 0 ? Math.round((transferOut / (resolved + transferOut)) * 100) : null;
+
+  // Sinyaller — her biri value + teamValue + TON (good/warn/flat). Ton, verdict'in
+  // hammaddesi; "warn" = endişe (concern). Absolut eşikli sinyaller (idle/transfer)
+  // ekip baseline'ı gerektirmez.
+  const toneHigherGood = (v, team) => {
+    if (v == null) return 'flat';
+    if (team == null) return 'flat';
+    if (v >= team * 0.85) return 'good';
+    if (v < team * 0.5) return 'warn';
+    return 'flat';
+  };
+  const signals = [
+    { key: 'activityPerDay', label: 'Aktif dokunuş / gün', value: activityPerDay, teamValue: teamActivityPerDay, unit: 'adet',
+      tone: toneHigherGood(activityPerDay, teamActivityPerDay), hint: 'not, yanıt, durum değişimi — işin görünür izi' },
+    { key: 'claims', label: 'Havuzdan üstlenme', value: claims, teamValue: teamClaims, unit: 'adet',
+      tone: claims == null || teamClaims == null ? 'flat' : (claims >= teamClaims * 0.7 ? 'good' : (claims < teamClaims * 0.3 ? 'warn' : 'flat')),
+      hint: 'kendi seçip aldığı iş — atanmayı bekleyen değil' },
+    { key: 'idleOwned', label: 'Dokunulmayan iş · top sende', value: idleOwned, teamValue: null, unit: 'vaka',
+      tone: idleOwned <= 2 ? 'good' : (idleOwned >= 5 ? 'warn' : 'flat'),
+      hint: '7+ gün hareketsiz kendi işi; müşteri/3.taraf/erteleme beklemesi HARİÇ' },
+    { key: 'hardSharePct', label: 'Zor iş payı', value: hardSharePct, teamValue: teamHardSharePct, unit: '%',
+      tone: hardSharePct == null || teamHardSharePct == null ? 'flat' : (hardSharePct >= teamHardSharePct ? 'good' : (hardSharePct < teamHardSharePct * 0.4 && resolved >= MIN_SAMPLE.agentPerformance ? 'warn' : 'flat')),
+      hint: 'eskalasyon/yüksek öncelik oranı — sadece kolay iş mi seçiyor' },
+    { key: 'transferOutPct', label: 'Hızlı devretme', value: transferOutPct, teamValue: null, unit: '%',
+      tone: transferOutPct == null ? 'flat' : (transferOutPct <= 15 ? 'good' : (transferOutPct >= 40 ? 'warn' : 'flat')),
+      hint: 'işi tutup çözüyor mu, sıcak-patates gibi başkasına mı atıyor' },
+  ];
+
+  // Verdict — CONCERN TETİKLİ, tek skor DEĞİL. Gizlenme = warn sinyalleri BİRLİKTE
+  // + düşük çözülmüş sonuç. Concern yoksa "aktif" (yük paylaşılıyor). Tek warn
+  // asla "kaytarıyor" demez.
+  const concerns = signals.filter((x) => x.tone === 'warn').length;
+  const lowOutput = resolved < MIN_SAMPLE.default;
+  let read;
+  if (concerns === 0 && resolved >= MIN_SAMPLE.default) read = 'active';
+  else if (lowOutput && concerns >= 2) read = 'watch';   // düşük sonuç + çoklu endişe → gizlenme sinyali
+  else if (concerns >= 3) read = 'watch';
+  else if (lowOutput && concerns === 0) read = 'inconclusive'; // az veri, endişe yok
+  else read = 'mixed';
+  const verdict = { read, concerns, resolved, signalCount: signals.length };
+  return { signals, verdict, meta: { minSampleAgent: MIN_SAMPLE.agentPerformance, durationMs: Date.now() - t0 } };
 }
 
 export async function computePersonDetail({ personId, allowedCompanyIds, teamIds, from, to }) {
