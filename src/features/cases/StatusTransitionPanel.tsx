@@ -28,6 +28,9 @@ import {
   type SmartTicketTaxonomyItem,
   type SuggestClosureResponse,
 } from '@/services/caseService';
+import { useAuth } from '@/services/AuthContext';
+import { CustomerMatchSuggestionsPanel } from './components/CustomerMatchSuggestionsPanel';
+import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
 import { aiService, aiErrorMessage } from '@/services/aiService';
 import { externalKbService } from '@/services/externalKbService';
 import {
@@ -162,6 +165,22 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   const [pending, setPending] = useState<CaseStatus | null>(initialPending ?? null);
   const [resolutionNote, setResolutionNote] = useState('');
   const [cancelReason, setCancelReason] = useState('');
+  // 2026-07-06 — Kapanış müşteri kapısı. Müşterisiz vaka Çözüldü'ye geçemez;
+  // SystemAdmin istisna (backend guard ile aynı kural). linkAccount DB'ye
+  // yazar → local linkedCustomer un-gate eder (item prop bu turda tazelenmez
+  // ama transitionStatus taze DB okur, guard geçer).
+  const { user } = useAuth();
+  const [linkedCustomer, setLinkedCustomer] = useState<{ id: string; name: string } | null>(null);
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const customerGateActive =
+    pending === 'Çözüldü' &&
+    !item.accountId &&
+    !linkedCustomer &&
+    user?.role !== 'SystemAdmin';
+  async function handleLinkCustomer(accountId: string, accountName: string) {
+    const updated = await caseService.linkAccount(item.id, accountId);
+    if (updated) setLinkedCustomer({ id: accountId, name: accountName });
+  }
   const [thirdPartyId, setThirdPartyId] = useState('');
   const [escalationLevel, setEscalationLevel] = useState<EscalationLevel | ''>('');
   const [escalationReason, setEscalationReason] = useState('');
@@ -237,6 +256,8 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     setKbSuggestion(null);
     setKbSuggestionError(null);
     kbSuggestedAtRef.current = null;
+    setLinkedCustomer(null); // 2026-07-06 — vaka değişince müşteri-bağla state'i sıfırla
+    setCustomerPickerOpen(false);
     // initialPending kasıtlı olarak dep değil — panel mount'unda Compact
     // Stepper'dan gelen preselect bir kez uygulanır. Sonraki kullanıcı
     // tıklamaları normal akışla pending'i değiştirir.
@@ -437,6 +458,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
 
   function applyDisabled(): boolean {
     if (!pending) return true;
+    if (customerGateActive) return true; // müşterisiz Çözüldü engeli (SystemAdmin muaf)
     if (pending === 'Çözüldü' && !resolutionNote.trim()) return true;
     if (pending === 'Çözüldü' && requiredChecklistPending.length > 0) return true;
     if (pending === 'Çözüldü' && kbAnalysisPending) return true;
@@ -658,6 +680,36 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
 
           {pending === 'Çözüldü' && (
             <>
+              {/* 2026-07-06 — Müşteri kapısı: müşterisiz vaka çözülemez.
+                  Öneriler (deterministik) + manuel ara; bağlanınca "Çöz"
+                  butonu açılır. SystemAdmin bu bloğu görmez (istisna). */}
+              {customerGateActive && (
+                <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/40">
+                  <div className="flex items-start gap-2 text-sm font-medium text-amber-900 dark:text-amber-200">
+                    <span>⚠️</span>
+                    <span>Müşteri seçilmedi — bu vaka müşteri eşleştirilmeden çözülemez. Aşağıdan önerilen müşterilerden seç ya da elle ara.</span>
+                  </div>
+                  <CustomerMatchSuggestionsPanel
+                    caseId={item.id}
+                    onConfirmLink={async (s) => {
+                      await handleLinkCustomer(s.accountId, s.accountName);
+                    }}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCustomerPickerOpen(true)}
+                    className="w-full justify-center"
+                  >
+                    Müşteri Ara (elle)
+                  </Button>
+                </div>
+              )}
+              {linkedCustomer && (
+                <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200">
+                  ✓ Müşteri bağlandı: <strong>{linkedCustomer.name}</strong> — artık çözebilirsin.
+                </div>
+              )}
               <RunaAiCard
                 title="Çözüm Notu Taslağı"
                 body={
@@ -947,6 +999,17 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
           </div>
         </div>
       )}
+
+      {/* Kapanış müşteri kapısı — manuel arama modalı (öneri yetmezse). */}
+      <AccountSearchPicker
+        open={customerPickerOpen}
+        companyId={item.companyId}
+        onClose={() => setCustomerPickerOpen(false)}
+        onSelect={(account) => {
+          setCustomerPickerOpen(false);
+          if (account) void handleLinkCustomer(account.id, account.name);
+        }}
+      />
     </section>
   );
 }
