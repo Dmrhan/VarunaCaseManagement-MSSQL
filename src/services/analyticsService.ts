@@ -436,13 +436,14 @@ export const analyticsService = {
     personId: string,
     from: string,
     to: string,
+    teams?: string[],
   ): Promise<EngagementResponse | undefined> {
     return apiFetch<EngagementResponse>(
       '/api/analytics/person-engagement',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ personId, from, to }),
+        body: JSON.stringify({ personId, from, to, ...(teams?.length ? { teams } : {}) }),
       },
       'Etkinlik verisi yüklenemedi',
     );
@@ -452,13 +453,14 @@ export const analyticsService = {
     personId: string,
     from: string,
     to: string,
+    teams?: string[],
   ): Promise<PersonDetailResponse | undefined> {
     return apiFetch<PersonDetailResponse>(
       '/api/analytics/person-detail',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ personId, from, to }),
+        body: JSON.stringify({ personId, from, to, ...(teams?.length ? { teams } : {}) }),
       },
       'Kişi profili yüklenemedi',
     );

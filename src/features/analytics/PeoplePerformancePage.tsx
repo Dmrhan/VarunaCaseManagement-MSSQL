@@ -20,6 +20,7 @@ import {
   type PersonMetric,
   type PersonPerformance,
 } from '@/services/analyticsService';
+import { lookupService } from '@/services/caseService';
 import { PersonProfileView } from './PersonProfileView';
 
 const DAY = 86400000;
@@ -292,15 +293,26 @@ export function PeoplePerformancePage({ onSelectCase }: { onSelectCase?: (id: st
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ id: string; name: string } | null>(null);
+  const [teamId, setTeamId] = useState<string>(''); // '' = tüm takımlar
+
+  // Aktif takımlar (dropdown) — lookup bootstrap, isme göre sıralı.
+  const teamOptions = useMemo(
+    () => lookupService.teams().slice().sort((a, b) => a.name.localeCompare(b.name, 'tr')),
+    [],
+  );
+  const teamsFilter = useMemo(() => (teamId ? [teamId] : undefined), [teamId]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const out = await analyticsService.peoplePerformance({ from: rangeStartIso(dateFrom), to: rangeEndIso(dateTo) });
+    const out = await analyticsService.peoplePerformance({
+      from: rangeStartIso(dateFrom), to: rangeEndIso(dateTo),
+      ...(teamId ? { teams: [teamId] } : {}),
+    });
     setLoading(false);
     if (!out) { setError('Performans verisi yüklenemedi.'); return; }
     setData(out);
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, teamId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -314,6 +326,7 @@ export function PeoplePerformancePage({ onSelectCase }: { onSelectCase?: (id: st
         personName={selected.name}
         from={rangeStartIso(dateFrom)}
         to={rangeEndIso(dateTo)}
+        teams={teamsFilter}
         onBack={() => setSelected(null)}
         onSelectCase={onSelectCase}
       />
@@ -331,7 +344,16 @@ export function PeoplePerformancePage({ onSelectCase }: { onSelectCase?: (id: st
             <p className="text-xs text-slate-500 dark:text-ndark-muted">Ekip koçluk görünümü · yük adil mi, kim neyde güçlü</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={teamId}
+            onChange={(e) => { setTeamId(e.target.value); setSelected(null); }}
+            aria-label="Takım filtresi"
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+          >
+            <option value="">Tüm takımlar</option>
+            {teamOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
           <input type="date" value={dateFrom} max={dateTo} onChange={(e) => setDateFrom(e.target.value)}
             className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text" />
           <span className="text-slate-400">–</span>

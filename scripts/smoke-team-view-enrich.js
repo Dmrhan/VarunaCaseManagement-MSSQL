@@ -59,6 +59,11 @@ ok('3.3 Koçluk sinyali kutusu (tone renkli, 3 durum)',
   && /watch:/.test(page) && /info:/.test(page) && /good:/.test(page));
 ok('3.4 net akış işaretli/renkli (eriyen ▲ yeşil / birikiyor ▼ kırmızı)',
   /melt >= 0 \? `\+\$\{melt\} ▲` : `\$\{melt\} ▼`/.test(page));
+ok('3.5 takım filtresi dropdown (Tüm takımlar + lookupService.teams) → teams scope',
+  /aria-label="Takım filtresi"/.test(page) && /lookupService\.teams\(\)/.test(page)
+  && /<option value="">Tüm takımlar<\/option>/.test(page)
+  && /teamId \? \{ teams: \[teamId\] \}/.test(page)
+  && /teams=\{teamsFilter\}/.test(page));
 
 if (process.env.SMOKE_LIVE === '1') {
   console.log('── CANLI ──');

@@ -184,6 +184,7 @@ export function PersonProfileView({
   personName,
   from,
   to,
+  teams,
   onBack,
   onSelectCase,
 }: {
@@ -191,25 +192,28 @@ export function PersonProfileView({
   personName: string;
   from: string;
   to: string;
+  teams?: string[];
   onBack: () => void;
   onSelectCase?: (id: string) => void;
 }) {
   const [data, setData] = useState<PersonDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [engagement, setEngagement] = useState<EngagementResponse | null>(null);
+  const teamKey = teams?.join(',') ?? '';
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
     setEngagement(null);
-    void analyticsService.personDetail(personId, from, to).then((out) => {
+    void analyticsService.personDetail(personId, from, to, teams).then((out) => {
       if (alive) { setData(out ?? null); setLoading(false); }
     });
-    void analyticsService.personEngagement(personId, from, to).then((out) => {
+    void analyticsService.personEngagement(personId, from, to, teams).then((out) => {
       if (alive) setEngagement(out ?? null);
     });
     return () => { alive = false; };
-  }, [personId, from, to]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personId, from, to, teamKey]);
 
   const sig = data?.solutionSignature;
 
