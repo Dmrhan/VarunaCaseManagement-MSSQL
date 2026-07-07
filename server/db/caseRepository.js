@@ -4204,12 +4204,20 @@ export const caseRepository = {
    *
    * SLA değiştirilmez (kuralı: aktarım SLA sayacını duraklatmaz/sıfırlamaz).
    */
-  async transferCase(id, input, allowedCompanyIds) {
+  async transferCase(id, input, allowedCompanyIds, actorRole = null, actorPersonId = null) {
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
 
     const c = await prisma.case.findUnique({ where: { id } });
     if (!c) return null;
+
+    // L1 Agent tab-visibility (F3) — Agent rolündeki kullanıcı, sadece
+    // kendine atanmış vakayı devredebilir. assertCaseResourcePolicy'nin
+    // yerine geçmez, ona ek sert bir ownership guard'ıdır (policy sistemi
+    // kapalıysa bile bu kontrol çalışır).
+    if (actorRole === 'Agent' && c.assignedPersonId !== actorPersonId) {
+      throw new CaseAccessError('Bu vakayı devretme yetkiniz yok — yalnız size atanmış vakaları devredebilirsiniz.');
+    }
 
     // Kapalı vakalar aktarılamaz
     if (c.status === 'Cozuldu' || c.status === 'IptalEdildi') {

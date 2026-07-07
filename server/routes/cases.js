@@ -580,26 +580,63 @@ router.get(
       });
       const agentTeamId = agentPerson?.teamId ?? null;
       const canSeeTeamPool = agentPerson?.isTeamLead === true || ['L2', 'L3'].includes(agentPerson?.supportLevel ?? '');
-      const orClauses = [
-        { assignedPersonId: req.user.personId },
-        { createdByUserId: req.user.id },
-      ];
-      if (!agentTeamId) {
-        // Takımı olmayan Agent → mevcut davranış (takımsız + tüm havuz)
-        orClauses.push({ assignedPersonId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
-      } else if (canSeeTeamPool) {
-        // Takım lideri veya L2/L3 → kendi takım havuzu + takımsız havuz
-        orClauses.push({ assignedPersonId: null, assignedTeamId: agentTeamId, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
-        orClauses.push({ assignedPersonId: null, assignedTeamId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+      // Sıradan L1 Agent — takımı var, takım lideri değil, L2/L3 değil.
+      // Team.defaultSupportLevel'a DEĞİL, canSeeTeamPool ile aynı kritere
+      // bakılır (bkz. caseRepository.js claim() guard — birebir aynı kural).
+      const isPlainL1Agent = !!agentTeamId && !canSeeTeamPool;
+      const inboxTab = ['all', 'open', 'closed'].includes(f.inboxTab) ? f.inboxTab : null;
+
+      if (inboxTab === 'all') {
+        // Tümü — TÜM Agent seviyeleri (L1/L2/L3, takım lideri fark etmez)
+        // için read-only geniş görünürlük. roleDefaultScope tamamen
+        // kaldırılır; company/security scope (allowedCompanyIds,
+        // buildCaseListSecurityWhere) korunur. Mutasyon endpoint'leri
+        // (transfer vb.) bu görünürlükten bağımsız ayrıca guard'lanır.
+        roleDefaultScope = null;
+      } else if (isPlainL1Agent && inboxTab) {
+        // Açık/Kapalı sekme bazlı kısıtlama — yalnız sıradan L1 Agent'a
+        // uygulanır (L2/L3/takım lideri bu daraltmadan etkilenmez, aşağıdaki
+        // eski/ortak dala düşer). "later" (Ertelenenler) sekmesi inboxTab
+        // parametresini hiç göndermez, o da eski/ortak dala düşer.
+        if (inboxTab === 'open') {
+          // Açık — yalnız kendine atanmış açık vakalar. createdByUserId OR
+          // koşulu BİLEREK yok: kendi açtığı ama başkasına atanmış açık vaka
+          // bu sekmede görünmemeli.
+          roleDefaultScope = { assignedPersonId: req.user.personId };
+        } else {
+          // Kapalı — kendine atanmış VEYA kendisinin actor olduğu activity
+          // VEYA kendisinin mention edildiği herhangi bir kapalı vaka.
+          // Serbest metin/isim eşleşmesi yok, sadece ilişkisel ID sinyalleri.
+          roleDefaultScope = {
+            OR: [
+              { assignedPersonId: req.user.personId },
+              { history: { some: { actorUserId: req.user.id } } },
+              { mentions: { some: { mentionedUserId: req.user.id } } },
+            ],
+          };
+        }
       } else {
-        // L1 Agent with team → hiçbir sahipsiz/atanmamış havuz görünmez
-        // (ne kendi takımının ne takımsız/genel havuzun). Kayıt üzerine
-        // atama yalnız L1 takım liderinin (Supervisor) elinde — L1 Agent
-        // kendi kendine "Üstlen" ile sahipsiz bir kayıt alamaz. Yalnız
-        // kendine atanmış + kendi açtığı vakaları görür (üstteki ortak
-        // orClauses zaten bunları kapsıyor).
+        // Eski/ortak davranış — inboxTab tanınmıyorsa (ör. "later" sekmesi)
+        // veya kullanıcı sıradan L1 Agent değilse (takımsız, takım lideri,
+        // L2/L3) burada değişiklik yok.
+        const orClauses = [
+          { assignedPersonId: req.user.personId },
+          { createdByUserId: req.user.id },
+        ];
+        if (!agentTeamId) {
+          // Takımı olmayan Agent → mevcut davranış (takımsız + tüm havuz)
+          orClauses.push({ assignedPersonId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+        } else if (canSeeTeamPool) {
+          // Takım lideri veya L2/L3 → kendi takım havuzu + takımsız havuz
+          orClauses.push({ assignedPersonId: null, assignedTeamId: agentTeamId, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+          orClauses.push({ assignedPersonId: null, assignedTeamId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+        } else {
+          // L1 Agent with team, inboxTab tanınmıyor (ör. "later") → hiçbir
+          // sahipsiz/atanmamış havuz görünmez. Yalnız kendine atanmış + kendi
+          // açtığı vakaları görür (üstteki ortak orClauses zaten kapsıyor).
+        }
+        roleDefaultScope = { OR: orClauses };
       }
-      roleDefaultScope = { OR: orClauses };
     } else if (['Supervisor', 'Backoffice'].includes(req.user.role) && req.user.personId && !roleDefaultViewOff) {
       const { prisma } = await import('../db/client.js');
       const myPerson = await prisma.person.findUnique({
@@ -1336,6 +1373,8 @@ router.post(
         priority: body.priority,
       },
       req.user.allowedCompanyIds,
+      req.user.role,
+      req.user.personId ?? null,
     );
 
     if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
