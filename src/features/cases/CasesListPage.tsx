@@ -835,7 +835,12 @@ export function CasesListPage({
     !c.assignedPersonId &&
     !CLOSED_STATUSES.includes(c.status) &&
     !(user?.role === 'Agent' && !!myTeamId && !canSeeTeamPool) &&
-    !(['Supervisor', 'Backoffice'].includes(user?.role ?? '') && inboxTab === 'all');
+    // Tümü sekmesi — Agent (seviyesi fark etmez, L2/L3/takım lideri dahil)
+    // ve Supervisor/Backoffice için salt-okunur. Sıradan L1 zaten yukarıdaki
+    // koşulla her sekmede engelli; bu satır L2/L3/takım lideri Agent'ların
+    // "Tümü"de kendi takımıyla ilgisi olmayan bir havuzu üstlenmesini önler
+    // (Açık sekmesinde kendi takımının havuzunu üstlenebilmeye devam ederler).
+    !(['Agent', 'Supervisor', 'Backoffice'].includes(user?.role ?? '') && inboxTab === 'all');
 
   // Role-aware KPI cards — backend tek truth source (GET /api/cases/stats).
   // Mode rol bazlı: personal (Agent/Backoffice/CSM), team (Supervisor),
