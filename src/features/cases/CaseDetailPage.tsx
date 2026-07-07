@@ -1192,7 +1192,6 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
           }
           drawerOpen={leftDrawerOpen}
           onCloseDrawer={() => setLeftDrawerOpen(false)}
-          userRole={user?.role}
         />
 
         {/* Main */}
@@ -1533,7 +1532,6 @@ function LeftPanel({
   onConfirmLinkSuggestion,
   drawerOpen,
   onCloseDrawer,
-  userRole,
 }: {
   item: Case;
   accountPhone?: string;
@@ -1551,8 +1549,6 @@ function LeftPanel({
   onConfirmLinkSuggestion?: (suggestion: CustomerMatchSuggestion) => Promise<void>;
   drawerOpen: boolean;
   onCloseDrawer: () => void;
-  /** LBD A6 — Agent rolünde WatchersPanel gizlenir; diğer tüm rollerde görünür. */
-  userRole?: string;
 }) {
   const ctxCompany = customerContext?.company ?? null;
   const content = (
@@ -1839,12 +1835,11 @@ function LeftPanel({
           arayüzden kaldırıldı. "Üstlen" butonu (WR-C1) header'a, Kaydet'in
           yanına taşındı — artık burada render edilmiyor. */}
 
-      {/* FAZ 2 Collab — izleyiciler. LBD A6: Agent rolünde gizli, diğer
-          tüm rollerde (Supervisor/Backoffice/CSM/Admin/SystemAdmin) görünür.
-          Self-watch + Supervisor başkasını ekleyebilir. */}
-      {userRole !== 'Agent' && (
-        <WatchersPanel caseId={item.id} assignedPersonId={item.assignedPersonId ?? null} />
-      )}
+      {/* FAZ 2 Collab — izleyiciler. Tüm rollerde (Agent dahil) görünür.
+          Self-watch + Supervisor/atanmış sahip başkasını ekleyebilir
+          (WatchersPanel içindeki canAddOthers/canRemove ve backend
+          /:id/watchers route guard'ları bu ayrımı zaten yapıyor). */}
+      <WatchersPanel caseId={item.id} assignedPersonId={item.assignedPersonId ?? null} />
 
       {/* LBD A7: "Hızlı Aksiyonlar" PanelSection kaldırıldı.
           Aksiyonların erişim noktası:
