@@ -50,6 +50,10 @@ ok('2.8 devir tenant filtresi CaseTransfer\'a doğrudan (Codex #457 R3 — compa
   /t\.\[fromPersonId\] = \$\{trPIdx\} AND t\.\[companyId\] IN \(\$\{trCC\}\)/.test(agg));
 ok('2.9 idle vaka en az 7 gündür var olmalı — taze/aktivitesiz vaka watch\'ı şişirmez (Codex #457 R3)',
   /c\.\[createdAt\] <= \$\{idleSIdx\}/.test(agg));
+ok('2.10 idle sinyali TERS DEĞİL — top-ajanda (pendingCustomerReply=1) dahil, sadece müşteri-bekleyen (0+outbound) hariç (Codex #457 R4)',
+  /NOT \(c\.\[pendingCustomerReply\] = 0 AND c\.\[lastEmailOutboundAt\] IS NOT NULL\)/.test(agg)
+  // eski ters filtre (düz `pendingCustomerReply = 0`) kalmadı
+  && !/\bAND c\.\[pendingCustomerReply\] = 0\b/.test(agg));
 
 console.log('── UI (PersonProfileView) ──');
 ok('3.1 EngagementSection + verdict banner (4 durum) + anti-toksik caption',

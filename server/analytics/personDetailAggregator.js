@@ -308,7 +308,12 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
     teamClaims = team[0].avg == null ? null : Math.round(Number(team[0].avg));
   }
 
-  // 3) Dokunulmayan iş (top sende) — açık, 7g+ hareketsiz, BEKLEME HARİÇ
+  // 3) Dokunulmayan iş (top sende) — açık, 7g+ hareketsiz, top AJANDA.
+  // Codex #457 R4: pendingCustomerReply=true = "müşteri yazdı, ajan cevap borçlu"
+  // (top ajanda) — bu tam da sayılması gereken idle. Eski `=0` filtresi SİNYALİ
+  // TERS çeviriyordu. Doğru dışlama: SADECE gerçekten müşteriyi bekleyen (ajan
+  // cevaplamış = pendingCustomerReply=0 VE outbound VAR) durumu hariç tut;
+  // e-posta olmayan/hiç cevaplanmamış vaka (outbound NULL) top-ajanda sayılır.
   const idleParams = [...companyIds]; const idleCC = companyIds.map((_, i) => `@P${i + 1}`).join(', ');
   idleParams.push(personId); const idlePIdx = `@P${idleParams.length}`;
   idleParams.push(staleCutoff); const idleSIdx = `@P${idleParams.length}`;
@@ -320,7 +325,8 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
     `SELECT COUNT(*) AS c FROM [Case] c
      WHERE c.[companyId] IN (${idleCC}) AND c.[assignedPersonId] = ${idlePIdx}
        AND c.[isArchived]=0 AND c.[status] IN (${OPEN_LIST})
-       AND c.[status] <> 'ThirdPartyWaiting' AND c.[pendingCustomerReply] = 0
+       AND c.[status] <> 'ThirdPartyWaiting'
+       AND NOT (c.[pendingCustomerReply] = 0 AND c.[lastEmailOutboundAt] IS NOT NULL)
        AND c.[createdAt] <= ${idleSIdx}
        AND (c.[snoozeUntil] IS NULL OR c.[snoozeUntil] <= ${idleSIdx})
        AND NOT EXISTS (SELECT 1 FROM [CaseActivity] a WHERE a.[caseId]=c.[id] AND a.[at] > ${idleSIdx})${idleTC}`,
