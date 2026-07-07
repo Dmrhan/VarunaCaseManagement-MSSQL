@@ -36,8 +36,19 @@ const rangeEndIso = (day: string) => {
   return d.toISOString();
 };
 
+// Süre gösterimi — L1 (dakikalar) ile L2 (saat/gün) aynı ekranda olduğundan
+// birimi büyüklüğe göre seç: <1sa → dakika, <48sa → saat, sonrası → gün.
+// Kullanıcı direktifi 2026-07-08: 1 saatin altı "saat" ile değil dakika ile.
+export function formatDur(hours: number | null): string {
+  if (hours == null) return '—';
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))} dk`;
+  if (hours < 48) return `${Math.round(hours * 10) / 10} sa`;
+  return `${Math.round(hours / 24)} gün`;
+}
+
 function formatMetric(m: PersonMetric): string {
   if (m.value === null) return '—';
+  if (m.unit === 'saat') return formatDur(m.value); // dk/sa/gün
   if (m.unit === '%') return `%${m.value}`;
   return `${m.value} ${m.unit}`;
 }
@@ -247,7 +258,7 @@ function SummaryCard({
 
 function TeamSummary({ data }: { data: PeoplePerformanceResponse }) {
   const s = data.teamSummary;
-  const hrs = (v: number | null) => (v === null ? '—' : `${v} saat`);
+  const hrs = (v: number | null) => formatDur(v);
   const pct = (v: number | null) => (v === null ? '—' : `%${v}`);
   const melt = s.netMelted;
   return (
@@ -265,7 +276,7 @@ function TeamSummary({ data }: { data: PeoplePerformanceResponse }) {
         />
         <SummaryCard
           layer="② Çözüm hızı" label="Tipik çözüm süresi" value={hrs(s.medianHours)} hint="ortadaki vaka (medyan)"
-          tip="TIPIK = MEDYAN — vakaları hızdan sıraya diz, tam ortadaki. Ortalama DEĞİL, çünkü tek uzun vaka ortalamayı yanıltır. YAVAŞ UÇ — en yavaş %10'un başladığı süre (P90). BİRİM — saat · müşteri beklemesi hariç."
+          tip="TIPIK = MEDYAN — vakaları hızdan sıraya diz, tam ortadaki. Ortalama DEĞİL, çünkü tek uzun vaka ortalamayı yanıltır. YAVAŞ UÇ — en yavaş %10'un başladığı süre (P90). BİRİM — büyüklüğe göre dakika / saat / gün · müşteri beklemesi hariç."
           secondaries={[{ k: 'Yavaş uç (P90)', v: hrs(s.p90Hours) }]}
         />
         <SummaryCard
@@ -310,7 +321,7 @@ function PulseSentence({ s, attention, strong }: { s: PeopleTeamSummary; attenti
       <p className="mt-2 text-[15px] leading-relaxed sm:text-base">
         <b className="font-bold text-white">Ekip {attention <= strong ? 'dengeli' : 'yoğun'} çalışıyor.</b>{' '}
         {melt >= 0 ? <>backlog <b className="text-white">{melt} vaka eridi</b></> : <>backlog <b className="text-white">{Math.abs(melt)} vaka büyüdü</b></>},{' '}
-        tipik çözüm <b className="text-white">{s.medianHours ?? '—'} saat</b>, yeniden açılma <b className="text-white">%{s.reopenRatePct ?? '—'}</b>.{' '}
+        tipik çözüm <b className="text-white">{formatDur(s.medianHours)}</b>, yeniden açılma <b className="text-white">%{s.reopenRatePct ?? '—'}</b>.{' '}
         Bu dönem <span className="font-semibold text-amber-200">{attention} kişi</span> yakından bakmaya değer, <span className="font-semibold text-emerald-200">{strong} kişi</span> belirgin güçlü.
       </p>
     </div>
@@ -362,7 +373,7 @@ function AttentionCard({ p, onOpen }: { p: PersonPerformance; onOpen: () => void
       <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 pb-3.5 pl-[76px]">
         <SupNum label="çözülen" value={`${m.resolved.value}`} />
         <SupNum label="elindeki açık iş" value={`${m.openWip.value}`} tone={tone === 'watch' && (m.openWip.value ?? 0) >= 8 ? 'warn' : undefined} />
-        <SupNum label="tipik süre" value={m.medianHours.value == null ? '—' : `${m.medianHours.value} sa`} />
+        <SupNum label="tipik süre" value={formatDur(m.medianHours.value)} />
         <SupNum label="yeniden açılma" value={m.reopenRatePct.value == null ? '—' : `%${m.reopenRatePct.value}`} tone={reopenHigh ? 'crit' : undefined} />
         {m.qaScore.value != null && <SupNum label="kalite" value={`${m.qaScore.value}/5`} />}
       </div>

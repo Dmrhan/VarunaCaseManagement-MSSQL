@@ -27,6 +27,15 @@ ok('1.4 tipler: topExpertise + coaching.action',
   /topExpertise\?: \{ topic: string; count: number; fasterPct: number \| null \}\[\]/.test(svc)
   && /action\?: string \| null/.test(svc));
 
+const prof = read('src/features/analytics/PersonProfileView.tsx');
+console.log('── Süre formatı (L1 dakika · L2 saat/gün, kullanıcı direktifi 2026-07-08) ──');
+ok('1.5 formatDur: <1sa→dk, <48sa→sa, sonrası→gün; formatMetric saat→formatDur',
+  /function formatDur\(hours/.test(page) && /hours < 1\) return `\$\{Math\.max\(1, Math\.round\(hours \* 60\)\)\} dk`/.test(page)
+  && /m\.unit === 'saat'\) return formatDur\(m\.value\)/.test(page)
+  // profil: longest cases dk + trend birim seçimi
+  && /hours < 1\) return `\$\{Math\.max\(1, Math\.round\(hours \* 60\)\)\} dk`/.test(prof)
+  && /maxH < 1 \? \[60, 'dk'\]/.test(prof));
+
 console.log('── UI (anlatı iskeleti) ──');
 ok('2.1 R6 nabız cümlesi (PulseSentence)',
   /function PulseSentence/.test(page) && /Ekip nabzı/.test(page) && /yakından bakmaya değer/.test(page) && /belirgin güçlü/.test(page));

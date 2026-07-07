@@ -15,10 +15,12 @@ import { TrendLine } from '@/components/charts/TrendLine';
 const initials = (name: string) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
 
-// Süre birimi — büyükse gün, değilse saat (yöneticinin dili).
+// Süre birimi — büyüklüğe göre dakika/saat/gün. L1 dakikalarda çözerken L2 saat/gün
+// sürebilir; 1 saatin altını dakika göster (kullanıcı direktifi 2026-07-08).
 function formatDuration(hours: number): string {
-  if (hours >= 48) return `${Math.round(hours / 24)} gün`;
-  return `${hours} saat`;
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))} dk`;
+  if (hours < 48) return `${Math.round(hours * 10) / 10} saat`;
+  return `${Math.round(hours / 24)} gün`;
 }
 
 // Günlük çözüm-süresi trendi — Operasyon Panosu "Açılan/Çözülen/SLA" kartıyla AYNI
@@ -34,8 +36,11 @@ function TrendChart({ data }: { data: PersonDetailResponse['dailyTrend'] }) {
     const parts = d.date.split('-'); // YYYY-MM-DD
     return `${Number(parts[2])}.${parts[1]}`;
   });
+  // Birim, kişinin süre büyüklüğüne göre (L1 dakika · L2 saat/gün). Tüm seri tek birime.
+  const maxH = Math.max(...pts.map((d) => d.rollingMedianHours as number));
+  const [factor, unitLabel] = maxH < 1 ? [60, 'dk'] : maxH >= 48 ? [1 / 24, 'gün'] : [1, 'sa'];
   const series = [
-    { label: 'Tipik çözüm süresi (sa)', color: '#7c3aed', values: pts.map((d) => d.rollingMedianHours as number) },
+    { label: `Tipik çözüm süresi (${unitLabel})`, color: '#7c3aed', values: pts.map((d) => Math.round((d.rollingMedianHours as number) * factor * 10) / 10) },
   ];
   return <TrendLine series={series} xLabels={xLabels} height={210} showLegend={false} />;
 }
