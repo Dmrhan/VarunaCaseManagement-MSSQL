@@ -20,6 +20,13 @@ ok('1.1 personDetail metodu + endpoint + tipler',
   /async personDetail\(/.test(svc) && svc.includes("'/api/analytics/person-detail'")
   && /interface PersonDetailResponse/.test(svc) && /interface ExpertiseTopic/.test(svc));
 
+const pdet = read('server/analytics/personDetailAggregator.js');
+console.log('── Codex #469 P2 — header resolved = TÜM (KB etiketsiz dahil) ──');
+ok('0.1 person.resolved queryResolvedCount\'tan (expertiseRes.total DEĞİL)',
+  /async function queryResolvedCount/.test(pdet)
+  && /resolved: resolvedCount/.test(pdet)
+  && !/resolved: expertiseRes\.total/.test(pdet));
+
 console.log('── Profil ekranı (6 bölüm) ──');
 ok('2.1 günlük süre trendi — Operasyon Panosu TrendLine (recharts) reuse (tasarım bütünlüğü)',
   /function TrendChart/.test(prof) && prof.includes('rollingMedianHours')

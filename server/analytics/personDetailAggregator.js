@@ -453,6 +453,15 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
   return { signals, verdict, meta: { minSampleAgent: MIN_SAMPLE.agentPerformance, durationMs: Date.now() - t0 } };
 }
 
+// Codex #469 P2: profil başlığı "çözülen" = TÜM resolved (KB etiketi olsun olmasın).
+// queryExpertise KB-filtreli olduğundan .total sadece etiketli vakaları sayar; header
+// için ayrı tam sayım (eski/import vaka KB'siz olabilir → başlık düşük görünmesin).
+async function queryResolvedCount(companyIds, teamIds, personId, from, to) {
+  const s = scopeParts(companyIds, teamIds, personId, from, to);
+  const rows = await prisma.$queryRawUnsafe(`SELECT COUNT(*) AS c FROM [Case] WHERE ${s.where};`, ...s.params);
+  return Number(rows[0]?.c ?? 0);
+}
+
 export async function computePersonDetail({ personId, allowedCompanyIds, teamIds, from, to }) {
   const t0 = Date.now();
   const companyIds = Array.isArray(allowedCompanyIds) ? allowedCompanyIds : [];
@@ -462,7 +471,7 @@ export async function computePersonDetail({ personId, allowedCompanyIds, teamIds
   }
   const fromD = new Date(from);
   const toD = new Date(to);
-  const [expertiseRes, problems, products, longestCases, solutionSignature, dailyTrend, name] = await Promise.all([
+  const [expertiseRes, problems, products, longestCases, solutionSignature, dailyTrend, name, resolvedCount] = await Promise.all([
     queryExpertise(companyIds, teams, personId, fromD, toD),
     queryProblems(companyIds, teams, personId, fromD, toD),
     queryProducts(companyIds, teams, personId, fromD, toD),
@@ -470,10 +479,12 @@ export async function computePersonDetail({ personId, allowedCompanyIds, teamIds
     querySolutionSignature(companyIds, teams, personId, fromD, toD),
     queryDailyTrend(companyIds, teams, personId, fromD, toD),
     queryPersonName(companyIds, teams, personId),
+    queryResolvedCount(companyIds, teams, personId, fromD, toD),
   ]);
   return {
-    // Codex #455 P2 — resolved = TÜM kategoriler (top-8'e kırpılmamış toplam).
-    person: { id: personId, name: name ?? personId, resolved: expertiseRes.total },
+    // resolved = TÜM resolved (KB etiketsiz dahil; Codex #469). sharePct denominator'ı
+    // (expertiseRes.total) KB-etiketli kalır — uzmanlık parmak izi yalnız sınıflı işten.
+    person: { id: personId, name: name ?? personId, resolved: resolvedCount },
     expertise: expertiseRes.items,
     problems, products, longestCases, solutionSignature, dailyTrend,
     meta: { minSampleAgent: MIN_SAMPLE.agentPerformance, durationMs: Date.now() - t0 },
