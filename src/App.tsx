@@ -120,6 +120,10 @@ export default function App() {
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   // Vaka detayına hangi view'dan girildiği — geri dönüşte oraya yönlendirmek için.
   const [caseDetailOrigin, setCaseDetailOrigin] = useState<View>('cases');
+  // Vaka detayına dar kapsamlı (Açık/Kapalı sekmesi ya da az önce
+  // üstlenilen/oluşturulan vaka) bir navigasyondan mi girildiği — Backoffice/
+  // Supervisor için Devret/Üstlen görünürlüğünü belirler (CaseDetailPage).
+  const [caseDetailNarrowScopeConfirmed, setCaseDetailNarrowScopeConfirmed] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   // Müşteri detayına hangi view'dan girildiği (ör. vaka detayından "Detay →")
   // — geri dönüşte oraya yönlendirmek için. caseDetailOrigin ile aynı desen.
@@ -330,8 +334,9 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, caseDetailOrigin]);
 
-  function openCase(id: string) {
+  function openCase(id: string, narrowScopeConfirmed = false) {
     setCaseDetailOrigin(view);
+    setCaseDetailNarrowScopeConfirmed(narrowScopeConfirmed);
     setSelectedCaseId(id);
     setView('case-detail');
   }
@@ -1071,6 +1076,7 @@ export default function App() {
                 onBack={backToList}
                 onShowCustomer={(id) => setCustomerCardId(id)}
                 onOpenAccount={canReadAccounts(user?.role) ? openAccount : undefined}
+                narrowScopeConfirmedByNav={caseDetailNarrowScopeConfirmed}
               />
             )
           )}

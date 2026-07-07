@@ -909,6 +909,11 @@ export interface CaseFilters {
   // Rol bazlı varsayılan kapsam. 'off' = Supervisor/Backoffice Tümü sekmesinde
   // havuz kaldırılır; Agent için backend tarafından ignore edilir.
   roleDefaultView?: 'off';
+  /** L1 Agent sekme bazlı görünürlük (F1) — hangi Inbox sekmesinin aktif
+   *  olduğunu backend'e bildirir. Sadece sıradan L1 Agent için anlamlı;
+   *  diğer roller backend tarafında ignore edilir. 'later' sekmesi bu
+   *  alanı hiç göndermez (ayrı endpoint kullanır). */
+  inboxTab?: 'all' | 'open' | 'closed';
 }
 
 // Role-aware KPI stats — GET /api/cases/stats response.

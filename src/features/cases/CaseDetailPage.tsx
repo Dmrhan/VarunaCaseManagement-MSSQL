@@ -180,13 +180,20 @@ interface CaseDetailPageProps {
   onShowCustomer?: (accountId: string) => void;
   /** "Müşteri Detayı'na git" linki — sadece canReadAccounts olan rollerde aktiftir. */
   onOpenAccount?: (accountId: string) => void;
+  /** true ise bu vaka detayına "dar kapsamlı" (Açık/Kapalı sekmesi satır
+   *  tıklaması, ya da az önce üstlenilen/oluşturulan vakaya otomatik
+   *  yönlendirme) bir navigasyondan girildiği kanıtlanmış demektir.
+   *  Varsayılan false — "Tümü" sekmesi, e-posta/bildirim linki, arama vb.
+   *  her giriş noktası dahil, Backoffice/Supervisor için salt-okunur kabul
+   *  edilir (kendine atanmış vakalar hariç — bkz. isOwnCase). */
+  narrowScopeConfirmedByNav?: boolean;
 }
 
 // R10.3 (2026-07-04) — onShowCustomer yeniden aktif tüketici: CommunicationTab
 // tam-ekran başlık barı müşteri linki App'in CustomerCardModal'ını açar
 // (Detay sekmesindeki kardeş kullanım deseni — accounts sayfası navigasyonu
 // DEĞİL). eslint yorumu ve _prefix kaldırıldı.
-export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }: CaseDetailPageProps) {
+export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, narrowScopeConfirmedByNav = false }: CaseDetailPageProps) {
   const { user } = useAuth();
   // Phase D + Agent/Backoffice genişletmesi — tüm operasyon rolleri müşteri
   // eşleştirebilir. Öğrenme (learned sender) yalnız Supervisor+ kararından
@@ -285,6 +292,21 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
   );
   const canSeeTeamPool = myPerson?.isTeamLead === true || ['L2', 'L3'].includes(myPerson?.supportLevel ?? '');
   const claimBlockedByTeamPool = user?.role === 'Agent' && !!myPerson?.teamId && !canSeeTeamPool;
+  // "Tümü" salt-okunur kuralı — Backoffice/Supervisor için VARSAYILAN kısıtlı:
+  // Devret/Üstlen yalnız (a) vaka gerçekten kendisine atanmışsa (isOwnCase —
+  // giriş yoluna bakılmaksızın her zaman kendi işi) VEYA (b) vaka detayına
+  // kanıtlanmış "dar kapsamlı" bir navigasyondan girildiyse (Açık/Kapalı
+  // sekmesi satır tıklaması, ya da az önce üstlendiği/oluşturduğu vakaya
+  // otomatik yönlendirme — narrowScopeConfirmedByNav prop'u, App.tsx) izin
+  // verilir. Takım eşleşmesi TEK BAŞINA yeterli değil — "Tümü" sekmesinden
+  // veya e-posta/bildirim gibi başka bir yoldan açılan, kendi takımının
+  // havuz vakası bile olsa varsayılan olarak salt-okunurdur.
+  const isOwnCase = !!item && item.assignedPersonId === user?.personId;
+  const wideViewReadOnly =
+    !!item &&
+    ['Backoffice', 'Supervisor'].includes(user?.role ?? '') &&
+    !isOwnCase &&
+    !narrowScopeConfirmedByNav;
 
   // WR-A7b — Catalog state (Package + Product). Vakanın companyId/accountId'sine bağlı.
   const [catalogPackages, setCatalogPackages] = useState<
@@ -889,8 +911,11 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
                 </>
               );
             })()}
-            {/* WR-C1 — "Üstlen" butonu Kaydet'in yanına taşındı (LeftPanel'den). */}
-            {!!user?.personId && !item.assignedPersonId && item.status !== 'Çözüldü' && item.status !== 'İptalEdildi' && !claimBlockedByTeamPool && (
+            {/* WR-C1 — "Üstlen" butonu Kaydet'in yanına taşındı (LeftPanel'den).
+                wideViewReadOnly — "Tümü" (wide) sekmesinden açılan vakalarda
+                Agent/Backoffice/Supervisor için gizlenir; o sekme arama/danışma
+                amaçlıdır, işlem amaçlı değil. CSM/Admin/SystemAdmin etkilenmez. */}
+            {!wideViewReadOnly && !!user?.personId && !item.assignedPersonId && item.status !== 'Çözüldü' && item.status !== 'İptalEdildi' && !claimBlockedByTeamPool && (
               <button
                 type="button"
                 onClick={handleClaim}
@@ -918,14 +943,20 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               <Sparkles size={12} />
               Durum Raporu
             </button>
-            <Button
-              variant="outline"
-              size="sm"
-              leftIcon={<UserPlus size={12} />}
-              onClick={() => setTransferOpen(true)}
-            >
-              Devret
-            </Button>
+            {/* F3 — L1 Agent salt-okunur aksiyon kuralı: Agent rolü sadece
+                kendine atanmış vakayı devredebilir. wideViewReadOnly ise
+                "Tümü" sekmesinden açılan vakada Agent/Backoffice/Supervisor
+                için Devret hiç gösterilmez; CSM/Admin/SystemAdmin etkilenmez. */}
+            {!wideViewReadOnly && (user?.role !== 'Agent' || item.assignedPersonId === user?.personId) && (
+              <Button
+                variant="outline"
+                size="sm"
+                leftIcon={<UserPlus size={12} />}
+                onClick={() => setTransferOpen(true)}
+              >
+                Devret
+              </Button>
+            )}
             {!isSnoozeActive && (
               <Button
                 variant="outline"

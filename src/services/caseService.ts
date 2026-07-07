@@ -427,6 +427,8 @@ export const caseService = {
     if (filters?.includeArchived) params.set('includeArchived', 'true');
     // Rol bazlı varsayılan kapsam — 'off' ise Supervisor/Backoffice havuz kaldırılır.
     if (filters?.roleDefaultView === 'off') params.set('roleDefaultView', 'off');
+    // F1 — L1 Agent sekme bazlı görünürlük.
+    if (filters?.inboxTab) params.set('inboxTab', filters.inboxTab);
     if (pagination) {
       params.set('page', String(pagination.page));
       params.set('pageSize', String(pagination.pageSize));
