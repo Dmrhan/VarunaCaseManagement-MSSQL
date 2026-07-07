@@ -70,6 +70,7 @@ export const MENU_REGISTRY = Object.freeze([
   { key: 'workspace.knowledgeBase', label: 'Bilgi Bankası', viewKey: 'kb-viewer', group: 'workspace', defaultRoles: ['Agent', 'Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'] },
   { key: 'reports.aiUsage', label: 'AI Kullanımı', viewKey: 'analytics-ai-usage', group: 'reports', defaultRoles: ['Supervisor', 'Admin', 'SystemAdmin'] },
   { key: 'reports.qaScores', label: 'QA Skorları', viewKey: 'analytics-qa-scores', group: 'reports', defaultRoles: ['Supervisor', 'Admin', 'SystemAdmin'] },
+  { key: 'reports.peoplePerformance', label: 'Performans', viewKey: 'analytics-people-performance', group: 'reports', defaultRoles: ['Supervisor', 'Admin', 'SystemAdmin'] },
   { key: 'reports.patterns', label: 'Örüntü Alarmları', viewKey: 'analytics-patterns', group: 'reports', defaultRoles: ['Supervisor', 'Admin', 'SystemAdmin'] },
   { key: 'reports.caseStudio', label: 'Rapor Stüdyosu', viewKey: 'case-report-studio', group: 'reports', defaultRoles: ['Supervisor', 'Admin', 'SystemAdmin'] },
   { key: 'reports.rootCause', label: 'Kök Neden Analiz Raporu', viewKey: 'root-cause-report', group: 'reports', defaultRoles: ['Supervisor', 'Admin', 'SystemAdmin'] },
