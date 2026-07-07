@@ -519,9 +519,11 @@ export async function listAccounts({
   // ile sınırla; aksi halde kullanıcı görmediği şirketin vaka sayısını sayar.
   // SystemAdmin allowed = tüm aktif şirketler (verifyJwt). allowed boşsa hiçbir
   // şey sayma (kullanıcı zaten hiçbir şey göremiyor).
+  // Review fix — arşivli vakalar müşteri kartındaki open/total sayısına
+  // dahil olmamalı (caseRepository.getStats()'taki scope ile aynı kural).
   const caseScope = accountIds.length
     ? allowed.length
-      ? { accountId: { in: accountIds }, companyId: { in: allowed } }
+      ? { accountId: { in: accountIds }, companyId: { in: allowed }, isArchived: false }
       : { accountId: { in: [] } }
     : null;
   const allCases = caseScope
@@ -729,10 +731,12 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
   if (allowed.length) caseScopeOr.push({ companyId: { in: allowed } });
   // Eğer kullanıcı legacy NULL account'a izinli (companyId NULL) ise vakaların da görünmesi gerekir;
   // ancak Case.companyId her zaman dolu, dolayısıyla NULL OR şartı eklenmez.
+  // Review fix — arşivli vakalar müşteri detayındaki istatistiklere (caseStats,
+  // slaBreachCount) ve "son vakalar" listesine (recentCases) dahil olmamalı.
   const caseWhere =
     caseScopeOr.length === 0
       ? { accountId, id: { in: [] } } // zero-match
-      : { accountId, AND: { OR: caseScopeOr } };
+      : { accountId, isArchived: false, AND: { OR: caseScopeOr } };
 
   const [caseStats, recentCases] = await prisma.$transaction([
     prisma.case.groupBy({
