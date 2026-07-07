@@ -1466,9 +1466,10 @@ export function SmartTicketNewPage({
       closure.resolutionType ||
       closure.permanentPrevention
     );
-    if (!closureSuggestion && !hasAnyClosureField) {
+    // KB analizine basmak YETMEZ — en az bir kapanış etiketi SEÇİLMİŞ olmalı.
+    if (!hasAnyClosureField) {
       setClosureError(
-        'Vaka çözülmeden önce KB kapanış analizi yapılmalı (veya kapanış etiketleri elle seçilmeli).',
+        'Vaka çözülmeden önce en az bir kapanış etiketi seçilmeli (kök neden grubu / detay / çözüm tipi / kalıcı önleme).',
       );
       return;
     }
