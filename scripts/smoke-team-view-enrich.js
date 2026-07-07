@@ -28,7 +28,7 @@ console.log('── İnsancıl dil (kaba ifade YOK) ──');
 ok('0.1b trend grafiği Operasyon Panosu TrendLine (recharts) bileşenini REUSE eder (tasarım bütünlüğü)',
   /import \{ TrendLine \} from '@\/components\/charts\/TrendLine'/.test(prof)
   && /<TrendLine series=\{series\} xLabels=\{xLabels\}/.test(prof)
-  && /Tipik çözüm süresi \(sa\)/.test(prof)
+  && /Tipik çözüm süresi \(\$\{unitLabel\}\)/.test(prof)
   // elle yazılmış SVG grafiği kaldırıldı (kendi <polyline>/<rect> çizimi yok)
   && !/vectorEffect="non-scaling-stroke"/.test(prof));
 ok('0.2 Etkinlik&Katkı + sinyal etiketleri insancıl — kaba ifade kaldırıldı',
