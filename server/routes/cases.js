@@ -781,6 +781,28 @@ router.get(
 );
 
 /**
+ * GET /api/cases/transferred-by-me — Agent KPI "Yönlendirdiklerim" kartı.
+ * transferredBy=req.user.id olan CaseTransfer kayıtlarını caseId bazında
+ * tekilleştirip döner (bkz. caseRepository.listTransferredByMe). Sadece
+ * authenticated kullanıcının KENDİ transferredBy kayıtları görünür — body/
+ * query'den userId alınmaz. Rol bağımsız çalışır (kart sadece Agent'ta
+ * gösterilir ama endpoint her rolde erişilebilir); companyId scope
+ * allowedCompanyIds ile korunur. /:id rotasından önce mount edilmeli.
+ */
+router.get(
+  '/transferred-by-me',
+  asyncRoute(async (req, res) => {
+    const securityWhere = await buildCaseListSecurityWhere(req);
+    const { items, total } = await caseRepository.listTransferredByMe(
+      req.user.id,
+      req.user.allowedCompanyIds,
+      securityWhere,
+    );
+    res.json({ value: items, '@odata.count': total });
+  }),
+);
+
+/**
  * GET /api/cases/watching — kullanıcının izlediği aktif vakalar (Watcher Inbox).
  * companyId scope. /:id rotasından önce mount edilmeli (Express order eşleşmesi).
  */

@@ -28,6 +28,7 @@ import {
   RotateCw,
   Search,
   SearchX,
+  Send,
   ShieldAlert,
   Sparkles,
   Tag,
@@ -150,7 +151,9 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 // Kapalı: status IN (Çözüldü, İptalEdildi).
 // Genel #45 — "Tümü" tab'ı eklendi. Default opt-in; ilk sırada görünür ama
 // açılışta hâlâ 'open' (mevcut davranış korunur).
-type InboxTab = 'all' | 'open' | 'later' | 'closed';
+// 'transferredByMe' — Agent KPI "Yönlendirdiklerim" kartı; sekme çubuğunda
+// GÖRÜNMEZ (buton yok), sadece KPI tıklamasıyla set edilir (bkz. load()).
+type InboxTab = 'all' | 'open' | 'later' | 'closed' | 'transferredByMe';
 const OPEN_STATUSES: CaseStatus[] = ['Açık', 'İncelemede', '3rdPartyBekleniyor', 'Eskalasyon', 'YenidenAcildi'];
 const CLOSED_STATUSES: CaseStatus[] = ['Çözüldü', 'İptalEdildi'];
 
@@ -449,6 +452,15 @@ export function CasesListPage({
         '/api/cases/snoozed',
         undefined,
         'Ertelenmiş vakalar yüklenemedi',
+      );
+      const items = data?.value ?? [];
+      setAllFiltered(items);
+      setServerTotal(data?.['@odata.count'] ?? items.length);
+    } else if (inboxTab === 'transferredByMe') {
+      const data = await apiFetch<{ value: Case[]; '@odata.count': number }>(
+        '/api/cases/transferred-by-me',
+        undefined,
+        'Yönlendirdiğim vakalar yüklenemedi',
       );
       const items = data?.value ?? [];
       setAllFiltered(items);
@@ -930,12 +942,22 @@ export function CasesListPage({
           setQuickFilter(null);
           setQuickQueueFilter('all');
         }),
-        tile('personal.snoozed', 'Ertelenenlerim', s.snoozedMine, 'amber', <Clock size={16} />, () => {
-          setFilters(initialFilters);
-          setQuickQueueFilter('all');
-          setInboxTab('later');
-          setQuickFilter(null);
-        }),
+        // Agent için "Ertelenenlerim" yerine "Yönlendirdiklerim" — Agent
+        // kendi devrettiği vakaları takip edebilsin. Backoffice/CSM'de
+        // slot değişmez (bu roller devir yapmaz/takip ihtiyacı farklı).
+        user?.role === 'Agent'
+          ? tile('personal.transferredByMe', 'Yönlendirdiklerim', s.transferredByMeCount, 'amber', <Send size={16} />, () => {
+              setFilters(initialFilters);
+              setQuickQueueFilter('all');
+              setInboxTab('transferredByMe');
+              setQuickFilter(null);
+            })
+          : tile('personal.snoozed', 'Ertelenenlerim', s.snoozedMine, 'amber', <Clock size={16} />, () => {
+              setFilters(initialFilters);
+              setQuickQueueFilter('all');
+              setInboxTab('later');
+              setQuickFilter(null);
+            }),
       );
       return tiles;
     }
@@ -1608,6 +1630,17 @@ export function CasesListPage({
                     ? (c as Case & { expired?: boolean })
                     : null;
                   const expired = Boolean(snoozeMeta?.expired);
+                  // "Yönlendirdiklerim" modu — BE'den bindirilen extra alanlar
+                  // (bkz. caseRepository.listTransferredByMe).
+                  const transferMeta = inboxTab === 'transferredByMe'
+                    ? (c as Case & {
+                        transferCount?: number;
+                        myLastTransferAt?: string;
+                        myLastTransferReason?: string;
+                        myLastTransferToTeamName?: string | null;
+                        myLastTransferToPersonName?: string | null;
+                      })
+                    : null;
                   const isSelected = selected.has(c.id);
                   const isUnassignedOpen = !c.assignedPersonId && !CLOSED_STATUSES.includes(c.status);
                   // Öncelik: expired (amber) > selected (brand) > atanmamış (slate) > default hover
@@ -1700,6 +1733,21 @@ export function CasesListPage({
                           {expired
                             ? `⏰ ${formatSnoozeAgo(snoozeMeta.snoozeUntil)}`
                             : `🕐 ${formatSnoozeIn(snoozeMeta.snoozeUntil)}`}
+                        </div>
+                      )}
+                      {transferMeta?.myLastTransferAt && (
+                        <div
+                          className="mt-0.5 truncate text-xs text-amber-700 dark:text-amber-300"
+                          title={[
+                            `Yönlendirme tarihi: ${formatDateTime(transferMeta.myLastTransferAt)}`,
+                            transferMeta.myLastTransferReason ? `Sebep: ${transferMeta.myLastTransferReason}` : null,
+                            transferMeta.myLastTransferToTeamName ? `Hedef takım: ${transferMeta.myLastTransferToTeamName}` : null,
+                            transferMeta.myLastTransferToPersonName ? `Hedef kişi: ${transferMeta.myLastTransferToPersonName}` : null,
+                          ].filter(Boolean).join('\n')}
+                        >
+                          <Send size={10} className="mr-1 inline-block align-[-1px]" />
+                          {formatRelative(transferMeta.myLastTransferAt)}
+                          {(transferMeta.transferCount ?? 1) > 1 && ` · ${transferMeta.transferCount}× devir`}
                         </div>
                       )}
                     </Td>
