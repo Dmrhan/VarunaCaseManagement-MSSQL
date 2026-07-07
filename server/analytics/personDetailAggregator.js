@@ -234,37 +234,46 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
   const now = asOf instanceof Date ? asOf : new Date();
   const staleCutoff = new Date(now.getTime() - 7 * 86400000);
 
-  // Codex #457 R6 (GÜVENLİK, #455 P1 ile aynı sınıf): kişi caller'ın KAPSAMINDA mı?
-  // Kapsam-dışı geçerli bir personId için global User çözülüp non-null sinyal/verdict
-  // üretmek kişi-varlığını sızdırır + yetkisiz profili "watch" gösterebilir. Kapsam-içi
-  // hiç izi yoksa nonexistent ile AYNI boş payload dön.
-  // Codex #457 R7: kanıt SADECE assignedPersonId olamaz — her vakayı devreden (transfer-only)
-  // hot-potato kişinin atanmış vakası kalmaz; onu da dışlarsak transferOut sinyali TAM da
-  // yakalamak istediği senaryoda gizlenir. Kanıt = atanmış vaka VEYA kapsam-içi devir-çıkışı.
+  // Kişinin User.id'si (aktivite/claim actorUserId ile eşleşir). Kapsam kanıtının
+  // aktivite kolu için önce çözülür; tek başına veri sızdırmaz (sadece personId→User.id).
+  const uRow = await prisma.$queryRawUnsafe(
+    `SELECT TOP 1 [id] AS uid FROM [User] WHERE [personId] = @P1`, personId);
+  const uid = uRow[0]?.uid ?? null;
+
+  // KAPSAM KANITI (GÜVENLİK — Codex #457 R6/R7/R8 zinciri, #455 P1 sınıfı):
+  // kişinin caller'ın KAPSAMINDA + NON-ARŞİVLİ izi var mı? Yoksa var-olmayan ile AYNI
+  // boş payload dön — aksi halde kapsam-dışı/gizli personId global User'a çözülüp
+  // non-null sinyal/verdict üreterek kişi-varlığını sızdırır ve yetkisiz profili "watch"
+  // gösterir. Kanıt ÜÇ sinyal kaynağının HEPSİNİ kapsar (tek kaynağa dayanan kapı, o
+  // kaynağı olmayan ama başka türlü kapsam-içi kişiyi ve sinyalini gizler):
+  //  1) atanmış vaka (queryPersonName, arşivsiz)      → resolved/hard-share/idle
+  //  2) kapsam-içi arşivsiz devir-çıkışı               → transferOut (hot-potato)
+  //  3) kapsam-içi arşivsiz vakada aktivite (uid)      → activityPerDay/claims
   let inScope = (await queryPersonName(companyIds, teamIds, personId)) != null;
-  if (!inScope) {
+  if (!inScope) { // 2) devir kanıtı — kaynak takım + arşivsiz
     const sp = [...companyIds];
     const spList = companyIds.map((_, i) => `@P${i + 1}`).join(', ');
     sp.push(personId); const spIdx = `@P${sp.length}`;
-    const spTC = teamClause(sp, teamIds, 't.[fromTeamId]'); // devir kapsamı = kaynak takım
-    // Codex #457 R8: arşivli vaka devri kanıt SAYILMAZ (transferOut sinyali + diğer
-    // scope yolları arşivliyi zaten hariç tutuyor). Yoksa yalnız-arşivli-devri olan
-    // kişi boş-payload yerine 5-sinyal alıp arşivli/gizli geçmiş varlığını sızdırır.
+    const spTC = teamClause(sp, teamIds, 't.[fromTeamId]');
     const spRow = await prisma.$queryRawUnsafe(
       `SELECT TOP 1 1 AS ok FROM [CaseTransfer] t
        WHERE t.[fromPersonId] = ${spIdx} AND t.[companyId] IN (${spList})${spTC}
          AND EXISTS (SELECT 1 FROM [Case] c WHERE c.[id]=t.[caseId] AND c.[isArchived] = 0)`, ...sp);
     inScope = spRow.length > 0;
   }
+  if (!inScope && uid) { // 3) aktivite kanıtı — kapsam-içi arşivsiz vakada dokunuş
+    const ap = [...companyIds];
+    const apList = companyIds.map((_, i) => `@P${i + 1}`).join(', ');
+    ap.push(uid); const apUid = `@P${ap.length}`;
+    const apTC = teamClause(ap, teamIds, 'cs.[assignedTeamId]');
+    const apRow = await prisma.$queryRawUnsafe(
+      `SELECT TOP 1 1 AS ok FROM [CaseActivity] a JOIN [Case] cs ON cs.[id]=a.[caseId]
+       WHERE a.[actorUserId] = ${apUid} AND cs.[companyId] IN (${apList}) AND cs.[isArchived] = 0${apTC}`, ...ap);
+    inScope = apRow.length > 0;
+  }
   if (!inScope) {
     return { signals: [], verdict: null, meta: { durationMs: Date.now() - t0 } };
   }
-
-  // Kişinin User.id'si (aktivite/claim actorUserId ile eşleşir). Artık kapsam teyitli
-  // (yukarıdaki scopedName kapısından geçti); uid yalnız aktör eşleştirme için.
-  const uRow = await prisma.$queryRawUnsafe(
-    `SELECT TOP 1 [id] AS uid FROM [User] WHERE [personId] = @P1`, personId);
-  const uid = uRow[0]?.uid ?? null;
 
   const s = scopeParts(companyIds, teamIds, personId, fromD, toD); // resolved-in-period (kişi)
   const tb = teamScopeParts(companyIds, teamIds, fromD, toD);      // resolved-in-period (ekip)

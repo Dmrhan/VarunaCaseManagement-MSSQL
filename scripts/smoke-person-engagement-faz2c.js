@@ -64,6 +64,9 @@ ok('2.13 scope kanıtı transfer-only kişiyi de kapsar — her vakayı devreden
   && /teamClause\(sp, teamIds, 't\.\[fromTeamId\]'\)/.test(agg));
 ok('2.14 transfer scope kanıtı arşivliyi hariç tutar — yalnız-arşivli-devri kişi geçmiş sızdırmaz (Codex #457 R8)',
   /WHERE t\.\[fromPersonId\] = \$\{spIdx\}[\s\S]{0,180}EXISTS \(SELECT 1 FROM \[Case\] c WHERE c\.\[id\]=t\.\[caseId\] AND c\.\[isArchived\] = 0\)/.test(agg));
+ok('2.15 kapsam kanıtı BÜTÜNCÜL — 3 kaynak (atanmış+devir+aktivite), aktivite-only kişi de gizlenmez (Codex #457 R8 preempt)',
+  /if \(!inScope && uid\) \{/.test(agg)
+  && /FROM \[CaseActivity\] a JOIN \[Case\] cs ON cs\.\[id\]=a\.\[caseId\]\s+WHERE a\.\[actorUserId\] = \$\{apUid\} AND cs\.\[companyId\] IN[\s\S]{0,40}cs\.\[isArchived\] = 0/.test(agg));
 
 console.log('── UI (PersonProfileView) ──');
 ok('3.1 EngagementSection + verdict banner (4 durum) + anti-toksik caption',
