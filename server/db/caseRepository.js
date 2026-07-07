@@ -1455,12 +1455,12 @@ export const caseRepository = {
         }),
         // transferredByMeCount: "Yönlendirdiklerim" kartı — CaseTransfer
         // sadece transferredBy+companyId ile filtrelenirse, authorization
-        // security filter (securityWhere) altında GİZLİ olan Case'ler de
-        // sayıma dahil olur (kart sayısı ≠ tıklayınca görünen liste sayısı,
-        // ve gizli vakaların VARLIĞI sızdırılmış olur). listTransferredByMe
-        // ile AYNI görünürlük kontratı: önce distinct caseId'leri topla,
-        // sonra securityWhere ile görünür Case sayısını say (Case.isArchived
-        // filtresi YOK — listTransferredByMe de filtrelemiyor).
+        // security filter (securityWhere) altında GİZLİ olan veya arşivlenmiş
+        // Case'ler de sayıma dahil olur (kart sayısı ≠ tıklayınca görünen
+        // liste sayısı, ve gizli/arşivli vakaların VARLIĞI sızdırılmış olur).
+        // listTransferredByMe ile AYNI görünürlük kontratı: önce distinct
+        // caseId'leri topla, sonra securityWhere + isArchived:false ile
+        // görünür Case sayısını say.
         (async () => {
           const transferredCaseIds = (
             await prisma.caseTransfer.groupBy({
@@ -1471,7 +1471,7 @@ export const caseRepository = {
           if (transferredCaseIds.length === 0) return 0;
           return prisma.case.count({
             where: mergeSecurityWhere(
-              { id: { in: transferredCaseIds }, companyId: { in: allowedCompanyIds } },
+              { id: { in: transferredCaseIds }, companyId: { in: allowedCompanyIds }, isArchived: false },
               securityWhere,
             ),
           });
@@ -4648,8 +4648,11 @@ export const caseRepository = {
    * başka kişiye/takıma devredilse bile listede kalır — Case'in GÜNCEL
    * status/assignedTeamName/assignedPersonName'i döner, "myLastTransferTo*"
    * alanları ise o anki (benim yaptığım) devrin hedefidir, güncel atama
-   * değildir. Multi-tenant: CaseTransfer.companyId VE Case.companyId
-   * ikisi de allowedCompanyIds ile kısıtlanır (çift kilit).
+   * değildir. Arşivlenmiş vaka İSTİSNASIZ listeden düşer (arşivlenmiş =
+   * kullanıcı için silinmiş muamelesi görür, hiçbir kartta/listede
+   * görünmemeli — getStats()'taki transferredByMeCount ile aynı kural,
+   * ikisi senkron kalmalı). Multi-tenant: CaseTransfer.companyId VE
+   * Case.companyId ikisi de allowedCompanyIds ile kısıtlanır (çift kilit).
    */
   async listTransferredByMe(userId, allowedCompanyIds, securityWhere = null) {
     if (!userId) return { items: [], total: 0 };
@@ -4678,7 +4681,7 @@ export const caseRepository = {
       }
     }
 
-    const where = { id: { in: [...byCase.keys()] } };
+    const where = { id: { in: [...byCase.keys()] }, isArchived: false };
     if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
     const rows = await prisma.case.findMany({
       where: mergeSecurityWhere(where, securityWhere),
