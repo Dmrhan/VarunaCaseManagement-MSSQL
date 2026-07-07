@@ -993,10 +993,12 @@ async function queryByPerson(scope, filters, from, to, baseWhere) {
   `;
   const mainRows = await prisma.$queryRawUnsafe(mainSql, ...p2.params);
 
-  // 2) Anlık açık iş (WIP) — dönemden bağımsız
+  // 2) Anlık açık iş (WIP) — dönemden bağımsız. İsim de çekilir çünkü
+  //    Codex #453 P2: dönemde 0 çözen ama açık iş taşıyan (aşırı yüklü) kişi
+  //    sadece burada görünür; ismi mainRows'ta olmayabilir.
   const w1 = withArrayParam(baseWhere, OPEN_STATUS_DB_VALUES);
   const wipSql = `
-    SELECT [assignedPersonId] AS id, COUNT(*) AS open_cnt
+    SELECT [assignedPersonId] AS id, MAX([assignedPersonName]) AS name, COUNT(*) AS open_cnt
     FROM [Case]
     WHERE ${baseWhere.sql}
       AND [status] IN (${w1.list})
@@ -1004,9 +1006,12 @@ async function queryByPerson(scope, filters, from, to, baseWhere) {
     GROUP BY [assignedPersonId];
   `;
   const wipRows = await prisma.$queryRawUnsafe(wipSql, ...w1.params);
-  const wipMap = new Map(wipRows.map((r) => [r.id, Number(r.open_cnt)]));
+  const wip = new Map(wipRows.map((r) => [r.id, { name: r.name, open: Number(r.open_cnt) }]));
 
-  return mainRows.map((r) => ({
+  // Kişi kümesi = dönemde çözenler ∪ şu an açık işi olanlar. Codex #453 P2 —
+  // salt-WIP kişiler resolved:0 ile eklenir; oran/medyan metrikleri zaten
+  // örneklem<20 → guardrail null. Yük dengesi sinyali eksik kalmaz.
+  const out = mainRows.map((r) => ({
     id: r.id,
     name: r.name ?? r.id,
     resolved: Number(r.resolved_cnt),
@@ -1016,8 +1021,18 @@ async function queryByPerson(scope, filters, from, to, baseWhere) {
     slaBreached: Number(r.sla_breach_cnt),
     escalated: Number(r.escalated_cnt),
     transferred: Number(r.transferred_cnt),
-    openWip: wipMap.get(r.id) ?? 0,
+    openWip: wip.get(r.id)?.open ?? 0,
   }));
+  const seen = new Set(out.map((r) => r.id));
+  for (const [id, v] of wip) {
+    if (seen.has(id)) continue;
+    out.push({
+      id, name: v.name ?? id, resolved: 0,
+      medianHours: null, p90Hours: null, reopened: 0, slaBreached: 0,
+      escalated: 0, transferred: 0, openWip: v.open,
+    });
+  }
+  return out;
 }
 
 // Ham satır → yöneticinin dilinde metrik sözleşmesi. Her metrik birim + hesap

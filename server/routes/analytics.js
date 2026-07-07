@@ -836,7 +836,7 @@ router.post('/cases/overview', requireOverviewAnalytics, async (req, res) => {
  * rol kapısı; kişi-kendi görünümü FAZ 1b). from/to overview ile aynı
  * validation + scope zinciri — body scope'u genişletemez.
  */
-router.post('/people-performance', requireOverviewAnalytics, async (req, res) => {
+router.post('/people-performance', requireSupervisorAnalytics, async (req, res) => {
   try {
     const body = req.body ?? {};
     const validation = validateOverviewBody(body);
@@ -845,7 +845,16 @@ router.post('/people-performance', requireOverviewAnalytics, async (req, res) =>
     }
     const { from, to } = validation;
     const scope = deriveAnalyticsScope(req.user, body);
-    const filters = { from: from.toISOString(), to: to.toISOString() };
+    // Codex #453 P2 — dashboard slice filtreleri iletilir (yoksa kişi kartları
+    // filtreli panonun geri kalanıyla çelişir). statuses BİLİNÇLİ hariç: kişi
+    // metrikleri çözülen-bazlı + WIP kendi açık-durum mantığını taşır; status
+    // filtresi ikisini de yanlış kısıtlar.
+    const filters = {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      productGroups: sanitizeStringArray(body.productGroups),
+      caseTypes: sanitizeStringArray(body.caseTypes),
+    };
     const payload = await computePeoplePerformanceOverview({ scope, filters });
     res.json({
       ...payload,

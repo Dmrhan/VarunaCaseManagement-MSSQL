@@ -62,14 +62,25 @@ ok('3.2 computePeoplePerformanceOverview export + buildWhereSql zinciri',
   && /buildWhereSql\(scope, filters\)/.test(aggr));
 
 console.log('── 4) Endpoint ──');
-ok('4.1 POST /people-performance + Supervisor+ (requireOverviewAnalytics)',
-  /router\.post\('\/people-performance', requireOverviewAnalytics/.test(routes));
+ok('4.1 Codex #453 P1: POST /people-performance Supervisor+ (requireSupervisorAnalytics — Agent/CSM DEĞİL)',
+  /router\.post\('\/people-performance', requireSupervisorAnalytics/.test(routes)
+  && !/router\.post\('\/people-performance', requireOverviewAnalytics/.test(routes));
 ok('4.2 overview ile aynı validation + scope zinciri (body scope genişletemez)',
   /people-performance[\s\S]{0,400}validateOverviewBody\(body\)/.test(routes)
-  && /people-performance[\s\S]{0,600}deriveAnalyticsScope\(req\.user, body\)/.test(routes));
+  && /people-performance[\s\S]{0,700}deriveAnalyticsScope\(req\.user, body\)/.test(routes));
 ok('4.3 computePeoplePerformanceOverview çağrısı + import',
   routes.includes('computePeoplePerformanceOverview')
   && /import \{ computeOperationsOverview, computePeoplePerformanceOverview \}/.test(routes));
+
+console.log('── 5) Codex #453 fix\'leri ──');
+ok('5.1 P2: slice filtreleri iletilir (productGroups + caseTypes); statuses bilinçli hariç',
+  /people-performance[\s\S]{0,800}productGroups: sanitizeStringArray\(body\.productGroups\)/.test(routes)
+  && /people-performance[\s\S]{0,900}caseTypes: sanitizeStringArray\(body\.caseTypes\)/.test(routes)
+  && !/people-performance[\s\S]{0,900}statuses: sanitizeStringArray/.test(routes));
+ok('5.2 P2: WIP-only kişiler listeye katılır (resolved:0) — yük dengesi eksik kalmaz',
+  /for \(const \[id, v\] of wip\)/.test(aggr)
+  && /resolved: 0,[\s\S]{0,120}openWip: v\.open/.test(aggr)
+  && /MAX\(\[assignedPersonName\]\) AS name, COUNT\(\*\) AS open_cnt/.test(aggr));
 
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);
