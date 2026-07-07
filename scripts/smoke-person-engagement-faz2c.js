@@ -56,6 +56,9 @@ ok('2.10 idle sinyali TERS DEĞİL — top-ajanda (pendingCustomerReply=1) dahil
   && !/\bAND c\.\[pendingCustomerReply\] = 0\b/.test(agg));
 ok('2.11 idle staleness inbound e-postadan da ölçülür — bugün gelen müşteri yanıtı idle şişirmez (Codex #457 R5)',
   /c\.\[lastEmailInboundAt\] IS NULL OR c\.\[lastEmailInboundAt\] <= \$\{idleSIdx\}/.test(agg));
+ok('2.12 engagement kişi-lookup SCOPE\'lu — kapsam-dışı personId boş payload (kişi-varlığı sızıntısı yok) (Codex #457 R6)',
+  /const scopedName = await queryPersonName\(companyIds, teamIds, personId\)/.test(agg)
+  && /if \(scopedName == null\) \{[\s\S]{0,120}return \{ signals: \[\], verdict: null/.test(agg));
 
 console.log('── UI (PersonProfileView) ──');
 ok('3.1 EngagementSection + verdict banner (4 durum) + anti-toksik caption',

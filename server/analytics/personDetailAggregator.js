@@ -234,7 +234,17 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
   const now = asOf instanceof Date ? asOf : new Date();
   const staleCutoff = new Date(now.getTime() - 7 * 86400000);
 
-  // Kişinin User.id'si (aktivite/claim actorUserId ile eşleşir) — scope'lu.
+  // Codex #457 R6 (GÜVENLİK, #455 P1 ile aynı sınıf): kişi caller'ın KAPSAMINDA mı?
+  // Kapsam-dışı geçerli bir personId için global User çözülüp non-null sinyal/verdict
+  // üretmek kişi-varlığını sızdırır + yetkisiz profili "watch" gösterebilir. queryPersonName
+  // scope kapısı — kapsam-içi hiç vakası yoksa nonexistent ile AYNI boş payload dön.
+  const scopedName = await queryPersonName(companyIds, teamIds, personId);
+  if (scopedName == null) {
+    return { signals: [], verdict: null, meta: { durationMs: Date.now() - t0 } };
+  }
+
+  // Kişinin User.id'si (aktivite/claim actorUserId ile eşleşir). Artık kapsam teyitli
+  // (yukarıdaki scopedName kapısından geçti); uid yalnız aktör eşleştirme için.
   const uRow = await prisma.$queryRawUnsafe(
     `SELECT TOP 1 [id] AS uid FROM [User] WHERE [personId] = @P1`, personId);
   const uid = uRow[0]?.uid ?? null;
