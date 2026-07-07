@@ -41,5 +41,10 @@ ok('3.2 profil doğru dönem (rangeStart/End) + onSelectCase App\'ten',
   /from=\{rangeStartIso\(dateFrom\)\}/.test(page)
   && /<PeoplePerformancePage onSelectCase=\{openCase\} \/>/.test(app));
 
+console.log('── Codex #456 fix ──');
+ok('4.1 P2: profil vaka-detayında mounted+hidden kalır (Geri → profil korunur)',
+  /view === 'analytics-people-performance' \|\| \(isDetail && caseDetailOrigin === 'analytics-people-performance'\)/.test(app)
+  && /caseDetailOrigin === 'analytics-people-performance'\)\) && \([\s\S]{0,120}isDetail \? 'hidden' : 'contents'/.test(app));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);
