@@ -49,6 +49,7 @@ export function FilesTab({
   item,
   onItemUpdated,
   onUploadingChange,
+  readOnly = false,
 }: {
   item: Case;
   onItemUpdated: (c: Case) => void;
@@ -57,6 +58,9 @@ export function FilesTab({
    *  disable edilir. Verilmezse default davranış (Case Detail Files tab'ı)
    *  hiçbir değişiklik görmez. */
   onUploadingChange?: (uploading: boolean) => void;
+  /** "Tümü" (wide, dar kapsam kanıtlanmamış) görünümde true — dosya
+   *  ekleme/silme devre dışı bırakılır. */
+  readOnly?: boolean;
 }) {
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -88,6 +92,7 @@ export function FilesTab({
   const maxMb = Math.round(CASE_FILE_MAX_SIZE / (1024 * 1024));
 
   async function uploadFiles(files: FileList | File[]) {
+    if (readOnly) return;
     const list = Array.from(files);
     if (list.length === 0) return;
 
@@ -172,6 +177,10 @@ export function FilesTab({
   }
 
   async function handleRemove(file: CaseFile) {
+    // P2 review fix — uploadFiles zaten gate'liydi, handleRemove'un aynı
+    // korumadan yoksun kalması "Tümü" salt-okunur görünümünden dosya
+    // silinebilmesine izin veriyordu.
+    if (readOnly) return;
     if (!window.confirm(`"${file.fileName}" dosyasını silmek istediğinizden emin misiniz?`)) {
       return;
     }
@@ -364,15 +373,17 @@ export function FilesTab({
                 >
                   <Download size={14} />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleRemove(f)}
-                  className="flex h-9 w-9 items-center justify-center rounded-md text-rose-600 ring-1 ring-rose-200 hover:bg-rose-50"
-                  title="Sil"
-                  aria-label="Sil"
-                >
-                  <Trash2 size={14} />
-                </button>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(f)}
+                    className="flex h-9 w-9 items-center justify-center rounded-md text-rose-600 ring-1 ring-rose-200 hover:bg-rose-50"
+                    title="Sil"
+                    aria-label="Sil"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </li>
             );
           })}

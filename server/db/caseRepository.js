@@ -1405,7 +1405,7 @@ export const caseRepository = {
 
     if (['Agent', 'Backoffice', 'CSM'].includes(role)) {
       if (!user.personId) {
-        return { mode: 'personal', assignedToMe: 0, slaRiskMine: 0, resolvedToday: 0, snoozedMine: 0 };
+        return { mode: 'personal', assignedToMe: 0, slaRiskMine: 0, resolvedToday: 0, snoozedMine: 0, transferredByMeCount: 0 };
       }
       const personId = user.personId;
       const notSnoozed = notSnoozedClause();
@@ -1436,7 +1436,7 @@ export const caseRepository = {
         agentUnassignedWhere = { assignedPersonId: null };
       }
 
-      const [assignedToMe, slaRiskMine, resolvedToday, snoozedMine, unassigned, critical] = await Promise.all([
+      const [assignedToMe, slaRiskMine, resolvedToday, snoozedMine, transferredByMeCount, unassigned, critical] = await Promise.all([
         // assignedToMe: open + not snoozed (matches list default)
         prisma.case.count({
           where: scoped({ ...scope, assignedPersonId: personId, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }),
@@ -1453,6 +1453,29 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, assignedPersonId: personId, snoozeUntil: { gt: new Date() }, status: { in: STATS_OPEN_STATUSES } }),
         }),
+        // transferredByMeCount: "Yönlendirdiklerim" kartı — CaseTransfer
+        // sadece transferredBy+companyId ile filtrelenirse, authorization
+        // security filter (securityWhere) altında GİZLİ olan Case'ler de
+        // sayıma dahil olur (kart sayısı ≠ tıklayınca görünen liste sayısı,
+        // ve gizli vakaların VARLIĞI sızdırılmış olur). listTransferredByMe
+        // ile AYNI görünürlük kontratı: önce distinct caseId'leri topla,
+        // sonra securityWhere ile görünür Case sayısını say (Case.isArchived
+        // filtresi YOK — listTransferredByMe de filtrelemiyor).
+        (async () => {
+          const transferredCaseIds = (
+            await prisma.caseTransfer.groupBy({
+              by: ['caseId'],
+              where: { transferredBy: user.id, companyId: { in: allowedCompanyIds } },
+            })
+          ).map((r) => r.caseId);
+          if (transferredCaseIds.length === 0) return 0;
+          return prisma.case.count({
+            where: mergeSecurityWhere(
+              { id: { in: transferredCaseIds }, companyId: { in: allowedCompanyIds } },
+              securityWhere,
+            ),
+          });
+        })(),
         // unassigned chip: liste görünürlüğüyle tutarlı havuz sayısı.
         // L1 Agent (agentBlockedFromPool) hiç sahipsiz kayıt görmediği için
         // sorgu bile atılmadan 0 sabitlenir.
@@ -1461,7 +1484,7 @@ export const caseRepository = {
           : prisma.case.count({ where: scoped({ ...scope, ...agentUnassignedWhere, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
         prisma.case.count({ where: scoped({ ...scope, priority: 'Critical', status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
       ]);
-      return { mode: 'personal', assignedToMe, slaRiskMine, resolvedToday, snoozedMine, unassigned, critical };
+      return { mode: 'personal', assignedToMe, slaRiskMine, resolvedToday, snoozedMine, transferredByMeCount, unassigned, critical };
     }
 
     if (role === 'Supervisor') {
@@ -4613,6 +4636,81 @@ export const caseRepository = {
       if (a.expired !== b.expired) return a.expired ? -1 : 1;
       return new Date(a.snoozeUntil).getTime() - new Date(b.snoozeUntil).getTime();
     });
+    return { items, total: items.length };
+  },
+
+  /**
+   * "Yönlendirdiklerim" KPI kartı (Agent) — kullanıcının transferredBy
+   * olduğu CaseTransfer kayıtlarını caseId bazında tekilleştirip listeler.
+   * Aynı vaka birden çok kez devredilmişse (transferredAt desc sıralı
+   * olduğu için) İLK görülen satır "benim son yönlendirmem" kabul edilir,
+   * geri kalanlar sadece transferCount'a katkı sağlar. Vaka sonradan
+   * başka kişiye/takıma devredilse bile listede kalır — Case'in GÜNCEL
+   * status/assignedTeamName/assignedPersonName'i döner, "myLastTransferTo*"
+   * alanları ise o anki (benim yaptığım) devrin hedefidir, güncel atama
+   * değildir. Multi-tenant: CaseTransfer.companyId VE Case.companyId
+   * ikisi de allowedCompanyIds ile kısıtlanır (çift kilit).
+   */
+  async listTransferredByMe(userId, allowedCompanyIds, securityWhere = null) {
+    if (!userId) return { items: [], total: 0 };
+    const transferWhere = { transferredBy: userId };
+    if (allowedCompanyIds) transferWhere.companyId = { in: allowedCompanyIds };
+    const transfers = await prisma.caseTransfer.findMany({
+      where: transferWhere,
+      orderBy: { transferredAt: 'desc' },
+      select: { caseId: true, transferredAt: true, reason: true, toTeamId: true, toPersonId: true },
+    });
+    if (transfers.length === 0) return { items: [], total: 0 };
+
+    const byCase = new Map();
+    for (const t of transfers) {
+      const existing = byCase.get(t.caseId);
+      if (existing) {
+        existing.transferCount += 1;
+      } else {
+        byCase.set(t.caseId, {
+          transferCount: 1,
+          myLastTransferAt: t.transferredAt,
+          myLastTransferReason: t.reason,
+          toTeamId: t.toTeamId,
+          toPersonId: t.toPersonId,
+        });
+      }
+    }
+
+    const where = { id: { in: [...byCase.keys()] } };
+    if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
+    const rows = await prisma.case.findMany({
+      where: mergeSecurityWhere(where, securityWhere),
+      include: CASE_INCLUDE,
+    });
+
+    const metas = [...byCase.values()];
+    const teamIds = [...new Set(metas.map((v) => v.toTeamId).filter(Boolean))];
+    const personIds = [...new Set(metas.map((v) => v.toPersonId).filter(Boolean))];
+    const [teams, persons] = await Promise.all([
+      teamIds.length
+        ? prisma.team.findMany({ where: { id: { in: teamIds } }, select: { id: true, name: true } })
+        : [],
+      personIds.length
+        ? prisma.person.findMany({ where: { id: { in: personIds } }, select: { id: true, name: true } })
+        : [],
+    ]);
+    const teamName = new Map(teams.map((t) => [t.id, t.name]));
+    const personName = new Map(persons.map((p) => [p.id, p.name]));
+
+    const items = rows.map((row) => {
+      const meta = byCase.get(row.id);
+      return {
+        ...shape(row),
+        transferCount: meta.transferCount,
+        myLastTransferAt: meta.myLastTransferAt,
+        myLastTransferReason: meta.myLastTransferReason,
+        myLastTransferToTeamName: meta.toTeamId ? teamName.get(meta.toTeamId) ?? null : null,
+        myLastTransferToPersonName: meta.toPersonId ? personName.get(meta.toPersonId) ?? null : null,
+      };
+    });
+    items.sort((a, b) => new Date(b.myLastTransferAt).getTime() - new Date(a.myLastTransferAt).getTime());
     return { items, total: items.length };
   },
 

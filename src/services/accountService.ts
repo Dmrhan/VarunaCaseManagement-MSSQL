@@ -973,7 +973,15 @@ export const accountService = {
   },
 };
 
-/** Rol bazlı UI gating helper'ları — UI'da tek yerden tüketilsin. */
+/** Rol bazlı UI gating helper'ları — UI'da tek yerden tüketilsin.
+ * canReadAccounts = müşteri MODÜLÜ kapısı (sidebar "Müşteriler" menüsü,
+ * AccountsListPage, AccountDetailPage, vaka detayındaki "Müşteri Detayı'na
+ * git" linki — App.tsx'te hepsi bunu kullanır). Agent bu modülü GEZEMEZ.
+ * Review fix (PM-04 sonrası) — Agent'ı buraya eklemek, vaka detayındaki
+ * Proje alanı için değil, yanlışlıkla tüm müşteri modülünü Agent'a açmıştı
+ * (App.tsx showAccounts tek bir helper'a bağlı olduğu için). Agent'ın
+ * Proje alanı için ihtiyaç duyduğu dar kapsamlı okuma ayrı bir helper'dır
+ * — bkz. canLookupAccountForCaseProject. */
 export const ACCOUNT_READ_ROLES = ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'] as const;
 export const ACCOUNT_WRITE_ROLES = ['Admin', 'SystemAdmin'] as const;
 
@@ -983,4 +991,12 @@ export function canReadAccounts(role: string | undefined): boolean {
 
 export function canWriteAccounts(role: string | undefined): boolean {
   return !!role && (ACCOUNT_WRITE_ROLES as readonly string[]).includes(role);
+}
+
+/** Vaka detayındaki "Proje" inline-edit alanı için DAR kapsamlı erişim —
+ * müşteri modülünü (canReadAccounts) AÇMAZ, sadece o vakanın müşterisinin
+ * proje listesini okumaya izin verir. Kasıtlı olarak canReadAccounts'tan
+ * ayrı tutulur ki biri genişletilince diğeri yanlışlıkla etkilenmesin. */
+export function canLookupAccountForCaseProject(role: string | undefined): boolean {
+  return !!role && ([...ACCOUNT_READ_ROLES, 'Agent'] as readonly string[]).includes(role);
 }

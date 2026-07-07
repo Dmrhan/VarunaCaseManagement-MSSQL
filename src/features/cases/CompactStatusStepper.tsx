@@ -63,6 +63,9 @@ interface CompactStatusStepperProps {
    * Default `false` — eski sıkışık görünüm (sticky/dar yerleşim için).
    */
   wideConnectors?: boolean;
+  /** "Tümü" (wide, dar kapsam kanıtlanmamış) görünümde true — statü
+   *  değiştirme tamamen devre dışı bırakılır. */
+  readOnly?: boolean;
 }
 
 /**
@@ -188,7 +191,7 @@ const STATUS_ACTION_LABEL: Record<CaseStatus, string | null> = {
   'İptalEdildi':         'İptal et',
 };
 
-export function CompactStatusStepper({ item, onApplied, wideConnectors = false }: CompactStatusStepperProps) {
+export function CompactStatusStepper({ item, onApplied, wideConnectors = false, readOnly = false }: CompactStatusStepperProps) {
   const { toast } = useToast();
   const allowed = useMemo(() => STATUS_TRANSITIONS[item.status], [item.status]);
 
@@ -197,6 +200,9 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
   const [directSubmitting, setDirectSubmitting] = useState<CaseStatus | null>(null);
 
   async function handleClick(target: CaseStatus) {
+    // Fonksiyon seviyesinde ek güvence — UI'da bir yer unutulsa bile
+    // "Tümü" (wide, dar kapsam kanıtlanmamış) görünümde statü değişmez.
+    if (readOnly) return;
     if (STATUS_REQUIRES_REASON[target]) {
       // Modal akışı — StatusTransitionPanel preselect ile açılır, reason/closure
       // taxonomy / KB suggestion / checklist bütünlüğü panelin kendisinde.
@@ -291,7 +297,7 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
           // semantik çıkarıyordu → tıklanabilir geri-dönüş CTA "tamamlanmış"
           // gibi görünüyordu. Doğru: allowed back-transition REACHABLE
           // kalmalı; sadece allowed DEĞİL olan geçmiş düğümler PAST sayılır.
-          const interactive = isAllowed && !isCurrent;
+          const interactive = isAllowed && !isCurrent && !readOnly;
           const isPast = idx < currentIdx && !isAllowed;
           const isBusy = directSubmitting === target;
           const needsReason = STATUS_REQUIRES_REASON[target];

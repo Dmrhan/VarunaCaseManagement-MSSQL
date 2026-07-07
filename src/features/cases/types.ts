@@ -918,7 +918,7 @@ export interface CaseFilters {
 
 // Role-aware KPI stats — GET /api/cases/stats response.
 export type CaseStatsResponse =
-  | { mode: 'personal'; assignedToMe: number; slaRiskMine: number; resolvedToday: number; snoozedMine: number; unassigned: number; critical: number }
+  | { mode: 'personal'; assignedToMe: number; slaRiskMine: number; resolvedToday: number; snoozedMine: number; transferredByMeCount: number; unassigned: number; critical: number }
   | { mode: 'team'; teamOpenCount: number; teamSlaRisk: number; teamEscalation: number; teamResolvedToday: number; supervisorTeamId: string | null; unassigned: number; critical: number }
   | { mode: 'operations'; totalOpen: number; slaViolation: number; critical: number; resolvedToday: number; unassigned: number }
   | { mode: 'empty'; unassigned?: number; critical?: number }
