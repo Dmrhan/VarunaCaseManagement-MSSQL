@@ -344,11 +344,14 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
   trParams.push(fromD); const trFIdx = `@P${trParams.length}`;
   trParams.push(toD); const trTIdx = `@P${trParams.length}`;
   const trTC = teamClause(trParams, teamIds, 't.[fromTeamId]');
+  // Codex #457 R3 (perf): tenant filtresini CaseTransfer'a DOĞRUDAN uygula —
+  // @@index([companyId, transferredAt]) kullanılsın, tarama EXISTS'ten önce daralsın.
+  // EXISTS yalnız isArchived teyidi için kalır. (Aynı company placeholder'ları reuse.)
   const tr = await prisma.$queryRawUnsafe(
     `SELECT COUNT(*) AS c FROM [CaseTransfer] t
-     WHERE t.[fromPersonId] = ${trPIdx}
+     WHERE t.[fromPersonId] = ${trPIdx} AND t.[companyId] IN (${trCC})
        AND t.[transferredAt] >= ${trFIdx} AND t.[transferredAt] < ${trTIdx}${trTC}
-       AND EXISTS (SELECT 1 FROM [Case] c WHERE c.[id]=t.[caseId] AND c.[companyId] IN (${trCC}) AND c.[isArchived] = 0)`,
+       AND EXISTS (SELECT 1 FROM [Case] c WHERE c.[id]=t.[caseId] AND c.[isArchived] = 0)`,
     ...trParams);
   const transferOut = Number(tr[0].c);
   const transferOutPct = (resolved + transferOut) > 0 ? Math.round((transferOut / (resolved + transferOut)) * 100) : null;

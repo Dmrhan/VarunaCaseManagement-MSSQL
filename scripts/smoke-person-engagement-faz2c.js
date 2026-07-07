@@ -45,7 +45,9 @@ ok('2.6 team scope engagement sinyallerine de uygulanır (Codex #457 P2 — çap
 ok('2.7 CaseActivity sinyalleri arşivli vakayı hariç tutar (Codex #457 R2 — Case join + isArchived=0)',
   /const caseJoin = 'JOIN \[Case\] cs ON cs\.\[id\] = ca\.\[caseId\]'/.test(agg)
   && (agg.match(/cs\.\[isArchived\] = 0/g) || []).length >= 3
-  && /EXISTS \(SELECT 1 FROM \[Case\] c WHERE c\.\[id\]=t\.\[caseId\][\s\S]{0,60}c\.\[isArchived\] = 0\)/.test(agg));
+  && /EXISTS \(SELECT 1 FROM \[Case\] c WHERE c\.\[id\]=t\.\[caseId\] AND c\.\[isArchived\] = 0\)/.test(agg));
+ok('2.8 devir tenant filtresi CaseTransfer\'a doğrudan (Codex #457 R3 — companyId,transferredAt index)',
+  /t\.\[fromPersonId\] = \$\{trPIdx\} AND t\.\[companyId\] IN \(\$\{trCC\}\)/.test(agg));
 
 console.log('── UI (PersonProfileView) ──');
 ok('3.1 EngagementSection + verdict banner (4 durum) + anti-toksik caption',
