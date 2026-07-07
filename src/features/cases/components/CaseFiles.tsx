@@ -49,6 +49,7 @@ export function FilesTab({
   item,
   onItemUpdated,
   onUploadingChange,
+  readOnly = false,
 }: {
   item: Case;
   onItemUpdated: (c: Case) => void;
@@ -57,6 +58,9 @@ export function FilesTab({
    *  disable edilir. Verilmezse default davranış (Case Detail Files tab'ı)
    *  hiçbir değişiklik görmez. */
   onUploadingChange?: (uploading: boolean) => void;
+  /** "Tümü" (wide, dar kapsam kanıtlanmamış) görünümde true — dosya
+   *  ekleme/silme devre dışı bırakılır. */
+  readOnly?: boolean;
 }) {
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -88,6 +92,7 @@ export function FilesTab({
   const maxMb = Math.round(CASE_FILE_MAX_SIZE / (1024 * 1024));
 
   async function uploadFiles(files: FileList | File[]) {
+    if (readOnly) return;
     const list = Array.from(files);
     if (list.length === 0) return;
 

@@ -493,7 +493,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
   );
 
   async function handleAddNote() {
-    if (!item || !noteText.trim()) return;
+    if (!item || !noteText.trim() || wideViewReadOnly) return;
     // Ref guard catches the rare double-click that lands before
     // setNoteSubmitting paints; React state guard catches everything
     // after first paint. Both must clear on completion.
@@ -630,6 +630,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
 
   // Inline edit handlers
   function commitDraft(field: keyof Case, value: unknown) {
+    // Fonksiyon seviyesinde ek güvence — "Tümü" (wide, dar kapsam
+    // kanıtlanmamış) görünümde hiçbir alan düzenlenemez. Tüm InlineEdit
+    // alanları bu tek fonksiyona commit ettiği için tek noktadan korunur.
+    if (wideViewReadOnly) return;
     setDrafts((prev) => {
       let next: Record<string, unknown> = { ...(prev as Record<string, unknown>) };
       // Mevcut değerle aynıysa draft'ı kaldır
@@ -680,8 +684,17 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
     setEditingField(null);
   }
 
+  // "Tümü" (wide) görünümde alan düzenleme moduna hiç girilmesin — InlineEdit
+  // tıklanınca düzenleme kutusu açılmasın (commitDraft zaten korunuyor ama
+  // kullanıcı düzenleme moduna girip sonra hiçbir şeyin kaydedilmediğini
+  // görmesin diye burada da engellenir).
+  function startEdit(field: string) {
+    if (wideViewReadOnly) return;
+    setEditingField(field);
+  }
+
   async function handleSaveDrafts() {
-    if (!item || savingDrafts) return;
+    if (!item || savingDrafts || wideViewReadOnly) return;
     const hasFieldDrafts = Object.keys(drafts).length > 0;
     if (!hasFieldDrafts && !pendingAccountChange) return;
 
@@ -909,6 +922,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
           <div className="flex shrink-0 items-center gap-2">
             {(() => {
               const pendingCount = Object.keys(drafts).length + (pendingAccountChange ? 1 : 0);
+              // "Tümü" (wide) görünümde Kaydet/Taslakları sil hiç gösterilmez —
+              // zaten commitDraft/handleSaveDrafts bu modda no-op, ama tıklanır
+              // görünen bir buton kafa karıştırmasın diye gizlenir.
+              if (wideViewReadOnly) return null;
               return (
                 <>
                   {pendingCount > 0 && (
@@ -1193,14 +1210,14 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
           customerContext={customerContext}
           onOpenAccount={onOpenAccount}
           canLinkAccount={canLinkAccount}
-          onLinkAccount={canLinkAccount ? () => { setChangeAccountMode(false); setLinkAccountOpen(true); } : undefined}
-          onChangeAccount={canLinkAccount ? () => { setChangeAccountMode(true); setLinkAccountOpen(true); } : undefined}
+          onLinkAccount={canLinkAccount && !wideViewReadOnly ? () => { setChangeAccountMode(false); setLinkAccountOpen(true); } : undefined}
+          onChangeAccount={canLinkAccount && !wideViewReadOnly ? () => { setChangeAccountMode(true); setLinkAccountOpen(true); } : undefined}
           pendingAccountChange={pendingAccountChange}
           onCancelAccountChange={() => setPendingAccountChange(null)}
           accountProjects={accountProjects}
           drafts={drafts}
           editingField={editingField}
-          onStartEdit={(f) => setEditingField(f)}
+          onStartEdit={startEdit}
           onCommitDraft={commitDraft}
           onCancelEdit={cancelEdit}
           onConfirmLinkSuggestion={
@@ -1231,7 +1248,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
               SLA göstergesi aşağıdaki KPI/SLA şeridine taşındı (tek yerde olsun). */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-200 bg-slate-50/60 px-4 py-2 dark:border-ndark-border dark:bg-ndark-bg/40">
             {/* [Statü] progress bar (wideConnectors=true ile banda yayılır) */}
-            <CompactStatusStepper item={item} onApplied={setItem} wideConnectors />
+            <CompactStatusStepper item={item} onApplied={setItem} wideConnectors readOnly={wideViewReadOnly} />
 
             {/* Sağ: yalnız kimlik metadata — SLA / Watcher KPI şeridinde */}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-ndark-muted">
@@ -1322,12 +1339,13 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
                 drafts={drafts}
                 editingField={editingField}
                 fieldStates={fieldStates}
-                onStartEdit={(f) => setEditingField(f)}
+                onStartEdit={startEdit}
                 onCancelEdit={cancelEdit}
                 onCommitDraft={commitDraft}
                 onTransitionApplied={(updated) => setItem(updated)}
                 kbEnabled={kbEnabled}
                 onCaseUpdated={(updated) => setItem(updated)}
+                wideViewReadOnly={wideViewReadOnly}
               />
             )}
             {tab === 'activity' && <ActivityTab item={item} />}
@@ -1351,7 +1369,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
               />
             )}
             {tab === 'files' && (
-              <FilesTab item={item} onItemUpdated={(c) => setItem(c)} />
+              <FilesTab item={item} onItemUpdated={(c) => setItem(c)} readOnly={wideViewReadOnly} />
             )}
             {tab === 'links' && (
               <LinksTab item={item} onShowCase={navigateToCase} />
@@ -3441,6 +3459,7 @@ function DetailTab({
   onTransitionApplied,
   kbEnabled,
   onCaseUpdated,
+  wideViewReadOnly,
 }: {
   item: Case;
   offeredSolutions: { id: string; name: string }[];
@@ -3469,14 +3488,19 @@ function DetailTab({
   kbEnabled: boolean | null;
   /** Akıllı Tanımlar kaydı sonrası güncel Case'i üst state'e yaz. */
   onCaseUpdated: (updated: Case) => void;
+  /** "Tümü" (wide, dar kapsam kanıtlanmamış) görünümde true — checklist,
+   *  DevOps bağlantısı, dosya ekleme gibi mutasyonlar devre dışı bırakılır. */
+  wideViewReadOnly: boolean;
 }) {
   // PR-D3 — case-write yetkili rol set'i. DevOps section'da Bağla/Kaldır
   // gating'i için kullanılır. Backend'de PATCH /:id ile aynı kapı
   // (allowedCompanyIds scope; explicit requireRole yok), UI sadece
-  // görünürlüğü düşürür — sızıntı yok.
+  // görünürlüğü düşürür — sızıntı yok. wideViewReadOnly — "Tümü" gibi dar
+  // kapsam kanıtlanmamış görünümde bu da devre dışı.
   const { user } = useAuth();
   const canWriteCase =
-    !!user && ['Agent', 'Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'].includes(user.role);
+    !!user && ['Agent', 'Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) &&
+    !wideViewReadOnly;
 
   // Kategori cascade — taslakta seçili kategoriye göre alt-kategori opsiyonları
   const activeCategory = (drafts.category ?? item.category) as string;
@@ -4046,7 +4070,7 @@ function DetailTab({
 
       {/* FAZ 4 — Kontrol Listesi (3-tuple template'inden snapshot, vaka açılırken yüklenir) */}
       {item.checklistItems && item.checklistItems.length > 0 && (
-        <ChecklistSection item={item} onCaseUpdated={onTransitionApplied} />
+        <ChecklistSection item={item} onCaseUpdated={onTransitionApplied} readOnly={wideViewReadOnly} />
       )}
 
       {item.caseType === 'ProactiveTracking' && (
@@ -4495,9 +4519,12 @@ function OfferedSolutionsPickerModal({
 function ChecklistSection({
   item,
   onCaseUpdated,
+  readOnly = false,
 }: {
   item: Case;
   onCaseUpdated: (updated: Case) => void;
+  /** "Tümü" (wide, dar kapsam kanıtlanmamış) görünümde true — işaretleme devre dışı. */
+  readOnly?: boolean;
 }) {
   const items = item.checklistItems ?? [];
   const total = items.length;
@@ -4508,6 +4535,7 @@ function ChecklistSection({
   const pct = total > 0 ? Math.round((checkedCount / total) * 100) : 0;
 
   async function handleToggle(itemId: string, currentlyChecked: boolean) {
+    if (readOnly) return;
     const updated = await caseService.toggleChecklistItem(item.id, itemId, !currentlyChecked);
     if (updated) onCaseUpdated(updated);
   }
@@ -4556,7 +4584,8 @@ function ChecklistSection({
               role="checkbox"
               aria-checked={it.checked}
               onClick={() => void handleToggle(it.id, it.checked)}
-              className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+              disabled={readOnly}
+              className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border disabled:cursor-not-allowed disabled:opacity-60 ${
                 it.checked
                   ? 'border-emerald-500 bg-emerald-500 text-white'
                   : 'border-slate-300 bg-white hover:border-slate-400 dark:border-ndark-border dark:bg-ndark-card dark:hover:border-ndark-muted'
