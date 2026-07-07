@@ -247,9 +247,13 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
     const spList = companyIds.map((_, i) => `@P${i + 1}`).join(', ');
     sp.push(personId); const spIdx = `@P${sp.length}`;
     const spTC = teamClause(sp, teamIds, 't.[fromTeamId]'); // devir kapsamı = kaynak takım
+    // Codex #457 R8: arşivli vaka devri kanıt SAYILMAZ (transferOut sinyali + diğer
+    // scope yolları arşivliyi zaten hariç tutuyor). Yoksa yalnız-arşivli-devri olan
+    // kişi boş-payload yerine 5-sinyal alıp arşivli/gizli geçmiş varlığını sızdırır.
     const spRow = await prisma.$queryRawUnsafe(
       `SELECT TOP 1 1 AS ok FROM [CaseTransfer] t
-       WHERE t.[fromPersonId] = ${spIdx} AND t.[companyId] IN (${spList})${spTC}`, ...sp);
+       WHERE t.[fromPersonId] = ${spIdx} AND t.[companyId] IN (${spList})${spTC}
+         AND EXISTS (SELECT 1 FROM [Case] c WHERE c.[id]=t.[caseId] AND c.[isArchived] = 0)`, ...sp);
     inScope = spRow.length > 0;
   }
   if (!inScope) {

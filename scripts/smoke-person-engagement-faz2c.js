@@ -62,6 +62,8 @@ ok('2.12 engagement kişi-lookup SCOPE\'lu — kapsam-dışı personId boş payl
 ok('2.13 scope kanıtı transfer-only kişiyi de kapsar — her vakayı devreden hot-potato gizlenmesin (Codex #457 R7)',
   /FROM \[CaseTransfer\] t\s+WHERE t\.\[fromPersonId\] = \$\{spIdx\} AND t\.\[companyId\] IN/.test(agg)
   && /teamClause\(sp, teamIds, 't\.\[fromTeamId\]'\)/.test(agg));
+ok('2.14 transfer scope kanıtı arşivliyi hariç tutar — yalnız-arşivli-devri kişi geçmiş sızdırmaz (Codex #457 R8)',
+  /WHERE t\.\[fromPersonId\] = \$\{spIdx\}[\s\S]{0,180}EXISTS \(SELECT 1 FROM \[Case\] c WHERE c\.\[id\]=t\.\[caseId\] AND c\.\[isArchived\] = 0\)/.test(agg));
 
 console.log('── UI (PersonProfileView) ──');
 ok('3.1 EngagementSection + verdict banner (4 durum) + anti-toksik caption',
