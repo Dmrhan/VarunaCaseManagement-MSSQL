@@ -57,8 +57,11 @@ ok('2.10 idle sinyali TERS DEĞİL — top-ajanda (pendingCustomerReply=1) dahil
 ok('2.11 idle staleness inbound e-postadan da ölçülür — bugün gelen müşteri yanıtı idle şişirmez (Codex #457 R5)',
   /c\.\[lastEmailInboundAt\] IS NULL OR c\.\[lastEmailInboundAt\] <= \$\{idleSIdx\}/.test(agg));
 ok('2.12 engagement kişi-lookup SCOPE\'lu — kapsam-dışı personId boş payload (kişi-varlığı sızıntısı yok) (Codex #457 R6)',
-  /const scopedName = await queryPersonName\(companyIds, teamIds, personId\)/.test(agg)
-  && /if \(scopedName == null\) \{[\s\S]{0,120}return \{ signals: \[\], verdict: null/.test(agg));
+  /let inScope = \(await queryPersonName\(companyIds, teamIds, personId\)\) != null/.test(agg)
+  && /if \(!inScope\) \{[\s\S]{0,400}return \{ signals: \[\], verdict: null/.test(agg));
+ok('2.13 scope kanıtı transfer-only kişiyi de kapsar — her vakayı devreden hot-potato gizlenmesin (Codex #457 R7)',
+  /FROM \[CaseTransfer\] t\s+WHERE t\.\[fromPersonId\] = \$\{spIdx\} AND t\.\[companyId\] IN/.test(agg)
+  && /teamClause\(sp, teamIds, 't\.\[fromTeamId\]'\)/.test(agg));
 
 console.log('── UI (PersonProfileView) ──');
 ok('3.1 EngagementSection + verdict banner (4 durum) + anti-toksik caption',

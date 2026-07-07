@@ -236,10 +236,23 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
 
   // Codex #457 R6 (GÜVENLİK, #455 P1 ile aynı sınıf): kişi caller'ın KAPSAMINDA mı?
   // Kapsam-dışı geçerli bir personId için global User çözülüp non-null sinyal/verdict
-  // üretmek kişi-varlığını sızdırır + yetkisiz profili "watch" gösterebilir. queryPersonName
-  // scope kapısı — kapsam-içi hiç vakası yoksa nonexistent ile AYNI boş payload dön.
-  const scopedName = await queryPersonName(companyIds, teamIds, personId);
-  if (scopedName == null) {
+  // üretmek kişi-varlığını sızdırır + yetkisiz profili "watch" gösterebilir. Kapsam-içi
+  // hiç izi yoksa nonexistent ile AYNI boş payload dön.
+  // Codex #457 R7: kanıt SADECE assignedPersonId olamaz — her vakayı devreden (transfer-only)
+  // hot-potato kişinin atanmış vakası kalmaz; onu da dışlarsak transferOut sinyali TAM da
+  // yakalamak istediği senaryoda gizlenir. Kanıt = atanmış vaka VEYA kapsam-içi devir-çıkışı.
+  let inScope = (await queryPersonName(companyIds, teamIds, personId)) != null;
+  if (!inScope) {
+    const sp = [...companyIds];
+    const spList = companyIds.map((_, i) => `@P${i + 1}`).join(', ');
+    sp.push(personId); const spIdx = `@P${sp.length}`;
+    const spTC = teamClause(sp, teamIds, 't.[fromTeamId]'); // devir kapsamı = kaynak takım
+    const spRow = await prisma.$queryRawUnsafe(
+      `SELECT TOP 1 1 AS ok FROM [CaseTransfer] t
+       WHERE t.[fromPersonId] = ${spIdx} AND t.[companyId] IN (${spList})${spTC}`, ...sp);
+    inScope = spRow.length > 0;
+  }
+  if (!inScope) {
     return { signals: [], verdict: null, meta: { durationMs: Date.now() - t0 } };
   }
 
