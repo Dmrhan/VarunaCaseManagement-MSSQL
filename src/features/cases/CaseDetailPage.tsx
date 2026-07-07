@@ -1229,7 +1229,12 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
           onCommitDraft={commitDraft}
           onCancelEdit={cancelEdit}
           onConfirmLinkSuggestion={
-            canLinkAccount
+            // P2 review fix — onLinkAccount/onChangeAccount ile aynı gate:
+            // wideViewReadOnly iken bu handler undefined olmalı, aksi halde
+            // CustomerMatchSuggestionsPanel aktif kalıp linkAccount
+            // mutasyonuna izin veriyordu (sayfanın geri kalanı salt-okunur
+            // olsa bile).
+            canLinkAccount && !wideViewReadOnly
               ? async (suggestion) => {
                   // Manuel onay: confirm popup spec gereği zorunlu.
                   const ok = window.confirm(
