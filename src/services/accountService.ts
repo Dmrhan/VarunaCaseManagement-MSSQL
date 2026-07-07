@@ -973,8 +973,12 @@ export const accountService = {
   },
 };
 
-/** Rol bazlı UI gating helper'ları — UI'da tek yerden tüketilsin. */
-export const ACCOUNT_READ_ROLES = ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'] as const;
+/** Rol bazlı UI gating helper'ları — UI'da tek yerden tüketilsin.
+ * Agent — vaka detayında Proje alanını düzenleyebilmesi için tam müşteri
+ * detayına (Supervisor ile aynı seviyede) okuma erişimi verildi. Yazma
+ * (ACCOUNT_WRITE_ROLES) bundan tamamen ayrı ve değişmedi — Agent müşteri
+ * kaydını düzenleyemez, sadece görüntüler. */
+export const ACCOUNT_READ_ROLES = ['Agent', 'Supervisor', 'CSM', 'Admin', 'SystemAdmin'] as const;
 export const ACCOUNT_WRITE_ROLES = ['Admin', 'SystemAdmin'] as const;
 
 export function canReadAccounts(role: string | undefined): boolean {

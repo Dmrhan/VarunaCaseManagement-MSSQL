@@ -101,7 +101,7 @@ import {
   type CustomerMatchSuggestion,
 } from '@/services/caseService';
 import { aiService, aiErrorMessage, type ChurnConversion } from '@/services/aiService';
-import { accountService, type CaseCustomerContext } from '@/services/accountService';
+import { accountService, type CaseCustomerContext, type AccountProjectSummary } from '@/services/accountService';
 import {
   authorizationService,
   type AuthorizationFieldState,
@@ -307,6 +307,26 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
     ['Backoffice', 'Supervisor'].includes(user?.role ?? '') &&
     !isOwnCase &&
     !narrowScopeConfirmedByNav;
+
+  // Proje inline-edit — vakanın accountId'sine bağlı, sadece o müşterinin
+  // (vakanın companyId'siyle eşleşen AccountCompany altındaki) projeleri.
+  // SmartTicketNewPage.tsx'teki proje fetch pattern'iyle aynı.
+  const [accountProjects, setAccountProjects] = useState<AccountProjectSummary[]>([]);
+  useEffect(() => {
+    let alive = true;
+    if (!item?.accountId || !item?.companyId) {
+      setAccountProjects([]);
+      return;
+    }
+    void accountService.get(item.accountId).then((detail) => {
+      if (!alive) return;
+      const company = detail?.companies.find((c) => c.companyId === item.companyId);
+      setAccountProjects((company?.projects ?? []).filter((p) => p.isActive));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [item?.accountId, item?.companyId]);
 
   // WR-A7b — Catalog state (Package + Product). Vakanın companyId/accountId'sine bağlı.
   const [catalogPackages, setCatalogPackages] = useState<
@@ -1172,6 +1192,12 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
           onChangeAccount={canLinkAccount ? () => { setChangeAccountMode(true); setLinkAccountOpen(true); } : undefined}
           pendingAccountChange={pendingAccountChange}
           onCancelAccountChange={() => setPendingAccountChange(null)}
+          accountProjects={accountProjects}
+          drafts={drafts}
+          editingField={editingField}
+          onStartEdit={(f) => setEditingField(f)}
+          onCommitDraft={commitDraft}
+          onCancelEdit={cancelEdit}
           onConfirmLinkSuggestion={
             canLinkAccount
               ? async (suggestion) => {
@@ -1532,6 +1558,12 @@ function LeftPanel({
   onConfirmLinkSuggestion,
   drawerOpen,
   onCloseDrawer,
+  accountProjects,
+  drafts,
+  editingField,
+  onStartEdit,
+  onCommitDraft,
+  onCancelEdit,
 }: {
   item: Case;
   accountPhone?: string;
@@ -1549,6 +1581,13 @@ function LeftPanel({
   onConfirmLinkSuggestion?: (suggestion: CustomerMatchSuggestion) => Promise<void>;
   drawerOpen: boolean;
   onCloseDrawer: () => void;
+  /** Proje inline edit — Müşteri kartında. */
+  accountProjects: AccountProjectSummary[];
+  drafts: Partial<Case>;
+  editingField: string | null;
+  onStartEdit: (field: string) => void;
+  onCommitDraft: (field: keyof Case, value: unknown) => void;
+  onCancelEdit: () => void;
 }) {
   const ctxCompany = customerContext?.company ?? null;
   const content = (
@@ -1633,7 +1672,6 @@ function LeftPanel({
                   parts.push(item.companyName);
                   if (ctxCompany?.externalCustomerCode) parts.push(`Kod ${ctxCompany.externalCustomerCode}`);
                   if (ctxCompany?.packageName) parts.push(ctxCompany.packageName);
-                  if (item.accountProjectName) parts.push(`Proje: ${item.accountProjectName}`);
                   if (item.packageName) parts.push(`Paket: ${item.packageName}`);
                   if (item.productName) parts.push(`Ürün: ${item.productName}`);
                   if (item.supportLevel) parts.push(SUPPORT_LEVEL_LABELS[item.supportLevel] ?? item.supportLevel);
@@ -1650,6 +1688,42 @@ function LeftPanel({
                   </span>
                 )}
               </div>
+              {/* Proje — Sınıflandırma kartından buraya taşındı; müşteriyle
+                  birlikte tek yerde görünüp düzenlensin diye. accountId
+                  yoksa disabled (müşterisiz vakada proje seçilemez). */}
+              {(() => {
+                const projectDisplayId =
+                  (drafts.accountProjectId as string | null | undefined) ?? item.accountProjectId ?? null;
+                return (
+                  <div className="flex items-center gap-1 text-xs text-slate-500 dark:text-ndark-muted">
+                    <span className="shrink-0">Proje:</span>
+                    <InlineEdit
+                      fieldKey="accountProjectId"
+                      type="select"
+                      value={projectDisplayId ?? ''}
+                      editing={editingField === 'accountProjectId'}
+                      isDraft={drafts.accountProjectId !== undefined}
+                      onStart={() => onStartEdit('accountProjectId')}
+                      onCommit={(val) => onCommitDraft('accountProjectId', val || null)}
+                      onCancel={onCancelEdit}
+                      disabled={!item.accountId}
+                      options={[
+                        { value: '', label: '— Proje Yok —' },
+                        ...accountProjects.map((p) => ({ value: p.id, label: `${p.name} (${p.code})` })),
+                      ]}
+                      renderDisplay={() => (
+                        <span className="text-slate-700 dark:text-ndark-text">
+                          {(() => {
+                            if (!projectDisplayId) return item.accountProjectName ?? '—';
+                            const found = accountProjects.find((p) => p.id === projectDisplayId);
+                            return found ? `${found.name} (${found.code})` : item.accountProjectName ?? projectDisplayId;
+                          })()}
+                        </span>
+                      )}
+                    />
+                  </div>
+                );
+              })()}
               {ctxCompany?.activeProducts && ctxCompany.activeProducts.length > 0 && (
                 <div className="pt-1">
                   <div className="text-[10px] font-medium text-slate-400 dark:text-ndark-dim">
