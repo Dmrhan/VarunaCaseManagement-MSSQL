@@ -36,6 +36,11 @@ ok('2.4 dokunulmayan iş beklemeleri HARİÇ (müşteri/3.taraf/erteleme)',
   /müşteri\/3\.taraf\/erteleme beklemesi HARİÇ/.test(agg));
 ok('2.5 PII-free — customerContact/customerCompany/exampleTitles payload\'a girmez',
   !/exampleTitles/.test(agg) && !/customerContact/.test(agg) && !/customerCompanyName/.test(agg));
+ok('2.6 team scope engagement sinyallerine de uygulanır (Codex #457 P2 — çapraz-takım sızıntısı yok)',
+  /function teamClause/.test(agg) && /const teamJoin = hasTeam\(teamIds\)/.test(agg)
+  && /teamClause\(p, teamIds, 'cs\.\[assignedTeamId\]'\)/.test(agg)
+  && /teamClause\(idleParams, teamIds, 'c\.\[assignedTeamId\]'\)/.test(agg)
+  && /teamClause\(trParams, teamIds, 'c\.\[assignedTeamId\]'\)/.test(agg));
 
 console.log('── UI (PersonProfileView) ──');
 ok('3.1 EngagementSection + verdict banner (4 durum) + anti-toksik caption',
@@ -68,6 +73,8 @@ if (process.env.SMOKE_LIVE === '1') {
       && eng.signals.every((s) => 'value' in s && 'teamValue' in s && 'tone' in s && 'hint' in s));
     ok('L2 verdict dürüst — concern=0 & resolved≥5 → active (haksız watch yok)',
       !(eng.verdict.concerns === 0 && eng.verdict.resolved >= 5 && eng.verdict.read !== 'active'));
+    // Not: team-scope daraltma (Codex #457 P2) DB-fetch teamId ile manuel doğrulandı
+    // (L2 merceğinde dokunuş 18.5→0, baseline L1'e daralıyor). Yapısal assert 2.6 guard.
     // authz: agent rolü person-engagement\'e erişememeli (P1)
     const agent = await login('agent@varuna.dev', 'Test1234!');
     if (agent.accessToken) {
