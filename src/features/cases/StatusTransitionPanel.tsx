@@ -424,11 +424,19 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   // ETİKETLENMİŞ vaka muaf (bare KB analizi muafiyet saymaz).
   const prevClosureCf = (
     item.customFields as {
-      smartTicket?: { closure?: { rootCauseGroup?: string; rootCauseGroupLabel?: string; closureSuggestion?: unknown } };
+      smartTicket?: {
+        closure?: {
+          rootCauseGroup?: string; rootCauseGroupLabel?: string;
+          rootCauseDetail?: string; resolutionType?: string; permanentPrevention?: string;
+          closureSuggestion?: unknown;
+        };
+      };
     } | undefined
   )?.smartTicket?.closure;
+  // Muafiyet, zorunlulukla HİZALI: 4 sınıftan herhangi biri daha önce set edilmişse muaf.
   const closureAlreadyAnalyzed = !!(
-    prevClosureCf?.rootCauseGroup || prevClosureCf?.rootCauseGroupLabel
+    prevClosureCf?.rootCauseGroup || prevClosureCf?.rootCauseGroupLabel ||
+    prevClosureCf?.rootCauseDetail || prevClosureCf?.resolutionType || prevClosureCf?.permanentPrevention
   );
   // KB analizine basmak (kbSuggestion) YETMEZ — en az bir kapanış etiketi SEÇİLMİŞ olmalı.
   const closureLabelsPending =

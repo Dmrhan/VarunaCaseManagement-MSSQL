@@ -679,9 +679,10 @@ export function SmartTicketNewPage({
   // Akıllı Tanımlar (açılış taksonomisi) — SEÇİLEBİLİR (item'ı olan) alanların HEPSİ
   // ZORUNLU (kullanıcı isteği: hepsi zorunlu). Admin'in item tanımlamadığı alan zorunlu
   // sayılmaz — aksi halde o alan seçilemeyeceği için hiç vaka açılamazdı.
-  const taxonomyRequirementSatisfied = TAXONOMY_FIELDS.every(
-    (f) => (taxonomies?.[f.key]?.length ?? 0) === 0 || !!form[f.key],
-  );
+  // Taxonomiler YÜKLENİRKEN sağlanmış sayılmaz (item'lar bilinmeden buton aktifleşmesin).
+  const taxonomyRequirementSatisfied =
+    !taxonomiesLoading &&
+    TAXONOMY_FIELDS.every((f) => (taxonomies?.[f.key]?.length ?? 0) === 0 || !!form[f.key]);
   const canCreate =
     stage === 'opening' &&
     !!form.companyId &&

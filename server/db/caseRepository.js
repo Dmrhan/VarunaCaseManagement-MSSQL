@@ -3905,9 +3905,14 @@ export const caseRepository = {
       // kapanış etiketi (kök neden grubu / detay / çözüm tipi / kalıcı önleme) SEÇİLMİŞ
       // olmalı. Daha önce ETİKETLENMİŞ vaka muaf; ama bare KB analizi (closureSuggestion)
       // artık muafiyet saymaz — etiket şart.
+      // Muafiyet, zorunlulukla (hasAnyLabel) HİZALI olmalı: 4 sınıftan HERHANGİ biri
+      // daha önce set edilmişse vaka "etiketlenmiş" sayılır (yalnız rootCauseGroup değil).
       const alreadyAnalyzed = !!(
         prevClosure?.rootCauseGroup ||
-        prevClosure?.rootCauseGroupLabel
+        prevClosure?.rootCauseGroupLabel ||
+        prevClosure?.rootCauseDetail ||
+        prevClosure?.resolutionType ||
+        prevClosure?.permanentPrevention
       );
       if (!alreadyAnalyzed) {
         const cl = payload.smartTicketClosure ?? {};
