@@ -101,7 +101,12 @@ import {
   type CustomerMatchSuggestion,
 } from '@/services/caseService';
 import { aiService, aiErrorMessage, type ChurnConversion } from '@/services/aiService';
-import { accountService, type CaseCustomerContext, type AccountProjectSummary } from '@/services/accountService';
+import {
+  accountService,
+  canLookupAccountForCaseProject,
+  type CaseCustomerContext,
+  type AccountProjectSummary,
+} from '@/services/accountService';
 import {
   authorizationService,
   type AuthorizationFieldState,
@@ -316,10 +321,13 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
   // Proje inline-edit — vakanın accountId'sine bağlı, sadece o müşterinin
   // (vakanın companyId'siyle eşleşen AccountCompany altındaki) projeleri.
   // SmartTicketNewPage.tsx'teki proje fetch pattern'iyle aynı.
+  // Review fix — canReadAccounts (müşteri modülü kapısı) DEĞİL, dar
+  // kapsamlı canLookupAccountForCaseProject kullanılır; aksi halde Agent'a
+  // yanlışlıkla tüm müşteri modülü açılırdı (bkz. accountService.ts).
   const [accountProjects, setAccountProjects] = useState<AccountProjectSummary[]>([]);
   useEffect(() => {
     let alive = true;
-    if (!item?.accountId || !item?.companyId) {
+    if (!item?.accountId || !item?.companyId || !canLookupAccountForCaseProject(user?.role)) {
       setAccountProjects([]);
       return;
     }
@@ -331,7 +339,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
     return () => {
       alive = false;
     };
-  }, [item?.accountId, item?.companyId]);
+  }, [item?.accountId, item?.companyId, user?.role]);
 
   // WR-A7b — Catalog state (Package + Product). Vakanın companyId/accountId'sine bağlı.
   const [catalogPackages, setCatalogPackages] = useState<
