@@ -10,7 +10,7 @@
  * Backend: POST /api/analytics/people-performance (Supervisor+).
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Users2, Info, RefreshCw } from 'lucide-react';
+import { Users2, Info, RefreshCw, Lightbulb } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -121,26 +121,122 @@ function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
 }
 
+// Yeniden açılma · Kalite birleşik hücre (maket deseni). Reopen değeri + QA puanı;
+// bağlam çipi reopen üzerinden (kalite guardrail altında "—").
+function ReopenQualityCell({ reopen, qa, chip }: { reopen: PersonMetric; qa: PersonMetric; chip: { tone: Tone; text: string } | null }) {
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 dark:text-ndark-muted">
+        Yeniden açılma · Kalite <InfoDot metric={reopen} />
+      </div>
+      <div className="mt-0.5 flex items-baseline gap-1.5">
+        <span className={`text-xl font-bold tabular-nums tracking-tight ${reopen.value === null ? 'text-slate-300 dark:text-ndark-dim' : 'text-slate-900 dark:text-ndark-text'}`}>{formatMetric(reopen)}</span>
+        <span className="text-sm font-semibold tabular-nums text-slate-400 dark:text-ndark-dim">· {qa.value === null ? '—' : `${qa.value}/5`}</span>
+      </div>
+      <div className="mt-0.5 text-[10px] text-slate-400 dark:text-ndark-dim">tekrar açılan ÷ çözülen · kalite (QA)</div>
+      <div className="mt-1.5">
+        {reopen.insufficient
+          ? <span className="text-[11px] text-slate-400 dark:text-ndark-dim">henüz {reopen.sampleSize} vaka — yorum için yetersiz</span>
+          : <ContextChip chip={chip} />}
+      </div>
+    </div>
+  );
+}
+
+const COACH_CLS: Record<'watch' | 'info' | 'good', string> = {
+  watch: 'border-amber-200 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/30',
+  info: 'border-sky-200 bg-sky-50/70 dark:border-sky-900/50 dark:bg-sky-950/30',
+  good: 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/50 dark:bg-emerald-950/30',
+};
+const COACH_TXT: Record<'watch' | 'info' | 'good', string> = {
+  watch: 'text-amber-900 dark:text-amber-200',
+  info: 'text-sky-900 dark:text-sky-200',
+  good: 'text-emerald-900 dark:text-emerald-200',
+};
+
+function CoachingSignal({ coaching }: { coaching: PersonPerformance['coaching'] }) {
+  if (!coaching?.text || !coaching.tone) return null;
+  const tone = coaching.tone;
+  return (
+    <div className={`mx-4 mb-3 rounded-lg border px-3 py-2.5 ${COACH_CLS[tone]}`}>
+      <div className={`flex items-start gap-2 text-[12px] leading-relaxed ${COACH_TXT[tone]}`}>
+        <Lightbulb size={13} className="mt-0.5 flex-none" />
+        <span><b className="font-semibold">Koçluk sinyali:</b> {coaching.text}</span>
+      </div>
+    </div>
+  );
+}
+
 function PersonCard({ p, bench, onOpen }: { p: PersonPerformance; bench: PeoplePerformanceResponse['teamBenchmark']; onOpen: () => void }) {
   const m = p.metrics;
   return (
     <Card>
       <CardBody className="!p-0">
-        <button type="button" onClick={onOpen} className="flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3 text-left hover:bg-slate-50 dark:border-ndark-border dark:hover:bg-ndark-card">
+        <button type="button" onClick={onOpen} className="group flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:border-ndark-border dark:hover:bg-ndark-card">
           <span className="sr-only">{p.name} profilini aç</span>
           <div className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-gradient-to-br from-brand-600 to-brand-700 text-sm font-bold text-white">
             {initials(p.name)}
           </div>
-          <span className="min-w-0">
+          <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-semibold text-slate-900 dark:text-ndark-text">{p.name}</span>
             <span className="text-[11px] text-slate-500 dark:text-ndark-muted">{p.sampleSize} vaka çözdü · bu dönem</span>
           </span>
+          <span className="flex-none text-[11px] font-medium text-brand-600 opacity-0 transition-opacity group-hover:opacity-100">Profili aç →</span>
         </button>
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-3">
           <MetricCell metric={m.resolved} chip={contextChip(m.resolved.value, bench.resolved, false)} />
           <MetricCell metric={m.medianHours} chip={contextChip(m.medianHours.value, bench.medianHours, true)} />
-          <MetricCell metric={m.reopenRatePct} chip={contextChip(m.reopenRatePct.value, bench.reopenRatePct, true)} />
+          <ReopenQualityCell reopen={m.reopenRatePct} qa={m.qaScore} chip={contextChip(m.reopenRatePct.value, bench.reopenRatePct, true)} />
           <MetricCell metric={m.openWip} chip={contextChip(m.openWip.value, bench.openWip, true)} />
+        </div>
+        <CoachingSignal coaching={p.coaching} />
+      </CardBody>
+    </Card>
+  );
+}
+
+// Zengin ⓘ — serbest metin (özet kartı için; metrik-sözleşme dışı açıklama).
+function InfoText({ text }: { text: string }) {
+  return (
+    <span className="group relative inline-flex">
+      <Info size={12} className="cursor-help text-slate-300 hover:text-brand-600 dark:text-ndark-dim" />
+      <span role="tooltip"
+        className="pointer-events-none absolute right-0 top-[calc(100%+6px)] z-30 w-64 rounded-lg bg-slate-900 px-3 py-2 text-[11px] leading-relaxed text-slate-100 opacity-0 shadow-xl transition-opacity group-hover:opacity-100 dark:bg-black">
+        {text}
+      </span>
+    </span>
+  );
+}
+
+type SecTone = 'good' | 'bad' | 'flat';
+function SummaryCard({
+  layer, label, value, hint, tip, secondaries,
+}: {
+  layer: string; label: string; value: string; hint: string; tip?: string;
+  secondaries: { k: string; v: string; tone?: SecTone }[];
+}) {
+  const toneCls: Record<SecTone, string> = {
+    good: 'text-emerald-600 dark:text-emerald-400',
+    bad: 'text-rose-600 dark:text-rose-400',
+    flat: 'text-slate-700 dark:text-ndark-text',
+  };
+  return (
+    <Card>
+      <CardBody>
+        <div className="flex items-center justify-between">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-ndark-dim">{layer}</div>
+          {tip && <InfoText text={tip} />}
+        </div>
+        <div className="mt-1 text-[11px] font-medium text-slate-500 dark:text-ndark-muted">{label}</div>
+        <div className="mt-0.5 text-2xl font-bold tabular-nums tracking-tight text-slate-900 dark:text-ndark-text">{value}</div>
+        <div className="mt-0.5 text-[10.5px] text-slate-400 dark:text-ndark-dim">{hint}</div>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 border-t border-dashed border-slate-200 pt-2 dark:border-ndark-border">
+          {secondaries.map((s, i) => (
+            <div key={i} className="text-[11px]">
+              <span className="text-slate-500 dark:text-ndark-muted">{s.k} </span>
+              <b className={`tabular-nums ${toneCls[s.tone ?? 'flat']}`}>{s.v}</b>
+            </div>
+          ))}
         </div>
       </CardBody>
     </Card>
@@ -148,27 +244,43 @@ function PersonCard({ p, bench, onOpen }: { p: PersonPerformance; bench: PeopleP
 }
 
 function TeamSummary({ data }: { data: PeoplePerformanceResponse }) {
-  const totalResolved = data.people.reduce((s, p) => s + (p.metrics.resolved.value ?? 0), 0);
-  const maxWip = data.people.reduce((mx, p) => Math.max(mx, p.metrics.openWip.value ?? 0), 0);
-  const b = data.teamBenchmark;
-  const tiles: { layer: string; label: string; value: string; sub: string }[] = [
-    { layer: '① Hacim', label: 'Toplam çözülen', value: `${totalResolved} vaka`, sub: `${data.people.length} kişi` },
-    { layer: '② Süre', label: 'Tipik çözüm (ekip ort.)', value: b.medianHours === null ? '—' : `${b.medianHours} saat`, sub: 'ortadaki vaka' },
-    { layer: '③ Kalite', label: 'Yeniden açılma (ekip ort.)', value: b.reopenRatePct === null ? '—' : `%${b.reopenRatePct}`, sub: `zamanında çözüm %${b.slaCompliancePct ?? '—'}` },
-    { layer: '④ Yük', label: 'Elindeki açık iş (ekip ort.)', value: b.openWip === null ? '—' : `${b.openWip} vaka`, sub: `en yüklü ${maxWip} vaka` },
-  ];
+  const s = data.teamSummary;
+  const hrs = (v: number | null) => (v === null ? '—' : `${v} saat`);
+  const pct = (v: number | null) => (v === null ? '—' : `%${v}`);
+  const melt = s.netMelted;
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      {tiles.map((t) => (
-        <Card key={t.layer}>
-          <CardBody>
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-ndark-dim">{t.layer}</div>
-            <div className="mt-1 text-[11px] font-medium text-slate-500 dark:text-ndark-muted">{t.label}</div>
-            <div className="mt-0.5 text-2xl font-bold tabular-nums tracking-tight text-slate-900 dark:text-ndark-text">{t.value}</div>
-            <div className="mt-1 border-t border-dashed border-slate-200 pt-1.5 text-[11px] text-slate-500 dark:border-ndark-border dark:text-ndark-muted">{t.sub}</div>
-          </CardBody>
-        </Card>
-      ))}
+    <div>
+      <p className="mb-2 px-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+        Takım özeti · 4 katman — yöneticinin dili; teknik karşılığı ⓘ'de
+      </p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <SummaryCard
+          layer="① İş hacmi" label="Çözülen iş" value={`${s.resolvedTotal} vaka`} hint="bu dönemde çözüme ulaşan"
+          secondaries={[
+            { k: 'Biriken (backlog)', v: `${s.backlog} vaka` },
+            { k: 'Bu dönem net', v: melt >= 0 ? `+${melt} ▲` : `${melt} ▼`, tone: melt >= 0 ? 'good' : 'bad' },
+          ]}
+        />
+        <SummaryCard
+          layer="② Çözüm hızı" label="Tipik çözüm süresi" value={hrs(s.medianHours)} hint="ortadaki vaka (medyan)"
+          tip="TIPIK = MEDYAN — vakaları hızdan sıraya diz, tam ortadaki. Ortalama DEĞİL, çünkü tek uzun vaka ortalamayı yanıltır. YAVAŞ UÇ — en yavaş %10'un başladığı süre (P90). BİRİM — saat · müşteri beklemesi hariç."
+          secondaries={[{ k: 'Yavaş uç (P90)', v: hrs(s.p90Hours) }]}
+        />
+        <SummaryCard
+          layer="③ Kalite" label="Yeniden açılma oranı" value={pct(s.reopenRatePct)} hint="kapatılıp tekrar açılan iş"
+          secondaries={[
+            { k: 'Kalite puanı', v: s.qaScore === null ? '—' : `${s.qaScore}/5` },
+            { k: 'Zamanında çözüm', v: pct(s.slaCompliancePct) },
+          ]}
+        />
+        <SummaryCard
+          layer="④ İş yükü" label="Elindeki açık iş" value={s.openWip === null ? '—' : `${s.openWip} vaka`} hint="kişi ort. · şu an omuzdaki"
+          secondaries={[
+            { k: 'En yüklü kişi', v: s.busiest ? `${s.busiest.openWip} vaka` : '—' },
+            { k: 'Boşta kapasite', v: `${s.idleCapacity} kişi`, tone: s.idleCapacity > 0 ? 'good' : 'flat' },
+          ]}
+        />
+      </div>
     </div>
   );
 }

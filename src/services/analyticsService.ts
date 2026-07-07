@@ -335,14 +335,34 @@ export interface PersonPerformance {
     escalationRatePct: PersonMetric;
     transferRatePct: PersonMetric;
     openWip: PersonMetric;
+    qaScore: PersonMetric;
   };
+  coaching?: { tone: 'watch' | 'info' | 'good' | null; text: string | null };
 }
 export interface PeopleTeamBenchmark {
   resolved: number | null;
   medianHours: number | null;
   reopenRatePct: number | null;
   slaCompliancePct: number | null;
+  escalationRatePct: number | null;
+  transferRatePct: number | null;
+  qaScore: number | null;
   openWip: number | null;
+}
+
+export interface PeopleTeamSummary {
+  resolvedTotal: number;
+  backlog: number;
+  netMelted: number;
+  medianHours: number | null;
+  p90Hours: number | null;
+  openWip: number | null;
+  reopenRatePct: number | null;
+  slaCompliancePct: number | null;
+  qaScore: number | null;
+  busiest: { name: string; openWip: number } | null;
+  idleCapacity: number;
+  peopleCount: number;
 }
 export interface PeoplePerformanceRequest {
   from: string;
@@ -353,6 +373,7 @@ export interface PeoplePerformanceRequest {
 export interface PeoplePerformanceResponse {
   people: PersonPerformance[];
   teamBenchmark: PeopleTeamBenchmark;
+  teamSummary: PeopleTeamSummary;
   meta: { formulaVersion: string; minSampleAgent: number; unitNote: string; durationMs: number };
   scope: { kind: string; companyIds: string[]; teamIds: string[] | null; personIds: string[] | null; narrative?: string };
 }

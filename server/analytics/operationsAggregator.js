@@ -1008,6 +1008,22 @@ async function queryByPerson(scope, filters, from, to, baseWhere) {
   const wipRows = await prisma.$queryRawUnsafe(wipSql, ...w1.params);
   const wip = new Map(wipRows.map((r) => [r.id, { name: r.name, open: Number(r.open_cnt) }]));
 
+  // 3) Per-person QA (kalite puanı) — composite = (empathy+clarity+speed)/3, /5.
+  //    Maket "Kalite puanı"; guardrail qaScore=10 (kişi başına). Az örneklemde null.
+  const q1 = withParam(baseWhere, from);
+  const q2 = withParam(q1, to);
+  const qaSql = `
+    SELECT [assignedPersonId] AS id, COUNT(*) AS qa_cnt,
+      AVG((CAST([qaEmpathyScore] AS FLOAT) + CAST([qaClarityScore] AS FLOAT) + CAST([qaSpeedScore] AS FLOAT)) / 3.0) AS qa_avg
+    FROM [Case]
+    WHERE ${baseWhere.sql}
+      AND [qaScoredAt] >= @P${q1.idx} AND [qaScoredAt] < @P${q2.idx}
+      AND [qaEmpathyScore] IS NOT NULL AND [assignedPersonId] IS NOT NULL
+    GROUP BY [assignedPersonId];
+  `;
+  const qaRows = await prisma.$queryRawUnsafe(qaSql, ...q2.params);
+  const qa = new Map(qaRows.map((r) => [r.id, { count: Number(r.qa_cnt), avg: r.qa_avg == null ? null : Number(r.qa_avg) }]));
+
   // Kişi kümesi = dönemde çözenler ∪ şu an açık işi olanlar. Codex #453 P2 —
   // salt-WIP kişiler resolved:0 ile eklenir; oran/medyan metrikleri zaten
   // örneklem<20 → guardrail null. Yük dengesi sinyali eksik kalmaz.
@@ -1022,6 +1038,8 @@ async function queryByPerson(scope, filters, from, to, baseWhere) {
     escalated: Number(r.escalated_cnt),
     transferred: Number(r.transferred_cnt),
     openWip: wip.get(r.id)?.open ?? 0,
+    qaCount: qa.get(r.id)?.count ?? 0,
+    qaAvg: qa.get(r.id)?.avg ?? null,
   }));
   const seen = new Set(out.map((r) => r.id));
   for (const [id, v] of wip) {
@@ -1030,6 +1048,7 @@ async function queryByPerson(scope, filters, from, to, baseWhere) {
       id, name: v.name ?? id, resolved: 0,
       medianHours: null, p90Hours: null, reopened: 0, slaBreached: 0,
       escalated: 0, transferred: 0, openWip: v.open,
+      qaCount: qa.get(id)?.count ?? 0, qaAvg: qa.get(id)?.avg ?? null,
     });
   }
   return out;
@@ -1064,6 +1083,15 @@ function shapePersonMetrics(row) {
       escalationRatePct: ratio('escalationRatePct', 'Eskalasyon oranı', safePct(row.escalated, n), 'üst kademeye çıkan ÷ çözülen'),
       transferRatePct: ratio('transferRatePct', 'Devir oranı', safePct(row.transferred, n), 'en az bir kez devredilen ÷ çözülen'),
       openWip: m('openWip', 'Elindeki açık iş', row.openWip, 'vaka', 'şu an açık durumda taşıdığı'),
+      qaScore: (() => {
+        const qEnough = (row.qaCount ?? 0) >= MIN_SAMPLE.qaScore;
+        return {
+          key: 'qaScore', label: 'Kalite puanı',
+          value: qEnough && row.qaAvg != null ? Math.round(row.qaAvg * 10) / 10 : null,
+          unit: '/5', formula: 'empati+netlik+hız ortalaması (QA)', sampleSize: row.qaCount ?? 0,
+          insufficient: !qEnough,
+        };
+      })(),
     },
   };
 }
@@ -1073,6 +1101,49 @@ function medianOf(values) {
   if (a.length === 0) return null;
   const mid = Math.floor(a.length / 2);
   return a.length % 2 ? a[mid] : Math.round(((a[mid - 1] + a[mid]) / 2) * 10) / 10;
+}
+
+// Kural-tabanlı Koçluk sinyali (deterministik, PII YOK). Metriklerden EN BELİRGİN
+// tek deseni seçer (öncelik: risk → gelişim → güçlü). tone: watch|info|good, null=sinyal yok.
+// Kullanıcı kararı 2026-07-07: RUNA/AI değil kural-tabanlı (kredi gerektirmez, tekrarlanabilir).
+function buildCoachingSignal(p, tb) {
+  const v = (k) => p.metrics[k]?.value ?? null;
+  const resolved = v('resolved'), reopen = v('reopenRatePct'), openWip = v('openWip');
+  const esc = v('escalationRatePct'), tr = v('transferRatePct'), qa = v('qaScore'), median = v('medianHours');
+  const tResolved = tb.resolved, tReopen = tb.reopenRatePct, tWip = tb.openWip, tEsc = tb.escalationRatePct, tMedian = tb.medianHours;
+  const oneIn = (pct) => (pct && pct > 0 ? Math.max(2, Math.round(100 / pct)) : null);
+
+  // 1) Hız kaliteyi yiyor — çok + (hızlı) ama yeniden açılma belirgin yüksek
+  if (resolved != null && tResolved != null && resolved >= tResolved
+      && reopen != null && tReopen != null && reopen >= Math.max(tReopen * 1.5, tReopen + 5) && reopen >= 8) {
+    const mine = oneIn(reopen), team = oneIn(tReopen);
+    const fast = median != null && tMedian != null && median <= tMedian ? ' ve hızlı' : '';
+    return { tone: 'watch', text: `Çok iş kapatıyor${fast} ama her ${mine} vakadan 1'i geri dönüyor${team ? ` (ekip: ${team}'de 1)` : ''}. Hız kaliteyi yiyor — sıralamada öne çıkar, gerçekte kalite koçluğu gerekiyor.` };
+  }
+  // 2) Aşırı yük — WIP ekip ortancasının belirgin üstünde
+  if (openWip != null && tWip != null && tWip > 0 && openWip >= tWip * 2 && openWip >= 5) {
+    return { tone: 'watch', text: `Elinde ekip ortancasının (${tWip}) belirgin üstünde açık iş var (${openWip}). Yük dengelenmezse gecikme riski — önceliklendirme/devir desteği düşünülebilir.` };
+  }
+  // 3) Yüksek devir — sahiplenme zayıf
+  if (tr != null && tr >= 40) {
+    return { tone: 'watch', text: `İşlerin önemli kısmını (%${tr}) başkasına devrediyor. Sahiplenme ve ilk-temas çözümü koçlukla güçlendirilebilir.` };
+  }
+  // 4) Sessiz uzman — düşük hacim ama temiz/kaliteli
+  if (resolved != null && tResolved != null && tResolved > 0 && resolved < tResolved * 0.7
+      && ((reopen != null && tReopen != null && reopen <= tReopen) || (qa != null && qa >= 4))) {
+    return { tone: 'info', text: `Hacmi ekip ortancasının altında ama işi temiz${qa != null ? ` (kalite ${qa}/5)` : ''}. Sessiz-üretken profil — sadece sayıya bakıp yanlış değerlendirme; daha çok iş üstlenebilir.` };
+  }
+  // 5) Sadece kolay iş — çok hacim, zor iş payı düşük
+  if (resolved != null && tResolved != null && resolved >= tResolved
+      && esc != null && tEsc != null && tEsc > 0 && esc < tEsc * 0.4) {
+    return { tone: 'info', text: `Çok iş kapatıyor ama zor iş payı (eskalasyon %${esc}) ekip altında. Zorlayıcı işlerle gelişim alanı açılabilir.` };
+  }
+  // 6) Dengeli ve güçlü
+  if (resolved != null && tResolved != null && resolved >= tResolved
+      && reopen != null && tReopen != null && reopen <= tReopen) {
+    return { tone: 'good', text: `Dengeli ve sağlam: hacim ekip üstünde, yeniden açılma düşük${qa != null ? `, kalite ${qa}/5` : ''}. Bilgi paylaşımı için iyi bir referans.` };
+  }
+  return { tone: null, text: null };
 }
 
 /**
@@ -1101,9 +1172,44 @@ export async function computePeoplePerformanceOverview({ scope, filters }) {
     medianHours: medianOf(people.map((p) => p.metrics.medianHours.value)),
     reopenRatePct: medianOf(people.map((p) => p.metrics.reopenRatePct.value)),
     slaCompliancePct: medianOf(people.map((p) => p.metrics.slaCompliancePct.value)),
+    escalationRatePct: medianOf(people.map((p) => p.metrics.escalationRatePct.value)),
+    transferRatePct: medianOf(people.map((p) => p.metrics.transferRatePct.value)),
+    qaScore: medianOf(people.map((p) => p.metrics.qaScore.value)),
     openWip: medianOf(people.map((p) => p.metrics.openWip.value)),
   };
-  return { people, teamBenchmark, meta: { ...meta, durationMs: Date.now() - t0 } };
+
+  // Takım özeti (maket 4 katman ikincil metrikleri). Mevcut tetkik sorguları reuse:
+  // queryPeriodMetrics (created/resolved/sla) + queryOpenSnapshot (backlog=openCount).
+  const [period, snapshot] = await Promise.all([
+    queryPeriodMetrics(scope, filters, from, to, baseWhere),
+    queryOpenSnapshot(scope, filters, baseWhere),
+  ]);
+  const busiest = people.reduce(
+    (a, b) => ((b.metrics.openWip.value ?? 0) > (a?.metrics.openWip.value ?? -1) ? b : a), null);
+  const idleCapacity = people.filter(
+    (p) => (p.metrics.openWip.value ?? 0) === 0 && (p.metrics.resolved.value ?? 0) > 0).length;
+  const teamSummary = {
+    resolvedTotal: period.totalResolved,
+    backlog: snapshot.openCount,
+    // Net eriyen: dönemde çözülen − açılan (pozitif = backlog eriyor).
+    netMelted: period.totalResolved - period.totalCreated,
+    medianHours: teamBenchmark.medianHours,
+    p90Hours: medianOf(people.map((p) => p.metrics.p90Hours.value)),
+    openWip: teamBenchmark.openWip,
+    reopenRatePct: teamBenchmark.reopenRatePct,
+    slaCompliancePct: period.totalResolved > 0
+      ? roundPct(100 - safePct(period.slaResolvedCount, period.totalResolved)) : null,
+    qaScore: teamBenchmark.qaScore,
+    busiest: busiest && (busiest.metrics.openWip.value ?? 0) > 0
+      ? { name: busiest.name, openWip: busiest.metrics.openWip.value } : null,
+    idleCapacity,
+    peopleCount: people.length,
+  };
+
+  // Her kişiye kural-tabanlı koçluk sinyali (ekip ortancasına göre).
+  const peopleOut = people.map((p) => ({ ...p, coaching: buildCoachingSignal(p, teamBenchmark) }));
+
+  return { people: peopleOut, teamBenchmark, teamSummary, meta: { ...meta, durationMs: Date.now() - t0 } };
 }
 
 async function queryByCategory(scope, filters, from, to, baseWhere) {
