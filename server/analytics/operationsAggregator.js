@@ -1118,32 +1118,80 @@ function buildCoachingSignal(p, tb) {
       && reopen != null && tReopen != null && reopen >= Math.max(tReopen * 1.5, tReopen + 5) && reopen >= 8) {
     const mine = oneIn(reopen), team = oneIn(tReopen);
     const fast = median != null && tMedian != null && median <= tMedian ? ' ve hızlı' : '';
-    return { tone: 'watch', text: `Çok iş kapatıyor${fast} ama her ${mine} vakadan 1'i geri dönüyor${team ? ` (ekip: ${team}'de 1)` : ''}. Hız kaliteyi yiyor — sıralamada öne çıkar, gerçekte kalite koçluğu gerekiyor.` };
+    return { tone: 'watch', text: `Çok iş kapatıyor${fast} ama her ${mine} vakadan 1'i geri dönüyor${team ? ` (ekip: ${team}'de 1)` : ''}. Hız kaliteyi yiyor — sıralamada öne çıkar, gerçekte kalite koçluğu gerekiyor.`, action: 'Kalite koçluğu için birebir planla' };
   }
-  // 2) Aşırı yük — WIP ekip ortancasının belirgin üstünde
-  if (openWip != null && tWip != null && tWip > 0 && openWip >= tWip * 2 && openWip >= 5) {
-    return { tone: 'watch', text: `Elinde ekip ortalamasının (${tWip}) belirgin üstünde açık iş var (${openWip}). Yük dengelenmezse gecikme riski — önceliklendirme/devir desteği düşünülebilir.` };
+  // 2) Aşırı yük — WIP belirgin yüksek. Ekip medyanı (tWip) 0 ise (çoğu kişide açık
+  //    iş yokken) mutlak eşik kullan: 8+ açık iş tek başına yük sinyalidir; aksi halde
+  //    medyanın 2 katı. (tWip>0 guard'ı tek başına, herkesin-0 olduğu ekipte gerçek
+  //    aşırı-yükü gizliyordu — kalıcı düzeltme 2026-07-08.)
+  if (openWip != null && openWip >= 5
+      && (tWip != null && tWip > 0 ? openWip >= tWip * 2 : openWip >= 8)) {
+    const ref = tWip != null && tWip > 0 ? `ekip ortalamasının (${tWip}) belirgin üstünde` : 'ekip normalinin çok üstünde';
+    return { tone: 'watch', text: `Elinde ${ref} açık iş var (${openWip}). Yük dengelenmezse gecikme riski — önceliklendirme/devir desteği düşünülebilir.`, action: 'İş dağılımını gözden geçir' };
   }
   // 3) Yüksek devir — sahiplenme zayıf
   if (tr != null && tr >= 40) {
-    return { tone: 'watch', text: `İşlerin önemli kısmını (%${tr}) başkasına devrediyor. Sahiplenme ve ilk-temas çözümü koçlukla güçlendirilebilir.` };
+    return { tone: 'watch', text: `İşlerin önemli kısmını (%${tr}) başkasına devrediyor. Sahiplenme ve ilk-temas çözümü koçlukla güçlendirilebilir.`, action: 'Sahiplenme için koçluk yap' };
   }
   // 4) Sessiz uzman — düşük hacim ama temiz/kaliteli
   if (resolved != null && tResolved != null && tResolved > 0 && resolved < tResolved * 0.7
       && ((reopen != null && tReopen != null && reopen <= tReopen) || (qa != null && qa >= 4))) {
-    return { tone: 'info', text: `Hacmi ekip ortalamasının altında ama işi temiz${qa != null ? ` (kalite ${qa}/5)` : ''}. Sessiz-üretken profil — sayıya bakıp erken yorumlamamalı; daha çok iş üstlenebilir.` };
+    return { tone: 'info', text: `Hacmi ekip ortalamasının altında ama işi temiz${qa != null ? ` (kalite ${qa}/5)` : ''}. Sessiz-üretken profil — sayıya bakıp erken yorumlamamalı; daha çok iş üstlenebilir.`, action: 'Kapasite için konuş, daha zorlayıcı iş ver' };
   }
   // 5) Sadece kolay iş — çok hacim, zor iş payı düşük
   if (resolved != null && tResolved != null && resolved >= tResolved
       && esc != null && tEsc != null && tEsc > 0 && esc < tEsc * 0.4) {
-    return { tone: 'info', text: `Çok iş kapatıyor ama zor iş payı (eskalasyon %${esc}) ekip altında. Zorlayıcı işlerle gelişim alanı açılabilir.` };
+    return { tone: 'info', text: `Çok iş kapatıyor ama zor iş payı (eskalasyon %${esc}) ekip altında. Zorlayıcı işlerle gelişim alanı açılabilir.`, action: 'Zorlayıcı işlerle geliştir' };
   }
   // 6) Dengeli ve güçlü
   if (resolved != null && tResolved != null && resolved >= tResolved
       && reopen != null && tReopen != null && reopen <= tReopen) {
-    return { tone: 'good', text: `Dengeli ve sağlam: hacim ekip üstünde, yeniden açılma düşük${qa != null ? `, kalite ${qa}/5` : ''}. Bilgi paylaşımı için iyi bir referans.` };
+    return { tone: 'good', text: `Dengeli ve sağlam: hacim ekip üstünde, yeniden açılma düşük${qa != null ? `, kalite ${qa}/5` : ''}. Bilgi paylaşımı için iyi bir referans.`, action: 'Bilgi paylaşımı için referans yap' };
   }
-  return { tone: null, text: null };
+  return { tone: null, text: null, action: null };
+}
+
+// Regenerasyon Faz A "Kim güçlü?" — kişi başına top KB iş süreci (businessProcessLabel)
+// + konu-içi hız (ekip medyanına göre). Uzman = belirgin çok yaptığı ve/veya ekipten
+// hızlı çözdüğü konu. Kullanıcı direktifi: uzmanlık KB etiketiyle.
+const KB_BIZPROC_OPS = `JSON_VALUE([customFields],'$.smartTicket.businessProcessLabel')`;
+async function queryPeopleExpertise(scope, filters, from, to, baseWhere) {
+  if (scope.companyIds.length === 0) return new Map();
+  const p1 = withParam(baseWhere, from);
+  const p2 = withParam(p1, to);
+  const mine = await prisma.$queryRawUnsafe(`
+    SELECT pid, topic, COUNT(*) AS cnt, MIN(med) AS med FROM (
+      SELECT [assignedPersonId] AS pid, ${KB_BIZPROC_OPS} AS topic,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(DATEDIFF(SECOND,[createdAt],[resolvedAt]) AS float)/3600.0)
+          OVER (PARTITION BY [assignedPersonId], ${KB_BIZPROC_OPS}) AS med
+      FROM [Case]
+      WHERE ${baseWhere.sql} AND [resolvedAt] >= @P${p1.idx} AND [resolvedAt] < @P${p2.idx}
+        AND [assignedPersonId] IS NOT NULL AND [resolvedAt] > [createdAt] AND ${KB_BIZPROC_OPS} IS NOT NULL
+    ) x GROUP BY pid, topic;`, ...p2.params);
+  const team = await prisma.$queryRawUnsafe(`
+    SELECT topic, MIN(med) AS med FROM (
+      SELECT ${KB_BIZPROC_OPS} AS topic,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(DATEDIFF(SECOND,[createdAt],[resolvedAt]) AS float)/3600.0)
+          OVER (PARTITION BY ${KB_BIZPROC_OPS}) AS med
+      FROM [Case]
+      WHERE ${baseWhere.sql} AND [resolvedAt] >= @P${p1.idx} AND [resolvedAt] < @P${p2.idx}
+        AND [resolvedAt] > [createdAt] AND ${KB_BIZPROC_OPS} IS NOT NULL
+    ) x GROUP BY topic;`, ...p2.params);
+  const teamMed = new Map(team.map((r) => [r.topic, r.med == null ? null : Number(r.med)]));
+  const byPerson = new Map();
+  for (const r of mine) {
+    const cnt = Number(r.cnt), med = r.med == null ? null : Number(r.med);
+    const tmed = teamMed.get(r.topic) ?? null;
+    let fasterPct = null;
+    if (med != null && tmed != null && tmed > 0) fasterPct = Math.max(-99, Math.min(99, Math.round(((tmed - med) / tmed) * 100)));
+    if (!byPerson.has(r.pid)) byPerson.set(r.pid, []);
+    byPerson.get(r.pid).push({ topic: r.topic, count: cnt, fasterPct });
+  }
+  for (const [pid, arr] of byPerson) {
+    arr.sort((a, b) => b.count - a.count);
+    byPerson.set(pid, arr.slice(0, 2));
+  }
+  return byPerson;
 }
 
 /**
@@ -1182,9 +1230,10 @@ export async function computePeoplePerformanceOverview({ scope, filters }) {
 
   // Takım özeti (maket 4 katman ikincil metrikleri). Mevcut tetkik sorguları reuse:
   // queryPeriodMetrics (created/resolved/sla) + queryOpenSnapshot (backlog=openCount).
-  const [period, snapshot] = await Promise.all([
+  const [period, snapshot, expertiseByPerson] = await Promise.all([
     queryPeriodMetrics(scope, filters, from, to, baseWhere),
     queryOpenSnapshot(scope, filters, baseWhere),
+    queryPeopleExpertise(scope, filters, from, to, baseWhere),
   ]);
   const busiest = people.reduce(
     (a, b) => ((b.metrics.openWip.value ?? 0) > (a?.metrics.openWip.value ?? -1) ? b : a), null);
@@ -1208,8 +1257,12 @@ export async function computePeoplePerformanceOverview({ scope, filters }) {
     peopleCount: people.length,
   };
 
-  // Her kişiye kural-tabanlı koçluk sinyali (ekip ortancasına göre).
-  const peopleOut = people.map((p) => ({ ...p, coaching: buildCoachingSignal(p, teamBenchmark) }));
+  // Her kişiye kural-tabanlı koçluk sinyali + KB uzmanlık highlight'ı.
+  const peopleOut = people.map((p) => ({
+    ...p,
+    coaching: buildCoachingSignal(p, teamBenchmark),
+    topExpertise: expertiseByPerson.get(p.id) ?? [],
+  }));
 
   return { people: peopleOut, teamBenchmark, teamSummary, meta: { ...meta, durationMs: Date.now() - t0 } };
 }

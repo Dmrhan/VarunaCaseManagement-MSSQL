@@ -337,7 +337,8 @@ export interface PersonPerformance {
     openWip: PersonMetric;
     qaScore: PersonMetric;
   };
-  coaching?: { tone: 'watch' | 'info' | 'good' | null; text: string | null };
+  coaching?: { tone: 'watch' | 'info' | 'good' | null; text: string | null; action?: string | null };
+  topExpertise?: { topic: string; count: number; fasterPct: number | null }[];
 }
 export interface PeopleTeamBenchmark {
   resolved: number | null;

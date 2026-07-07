@@ -17,6 +17,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import {
   analyticsService,
   type PeoplePerformanceResponse,
+  type PeopleTeamSummary,
   type PersonMetric,
   type PersonPerformance,
 } from '@/services/analyticsService';
@@ -286,6 +287,143 @@ function TeamSummary({ data }: { data: PeoplePerformanceResponse }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Regenerasyon Faz A — anlatı bileşenleri (nabız · dikkat · uzman · dengeli)
+// ─────────────────────────────────────────────────────────────────
+
+// Soru-başlığı (R1) — sayfa yukarıdan aşağı sorulara cevap akar.
+function SectionQ({ q, badge }: { q: string; badge?: string }) {
+  return (
+    <div className="mb-4 flex items-baseline gap-3">
+      <h2 className="text-[19px] font-bold tracking-tight text-slate-900 dark:text-ndark-text">{q}</h2>
+      {badge && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:bg-ndark-bg dark:text-ndark-muted">{badge}</span>}
+    </div>
+  );
+}
+
+// R6 — Nabız cümlesi: tek bakışta ekip okuması.
+function PulseSentence({ s, attention, strong }: { s: PeopleTeamSummary; attention: number; strong: number }) {
+  const melt = s.netMelted;
+  return (
+    <div className="rounded-2xl bg-gradient-to-br from-[#2c1c49] to-[#3f2668] px-6 py-5 text-violet-50 shadow-sm">
+      <div className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-violet-300">Ekip nabzı</div>
+      <p className="mt-2 text-[15px] leading-relaxed sm:text-base">
+        <b className="font-bold text-white">Ekip {attention <= strong ? 'dengeli' : 'yoğun'} çalışıyor.</b>{' '}
+        {melt >= 0 ? <>backlog <b className="text-white">{melt} vaka eridi</b></> : <>backlog <b className="text-white">{Math.abs(melt)} vaka büyüdü</b></>},{' '}
+        tipik çözüm <b className="text-white">{s.medianHours ?? '—'} saat</b>, yeniden açılma <b className="text-white">%{s.reopenRatePct ?? '—'}</b>.{' '}
+        Bu dönem <span className="font-semibold text-amber-200">{attention} kişi</span> yakından bakmaya değer, <span className="font-semibold text-emerald-200">{strong} kişi</span> belirgin güçlü.
+      </p>
+    </div>
+  );
+}
+
+function SupNum({ label, value, tone }: { label: string; value: string; tone?: 'crit' | 'warn' }) {
+  const c = tone === 'crit' ? 'text-rose-600 dark:text-rose-400' : tone === 'warn' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-900 dark:text-ndark-text';
+  return (
+    <span className="text-[12px] text-slate-500 dark:text-ndark-muted">
+      <b className={`block text-[16px] font-bold tabular-nums leading-tight ${c}`}>{value}</b>{label}
+    </span>
+  );
+}
+
+const ATT_UI = {
+  watch: { av: 'from-amber-500 to-amber-600', pill: 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300', dot: 'bg-amber-500', act: 'border-amber-200 bg-amber-50/70 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200' },
+  info: { av: 'from-sky-500 to-sky-600', pill: 'bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300', dot: 'bg-sky-500', act: 'border-sky-200 bg-sky-50/70 text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200' },
+};
+// Kısa pill etiketi — koçluk metninin desenine göre.
+function attLabel(tone: 'watch' | 'info', text: string | null | undefined): string {
+  if (tone === 'watch') {
+    if (text?.includes('açık iş var')) return 'Aşırı yük';
+    if (text?.includes('devrediyor')) return 'Sahiplenme';
+    return 'Kalite koçluğu';
+  }
+  return text?.includes('zor iş payı') ? 'Kolay işe kaçış' : 'Sessiz üretken';
+}
+
+// R3 + R5 — İçgörü-önce dikkat kartı: koçluk cümlesi başlık, sayılar destekler, aksiyon köprüsü.
+function AttentionCard({ p, onOpen }: { p: PersonPerformance; onOpen: () => void }) {
+  const c = p.coaching!;
+  const tone: 'watch' | 'info' = c.tone === 'watch' ? 'watch' : 'info';
+  const ui = ATT_UI[tone];
+  const m = p.metrics;
+  const reopenHigh = (m.reopenRatePct.value ?? 0) >= 12;
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-ndark-border dark:bg-ndark-card">
+      <button type="button" onClick={onOpen} className="flex w-full gap-3.5 px-5 py-4 text-left transition-colors hover:bg-slate-50/70 dark:hover:bg-ndark-bg/40">
+        <span className={`grid h-11 w-11 flex-none place-items-center rounded-xl bg-gradient-to-br ${ui.av} text-[15px] font-bold text-white`}>{initials(p.name)}</span>
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-2 text-[15px] font-bold text-slate-900 dark:text-ndark-text">
+            {p.name}
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${ui.pill}`}><span className={`h-1.5 w-1.5 rounded-full ${ui.dot}`} />{attLabel(tone, c.text)}</span>
+          </span>
+          <span className="mt-1.5 block text-[13.5px] leading-relaxed text-slate-600 dark:text-ndark-muted">{c.text}</span>
+        </span>
+      </button>
+      <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 pb-3.5 pl-[76px]">
+        <SupNum label="çözülen" value={`${m.resolved.value}`} />
+        <SupNum label="elindeki açık iş" value={`${m.openWip.value}`} tone={tone === 'watch' && (m.openWip.value ?? 0) >= 8 ? 'warn' : undefined} />
+        <SupNum label="tipik süre" value={m.medianHours.value == null ? '—' : `${m.medianHours.value} sa`} />
+        <SupNum label="yeniden açılma" value={m.reopenRatePct.value == null ? '—' : `%${m.reopenRatePct.value}`} tone={reopenHigh ? 'crit' : undefined} />
+        {m.qaScore.value != null && <SupNum label="kalite" value={`${m.qaScore.value}/5`} />}
+      </div>
+      {c.action && (
+        <div className={`flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3 ${ui.act}`}>
+          <span className="text-[12.5px] font-semibold">Öneri: {c.action}</span>
+          <button type="button" onClick={onOpen} className="flex-none rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-bold text-brand-700 shadow-sm dark:border-ndark-border dark:bg-ndark-card dark:text-brand-300">Profili aç →</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// "Kim neyde güçlü?" — uzman/referans kartı (KB iş süreçleri).
+function ExpertCard({ p, onOpen }: { p: PersonPerformance; onOpen: () => void }) {
+  const topics = (p.topExpertise ?? []).slice(0, 2);
+  const fast = topics.find((t) => (t.fasterPct ?? 0) >= 20);
+  const qa = p.metrics.qaScore.value;
+  return (
+    <button type="button" onClick={onOpen} className="rounded-xl border border-emerald-200 bg-white p-4 text-left shadow-sm transition-colors hover:bg-emerald-50/40 dark:border-emerald-900/40 dark:bg-ndark-card dark:hover:bg-emerald-950/20">
+      <div className="mb-2 flex items-center gap-2.5">
+        <span className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-600 text-[13px] font-bold text-white">{initials(p.name)}</span>
+        <span className="truncate text-sm font-semibold text-slate-900 dark:text-ndark-text">{p.name}</span>
+        <span className="ml-auto flex-none rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-[9.5px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">Uzman</span>
+      </div>
+      <p className="text-[12.5px] leading-relaxed text-slate-600 dark:text-ndark-muted">
+        {topics.length > 0
+          ? <><b className="text-slate-800 dark:text-ndark-text">{topics.map((t) => t.topic).join(' ve ')}</b>’nde güçlü.</>
+          : <>Dengeli, sağlam performans.</>}
+        {qa != null && <> Kalite {qa}/5.</>}
+      </p>
+      {fast && <div className="mt-2 text-[11.5px] font-medium text-emerald-600 dark:text-emerald-400">▼ {fast.topic}’nde ekipten %{fast.fasterPct} hızlı</div>}
+      <div className="mt-2 text-[11.5px] font-semibold text-emerald-600 dark:text-emerald-400">→ Bilgi paylaşımı için referans</div>
+    </button>
+  );
+}
+
+// R2 — dengeli çoğunluk katlanır; yönetici önemliyle karşılaşır, kalabalık avlanma yok.
+function BalancedCollapsed({ people, bench, onOpen }: { people: PersonPerformance[]; bench: PeoplePerformanceResponse['teamBenchmark']; onOpen: (p: PersonPerformance) => void }) {
+  const [open, setOpen] = useState(false);
+  if (people.length === 0) return null;
+  return (
+    <section>
+      <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-dashed border-slate-200 bg-white px-5 py-4 shadow-sm dark:border-ndark-border dark:bg-ndark-card">
+        <div className="flex">
+          {people.slice(0, 5).map((p, i) => (
+            <span key={p.id} className={`grid h-8 w-8 place-items-center rounded-full border-2 border-white bg-brand-500 text-[10.5px] font-bold text-white dark:border-ndark-card ${i ? '-ml-2.5' : ''}`}>{initials(p.name)}</span>
+          ))}
+        </div>
+        <div className="flex-1 text-[13px] text-slate-600 dark:text-ndark-muted"><b className="text-slate-900 dark:text-ndark-text">{people.length} kişi dengeli çalışıyor</b> — sinyaller ekip normalinde, ayrı bir aksiyon gerektirmiyor.</div>
+        <button type="button" onClick={() => setOpen((o) => !o)} className="flex-none text-[12.5px] font-bold text-brand-700 dark:text-brand-400">{open ? 'Gizle' : 'Tümünü göster →'}</button>
+      </div>
+      {open && (
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          {people.map((p) => <PersonCard key={p.id} p={p} bench={bench} onOpen={() => onOpen(p)} />)}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function PeoplePerformancePage({ onSelectCase }: { onSelectCase?: (id: string) => void }) {
   const [dateFrom, setDateFrom] = useState(() => isoDate(new Date(Date.now() - 30 * DAY)));
   const [dateTo, setDateTo] = useState(() => isoDate(new Date()));
@@ -327,6 +465,30 @@ export function PeoplePerformancePage({ onSelectCase }: { onSelectCase?: (id: st
   useEffect(() => { void load(); }, [load]);
 
   const people = useMemo(() => data?.people ?? [], [data]);
+  // R2 — exception-first bucketing (koçluk sinyali tonuna göre).
+  const attention = useMemo(
+    () => people.filter((p) => p.coaching?.tone === 'watch' || p.coaching?.tone === 'info')
+      .sort((a, b) => (a.coaching?.tone === 'watch' ? 0 : 1) - (b.coaching?.tone === 'watch' ? 0 : 1)),
+    [people],
+  );
+  // "Güçlü" tonundakileri güç skoruyla sırala; sadece belirgin öne çıkanları (top ~8)
+  // "Kim güçlü?" bölümüne al — gerisi dengeli çoğunluğa katılır (aksi halde herkes
+  // "uzman" olur, ayrım kaybolur). Skor: konu-içi hız > kalite > hacim.
+  const EXPERT_CAP = 8;
+  const rankedGood = useMemo(() => {
+    const strength = (p: PersonPerformance) => {
+      const fast = (p.topExpertise ?? []).some((t) => (t.fasterPct ?? 0) >= 20) ? 1000 : 0;
+      return fast + (p.metrics.qaScore.value ?? 0) * 100 + (p.metrics.resolved.value ?? 0);
+    };
+    return people.filter((p) => p.coaching?.tone === 'good').sort((a, b) => strength(b) - strength(a));
+  }, [people]);
+  const experts = useMemo(() => rankedGood.slice(0, EXPERT_CAP), [rankedGood]);
+  const balanced = useMemo(
+    () => [...people.filter((p) => !p.coaching?.tone), ...rankedGood.slice(EXPERT_CAP)]
+      .sort((a, b) => (b.metrics.resolved.value ?? 0) - (a.metrics.resolved.value ?? 0)),
+    [people, rankedGood],
+  );
+  const openPerson = (p: PersonPerformance) => setSelected({ id: p.id, name: p.name });
 
   // Kişi kartına tıklanınca uzmanlık profili (drill-down) açılır.
   if (selected) {
@@ -409,17 +571,39 @@ export function PeoplePerformancePage({ onSelectCase }: { onSelectCase?: (id: st
       ) : people.length === 0 ? (
         <Card><CardBody><p className="py-8 text-center text-sm text-slate-500 dark:text-ndark-muted">Bu dönemde gösterilecek kişi verisi yok.</p></CardBody></Card>
       ) : (
-        <>
-          <TeamSummary data={data!} />
-          <div>
-            <p className="mb-2 px-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
-              Kişi koçluk kartları — ekip ortalamasına göre
-            </p>
-            <div className="grid gap-4 md:grid-cols-2">
-              {people.map((p) => <PersonCard key={p.id} p={p} bench={data!.teamBenchmark} onOpen={() => setSelected({ id: p.id, name: p.name })} />)}
-            </div>
-          </div>
-        </>
+        <div className="space-y-8">
+          {/* R6 — nabız cümlesi */}
+          <PulseSentence s={data!.teamSummary} attention={attention.length} strong={experts.length} />
+
+          {/* Ekip bu dönem nasıl? */}
+          <section>
+            <SectionQ q="Ekip bu dönem nasıl?" />
+            <TeamSummary data={data!} />
+          </section>
+
+          {/* Kime bakmalıyım? — exception-first */}
+          {attention.length > 0 && (
+            <section>
+              <SectionQ q="Kime bakmalıyım?" badge={`${attention.length} kişi · dikkat`} />
+              <div className="grid gap-3">
+                {attention.map((p) => <AttentionCard key={p.id} p={p} onOpen={() => openPerson(p)} />)}
+              </div>
+            </section>
+          )}
+
+          {/* Kim neyde güçlü? */}
+          {experts.length > 0 && (
+            <section>
+              <SectionQ q="Kim neyde güçlü?" badge={`${experts.length} uzman · referans`} />
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {experts.map((p) => <ExpertCard key={p.id} p={p} onOpen={() => openPerson(p)} />)}
+              </div>
+            </section>
+          )}
+
+          {/* Dengeli çoğunluk — katlanmış */}
+          <BalancedCollapsed people={balanced} bench={data!.teamBenchmark} onOpen={openPerson} />
+        </div>
       )}
     </div>
   );
