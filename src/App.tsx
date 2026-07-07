@@ -1075,7 +1075,11 @@ export default function App() {
             />
           )}
           {view === 'analytics-qa-scores' && <QAScoresPage />}
-          {view === 'analytics-people-performance' && <PeoplePerformancePage />}
+          {(view === 'analytics-people-performance' || (isDetail && caseDetailOrigin === 'analytics-people-performance')) && (
+            <div className={isDetail ? 'hidden' : 'contents'}>
+              <PeoplePerformancePage onSelectCase={openCase} />
+            </div>
+          )}
           {view === 'case-report-studio' && <CaseReportStudioPage />}
           {view === 'monthly-bulletin' && <MonthlyBulletinPage />}
           {(view === 'root-cause-report' || (isDetail && caseDetailOrigin === 'root-cause-report')) && (

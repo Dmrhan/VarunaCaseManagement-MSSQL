@@ -357,7 +357,60 @@ export interface PeoplePerformanceResponse {
   scope: { kind: string; companyIds: string[]; teamIds: string[] | null; personIds: string[] | null; narrative?: string };
 }
 
+// Performans Panosu FAZ 2 — kişi uzmanlık profili (drill-down).
+export interface ExpertiseTopic {
+  category: string;
+  count: number;
+  sharePct: number;
+  medianHours: number | null;
+  teamMedianHours: number | null;
+  fasterPct: number | null;
+  tag: 'expert' | 'solid' | 'normal';
+}
+export interface LongestCase {
+  id: string;
+  caseNumber: string;
+  title: string;
+  category: string;
+  subCategory: string;
+  hours: number;
+  reopened: boolean;
+}
+export interface SolutionSignatureItem { code: string; label: string; count: number; pct: number }
+export interface DailyTrendPoint { date: string; resolvedCount: number; medianHours: number | null; rollingMedianHours: number | null }
+export interface PersonDetailResponse {
+  person: { id: string; name: string; resolved: number } | null;
+  expertise: ExpertiseTopic[];
+  problems: { subCategory: string; count: number }[];
+  products: { product: string; count: number; sharePct: number }[];
+  longestCases: LongestCase[];
+  solutionSignature: {
+    rootCause: SolutionSignatureItem[];
+    resolutionType: SolutionSignatureItem[];
+    permanentPreventionPct: number | null;
+    teamPermanentPreventionPct: number | null;
+  } | null;
+  dailyTrend: DailyTrendPoint[];
+  meta: { minSampleAgent?: number; durationMs: number };
+}
+
 export const analyticsService = {
+  async personDetail(
+    personId: string,
+    from: string,
+    to: string,
+  ): Promise<PersonDetailResponse | undefined> {
+    return apiFetch<PersonDetailResponse>(
+      '/api/analytics/person-detail',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personId, from, to }),
+      },
+      'Kişi profili yüklenemedi',
+    );
+  },
+
   async peoplePerformance(
     body: PeoplePerformanceRequest,
   ): Promise<PeoplePerformanceResponse | undefined> {
