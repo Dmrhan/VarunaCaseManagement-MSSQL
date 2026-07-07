@@ -335,24 +335,48 @@ export interface PersonPerformance {
     escalationRatePct: PersonMetric;
     transferRatePct: PersonMetric;
     openWip: PersonMetric;
+    qaScore: PersonMetric;
   };
+  coaching?: { tone: 'watch' | 'info' | 'good' | null; text: string | null; action?: string | null };
+  topExpertise?: { topic: string; count: number; fasterPct: number | null }[];
 }
 export interface PeopleTeamBenchmark {
   resolved: number | null;
   medianHours: number | null;
   reopenRatePct: number | null;
   slaCompliancePct: number | null;
+  escalationRatePct: number | null;
+  transferRatePct: number | null;
+  qaScore: number | null;
   openWip: number | null;
+}
+
+export interface PeopleTeamSummary {
+  resolvedTotal: number;
+  backlog: number;
+  netMelted: number;
+  medianHours: number | null;
+  p90Hours: number | null;
+  openWip: number | null;
+  reopenRatePct: number | null;
+  slaCompliancePct: number | null;
+  qaScore: number | null;
+  busiest: { name: string; openWip: number } | null;
+  idleCapacity: number;
+  peopleCount: number;
 }
 export interface PeoplePerformanceRequest {
   from: string;
   to: string;
+  companies?: string[];
+  teams?: string[];
   productGroups?: string[];
   caseTypes?: string[];
 }
 export interface PeoplePerformanceResponse {
   people: PersonPerformance[];
   teamBenchmark: PeopleTeamBenchmark;
+  teamSummary: PeopleTeamSummary;
   meta: { formulaVersion: string; minSampleAgent: number; unitNote: string; durationMs: number };
   scope: { kind: string; companyIds: string[]; teamIds: string[] | null; personIds: string[] | null; narrative?: string };
 }
@@ -394,18 +418,54 @@ export interface PersonDetailResponse {
   meta: { minSampleAgent?: number; durationMs: number };
 }
 
+// FAZ 2c — Etkinlik & Katkı (gizlenme tespiti). HASSAS.
+export interface EngagementSignal {
+  key: string;
+  label: string;
+  value: number | null;
+  teamValue: number | null;
+  unit: string;
+  tone: 'good' | 'warn' | 'flat';
+  hint: string;
+}
+export interface EngagementResponse {
+  signals: EngagementSignal[];
+  verdict: { read: 'active' | 'mixed' | 'watch' | 'inconclusive'; concerns: number; resolved: number; signalCount: number } | null;
+  meta: { minSampleAgent?: number; durationMs: number };
+}
+
 export const analyticsService = {
+  async personEngagement(
+    personId: string,
+    from: string,
+    to: string,
+    teams?: string[],
+    companies?: string[],
+  ): Promise<EngagementResponse | undefined> {
+    return apiFetch<EngagementResponse>(
+      '/api/analytics/person-engagement',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personId, from, to, ...(teams?.length ? { teams } : {}), ...(companies?.length ? { companies } : {}) }),
+      },
+      'Etkinlik verisi yüklenemedi',
+    );
+  },
+
   async personDetail(
     personId: string,
     from: string,
     to: string,
+    teams?: string[],
+    companies?: string[],
   ): Promise<PersonDetailResponse | undefined> {
     return apiFetch<PersonDetailResponse>(
       '/api/analytics/person-detail',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ personId, from, to }),
+        body: JSON.stringify({ personId, from, to, ...(teams?.length ? { teams } : {}), ...(companies?.length ? { companies } : {}) }),
       },
       'Kişi profili yüklenemedi',
     );
