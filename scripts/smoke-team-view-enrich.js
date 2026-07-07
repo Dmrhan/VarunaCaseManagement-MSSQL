@@ -24,6 +24,10 @@ ok('0.2 Etkinlik&Katkı + sinyal etiketleri insancıl — kaba ifade kaldırıld
   !/sıcak-patates|sadece kolay iş mi seçiyor|gerçekten çalışıyor mu/.test(pdet)
   && !/kaytarma|Gizlenme deseni|gerçekten çalışıyor mu/.test(prof)
   && /Zorlayıcı iş payı/.test(pdet) && /Devretme eğilimi/.test(pdet) && /Bekleyen kendi işi/.test(pdet));
+ok('0.3 iş dili — kullanıcıya görünen metinde "ortanca" YOK, "ortalama" kullanılıyor (kullanıcı direktifi)',
+  // JSX metni + koçluk sinyali text\'lerinde ortanca geçmemeli (kod yorumu hariç)
+  !/ekip ortancasına göre|ekip ortancasının|Kişi koçluk kartları — ekip ortancasına/.test(page)
+  && !/ortancasının \(\$\{tWip\}|ortancasının altında/.test(agg));
 
 console.log('── Backend ──');
 ok('1.1 teamSummary (backlog·netMelted·busiest·idleCapacity·QA·P90) döndürülüyor',

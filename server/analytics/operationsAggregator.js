@@ -1122,7 +1122,7 @@ function buildCoachingSignal(p, tb) {
   }
   // 2) Aşırı yük — WIP ekip ortancasının belirgin üstünde
   if (openWip != null && tWip != null && tWip > 0 && openWip >= tWip * 2 && openWip >= 5) {
-    return { tone: 'watch', text: `Elinde ekip ortancasının (${tWip}) belirgin üstünde açık iş var (${openWip}). Yük dengelenmezse gecikme riski — önceliklendirme/devir desteği düşünülebilir.` };
+    return { tone: 'watch', text: `Elinde ekip ortalamasının (${tWip}) belirgin üstünde açık iş var (${openWip}). Yük dengelenmezse gecikme riski — önceliklendirme/devir desteği düşünülebilir.` };
   }
   // 3) Yüksek devir — sahiplenme zayıf
   if (tr != null && tr >= 40) {
@@ -1131,7 +1131,7 @@ function buildCoachingSignal(p, tb) {
   // 4) Sessiz uzman — düşük hacim ama temiz/kaliteli
   if (resolved != null && tResolved != null && tResolved > 0 && resolved < tResolved * 0.7
       && ((reopen != null && tReopen != null && reopen <= tReopen) || (qa != null && qa >= 4))) {
-    return { tone: 'info', text: `Hacmi ekip ortancasının altında ama işi temiz${qa != null ? ` (kalite ${qa}/5)` : ''}. Sessiz-üretken profil — sadece sayıya bakıp yanlış değerlendirme; daha çok iş üstlenebilir.` };
+    return { tone: 'info', text: `Hacmi ekip ortalamasının altında ama işi temiz${qa != null ? ` (kalite ${qa}/5)` : ''}. Sessiz-üretken profil — sayıya bakıp erken yorumlamamalı; daha çok iş üstlenebilir.` };
   }
   // 5) Sadece kolay iş — çok hacim, zor iş payı düşük
   if (resolved != null && tResolved != null && resolved >= tResolved
@@ -1148,8 +1148,10 @@ function buildCoachingSignal(p, tb) {
 
 /**
  * Performans Panosu FAZ 1a — kişi bazlı performans + ekip benchmark (bağlam).
- * teamBenchmark = kişiler arası ortanca; UI "ekip ortancasına göre" çipleri
- * bundan türetir (tek kaynak backend). computeOperationsOverview ile aynı
+ * teamBenchmark = kişiler arası MEDYAN (medianOf). UI'da iş diliyle "ekip
+ * ortalamasına göre" denir (kullanıcı direktifi 2026-07-07: "ortanca" business
+ * kelimesi değil) — hesap medyan kalır, yalnız görünen sözcük "ortalama".
+ * computeOperationsOverview ile aynı
  * scope/filters/buildWhereSql zincirini kullanır.
  */
 export async function computePeoplePerformanceOverview({ scope, filters }) {

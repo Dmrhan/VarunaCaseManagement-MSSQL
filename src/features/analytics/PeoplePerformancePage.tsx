@@ -6,7 +6,7 @@
  *  - Yöneticinin dili (backend etiketleri); istatistik terimi ⓘ'de
  *  - Her metrik birim + hesap taşır (backend tek kaynak; UI uydurmaz)
  *  - Guardrail: az örneklem (insufficient) → "—" + not
- *  - Bağlam: ekip ortancasına (teamBenchmark) göre çip
+ *  - Bağlam: ekip ortalamasına (teamBenchmark) göre çip
  * Backend: POST /api/analytics/people-performance (Supervisor+).
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -65,7 +65,7 @@ const TONE_CLS: Record<Tone, string> = {
   flat: 'text-slate-500 bg-slate-100 dark:text-ndark-muted dark:bg-ndark-bg',
 };
 
-// Kişi değerini ekip ortancasına göre yorumla — betterWhenLower: küçük iyi mi.
+// Kişi değerini ekip ortalamasına göre yorumla — betterWhenLower: küçük iyi mi.
 function contextChip(
   value: number | null,
   benchmark: number | null,
@@ -346,7 +346,7 @@ export function PeoplePerformancePage({ onSelectCase }: { onSelectCase?: (id: st
         <Info size={16} className="mt-0.5 flex-none text-brand-600" />
         <p className="text-xs text-slate-600 dark:text-ndark-muted">
           <span className="font-semibold text-slate-800 dark:text-ndark-text">Bu pano sıralama değil, koçluk içindir.</span>{' '}
-          Her sayı ekip ortancasına göre bağlamıyla gösterilir; yetersiz örneklemli
+          Her sayı ekip ortalamasına göre bağlamıyla gösterilir; yetersiz örneklemli
           (&lt;{data?.meta.minSampleAgent ?? 20} vaka) değerler yorum yerine gizlenir. Her metrik birimini + hesabını taşır (ⓘ).
           Amaç "en yavaş kim" değil, "nerede destek gerekiyor".
         </p>
@@ -369,7 +369,7 @@ export function PeoplePerformancePage({ onSelectCase }: { onSelectCase?: (id: st
           <TeamSummary data={data!} />
           <div>
             <p className="mb-2 px-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
-              Kişi koçluk kartları — ekip ortancasına göre
+              Kişi koçluk kartları — ekip ortalamasına göre
             </p>
             <div className="grid gap-4 md:grid-cols-2">
               {people.map((p) => <PersonCard key={p.id} p={p} bench={data!.teamBenchmark} onOpen={() => setSelected({ id: p.id, name: p.name })} />)}
