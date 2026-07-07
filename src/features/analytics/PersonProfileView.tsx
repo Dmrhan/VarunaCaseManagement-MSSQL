@@ -94,26 +94,26 @@ function MiniBars({ rows }: { rows: { label: string; count: number; suffix?: str
 // birden çok endişe üst üste binince "bakmaya değer" der (backend concern sayımı).
 const VERDICT_UI: Record<string, { label: string; caption: string; ring: string; bg: string; dot: string; text: string }> = {
   active: {
-    label: 'Aktif ve dengeli çalışıyor',
-    caption: 'Sinyaller ekip normali içinde; endişe işareti yok.',
+    label: 'Aktif ve dengeli',
+    caption: 'Sinyaller ekip normali içinde — güçlü, dengeli bir dönem.',
     ring: 'border-emerald-200 dark:border-emerald-900/50', bg: 'bg-emerald-50/70 dark:bg-emerald-950/30',
     dot: 'bg-emerald-500', text: 'text-emerald-800 dark:text-emerald-200',
   },
   mixed: {
-    label: 'Karışık sinyal — bağlamıyla oku',
-    caption: 'Bazı sinyaller ekipten farklı. Tek başına sorun değil; kişiyle konuşmadan yorum yapma.',
+    label: 'Bağlamıyla okunmalı',
+    caption: 'Bazı sinyaller ekipten farklı; bu çoğu zaman uzmanlık ya da rol farkıdır. En doğrusu kişiyle konuşarak anlamak.',
     ring: 'border-sky-200 dark:border-sky-900/50', bg: 'bg-sky-50/70 dark:bg-sky-950/30',
     dot: 'bg-sky-500', text: 'text-sky-800 dark:text-sky-200',
   },
   watch: {
-    label: 'Yakından bakmaya değer',
-    caption: 'Birden çok sinyal aynı anda ekip normalinin altında. Suçlama değil — bir konuşma başlatma işareti.',
+    label: 'Bir koçluk konuşmasına değer',
+    caption: 'Birkaç sinyal birlikte ekip normalinin altında. Bir değerlendirme değil — destek gerekip gerekmediğini birlikte anlamak için iyi bir başlangıç.',
     ring: 'border-amber-200 dark:border-amber-900/50', bg: 'bg-amber-50/70 dark:bg-amber-950/30',
     dot: 'bg-amber-500', text: 'text-amber-800 dark:text-amber-200',
   },
   inconclusive: {
     label: 'Yorum için yeterli veri yok',
-    caption: 'Bu dönemde bu kişi için güvenli okuma yapacak kadar iş yok.',
+    caption: 'Bu dönemde güvenli bir okuma yapacak kadar iş yok.',
     ring: 'border-slate-200 dark:border-ndark-border', bg: 'bg-slate-50/70 dark:bg-ndark-bg',
     dot: 'bg-slate-400', text: 'text-slate-700 dark:text-ndark-text',
   },
@@ -132,8 +132,8 @@ function EngagementSection({ eng }: { eng: EngagementResponse }) {
     t === 'good' ? 'bg-emerald-500' : t === 'warn' ? 'bg-amber-500' : 'bg-slate-300 dark:bg-ndark-border';
   return (
     <Section
-      title="Etkinlik & katkı — ekipte gerçekten çalışıyor mu?"
-      hint="Çözülen sayıdan bağımsız davranış sinyalleri. Amaç suçlama değil: sessiz ama üretken bir uzmanı yanlışlıkla işaretlememek için birden çok sinyal birlikte okunur."
+      title="Etkinlik & katkı — çalışma deseni ve yük dengesi"
+      hint="Çözülen sayının ötesinde çalışma deseni. Tek metrik değil, birlikte okunan sinyaller — bir kişiyi bağlamıyla anlamak ve nerede destek gerektiğini görmek için."
     >
       <div className={`mb-4 flex items-start gap-3 rounded-xl border ${ui.ring} ${ui.bg} p-3.5`}>
         <span className={`mt-1 h-2.5 w-2.5 flex-none rounded-full ${ui.dot}`} />
@@ -142,7 +142,9 @@ function EngagementSection({ eng }: { eng: EngagementResponse }) {
           <div className="mt-0.5 text-[11.5px] text-slate-600 dark:text-ndark-muted">{ui.caption}</div>
           {v && (
             <div className="mt-1 text-[10.5px] text-slate-400 dark:text-ndark-dim">
-              {v.concerns} sinyal ekip normalinin altında · bu dönem {v.resolved} vaka çözdü
+              {v.concerns === 0
+                ? `Tüm sinyaller ekip aralığında · bu dönem ${v.resolved} vaka çözdü`
+                : `${v.concerns} sinyal ekip ortalamasının altında · bu dönem ${v.resolved} vaka çözdü`}
             </div>
           )}
         </div>
@@ -167,11 +169,11 @@ function EngagementSection({ eng }: { eng: EngagementResponse }) {
       </div>
 
       <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50/60 p-3 text-[11.5px] leading-relaxed text-slate-500 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted">
-        <span className="font-semibold text-slate-600 dark:text-ndark-text">Gizlenme deseni neye benzer?</span>{' '}
-        Gerçek kaytarma tek bir düşük sayı değildir — aktif dokunuş, havuzdan üstlenme ve iş payının
-        <em> aynı anda</em> ve zaman içinde düşük seyretmesidir. Tek bir sinyalin ekipten farklı olması çoğu zaman
-        uzmanlık (zor işlere odaklanma) ya da rol farkıdır. Bu yüzden ekran tek sinyale değil, birlikte okunan
-        desene bakar; kararı sayı değil, kişiyle yapılan konuşma verir.
+        <span className="font-semibold text-slate-600 dark:text-ndark-text">Deseni nasıl okumalı?</span>{' '}
+        Tek bir sinyalin ekipten farklı olması çoğu zaman <em>uzmanlıktır</em> (zor işlere odaklanma) ya da rol
+        farkıdır — tek başına bir sonuç taşımaz. Anlamlı olan, birkaç sinyalin
+        <em> aynı anda</em> ve zaman içinde birlikte seyretmesidir. Bu yüzden ekran tek sayıya değil, birlikte
+        okunan desene bakar; kararı sayı değil, kişiyle yapılan konuşma verir.
       </div>
     </Section>
   );

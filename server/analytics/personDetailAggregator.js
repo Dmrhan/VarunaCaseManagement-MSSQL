@@ -56,26 +56,28 @@ function teamScopeParts(companyIds, teamIds, from, to) {
   return { where, params };
 }
 
-// 1) Uzmanlık — kişi kategori dağılımı + konu-içi median (+ ekip median).
-//    Dönüş { items, total } — total tüm kategoriler (Codex #455 P2: header
-//    sayımı top-8'e kırpılmasın).
+// 1) Uzmanlık — KB etiketi (iş süreci) dağılımı + konu-içi median (+ ekip median).
+//    Kullanıcı kararı 2026-07-07: uzmanlık analizi KB etiketleriyle yapılmalı
+//    (category değil) — smartTicket.businessProcessLabel (external_kb sınıflandırma).
+//    Dönüş { items, total }; KB etiketi olmayan (sınıflandırılmamış) vaka sayılmaz.
+const KB_EXPERTISE = `JSON_VALUE([customFields],'$.smartTicket.businessProcessLabel')`;
 async function queryExpertise(companyIds, teamIds, personId, from, to) {
   const s = scopeParts(companyIds, teamIds, personId, from, to);
   const mine = await prisma.$queryRawUnsafe(`
-    SELECT [category] AS cat, COUNT(*) AS cnt, MIN(med) AS med FROM (
-      SELECT [category],
+    SELECT cat, COUNT(*) AS cnt, MIN(med) AS med FROM (
+      SELECT ${KB_EXPERTISE} AS cat,
         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(DATEDIFF(SECOND,[createdAt],[resolvedAt]) AS float)/3600.0)
-          OVER (PARTITION BY [category]) AS med
-      FROM [Case] WHERE ${s.where}
-    ) x GROUP BY [category] ORDER BY cnt DESC;`, ...s.params);
+          OVER (PARTITION BY ${KB_EXPERTISE}) AS med
+      FROM [Case] WHERE ${s.where} AND ${KB_EXPERTISE} IS NOT NULL
+    ) x GROUP BY cat ORDER BY cnt DESC;`, ...s.params);
   const t = teamScopeParts(companyIds, teamIds, from, to);
   const team = await prisma.$queryRawUnsafe(`
-    SELECT [category] AS cat, MIN(med) AS med FROM (
-      SELECT [category],
+    SELECT cat, MIN(med) AS med FROM (
+      SELECT ${KB_EXPERTISE} AS cat,
         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(DATEDIFF(SECOND,[createdAt],[resolvedAt]) AS float)/3600.0)
-          OVER (PARTITION BY [category]) AS med
-      FROM [Case] WHERE ${t.where}
-    ) x GROUP BY [category];`, ...t.params);
+          OVER (PARTITION BY ${KB_EXPERTISE}) AS med
+      FROM [Case] WHERE ${t.where} AND ${KB_EXPERTISE} IS NOT NULL
+    ) x GROUP BY cat;`, ...t.params);
   const teamMed = new Map(team.map((r) => [r.cat, r.med == null ? null : Number(r.med)]));
   const total = mine.reduce((acc, r) => acc + Number(r.cnt), 0);
   const denom = total || 1;
@@ -94,21 +96,25 @@ async function queryExpertise(companyIds, teamIds, personId, from, to) {
   return { items, total };
 }
 
+// Sorunlar — KB etiketi (işlem tipi). smartTicket.operationTypeLabel.
+const KB_PROBLEM = `JSON_VALUE([customFields],'$.smartTicket.operationTypeLabel')`;
 async function queryProblems(companyIds, teamIds, personId, from, to) {
   const s = scopeParts(companyIds, teamIds, personId, from, to);
   const rows = await prisma.$queryRawUnsafe(`
-    SELECT TOP 6 [subCategory] AS sub, COUNT(*) AS cnt
-    FROM [Case] WHERE ${s.where}
-    GROUP BY [subCategory] ORDER BY cnt DESC;`, ...s.params);
+    SELECT TOP 6 ${KB_PROBLEM} AS sub, COUNT(*) AS cnt
+    FROM [Case] WHERE ${s.where} AND ${KB_PROBLEM} IS NOT NULL
+    GROUP BY ${KB_PROBLEM} ORDER BY cnt DESC;`, ...s.params);
   return rows.map((r) => ({ subCategory: r.sub, count: Number(r.cnt) }));
 }
 
+// Ürün / modül — KB etiketi (platform). smartTicket.platformLabel.
+const KB_PRODUCT = `JSON_VALUE([customFields],'$.smartTicket.platformLabel')`;
 async function queryProducts(companyIds, teamIds, personId, from, to) {
   const s = scopeParts(companyIds, teamIds, personId, from, to);
   const rows = await prisma.$queryRawUnsafe(`
-    SELECT TOP 5 [productName] AS prod, COUNT(*) AS cnt
-    FROM [Case] WHERE ${s.where} AND [productName] IS NOT NULL
-    GROUP BY [productName] ORDER BY cnt DESC;`, ...s.params);
+    SELECT TOP 5 ${KB_PRODUCT} AS prod, COUNT(*) AS cnt
+    FROM [Case] WHERE ${s.where} AND ${KB_PRODUCT} IS NOT NULL
+    GROUP BY ${KB_PRODUCT} ORDER BY cnt DESC;`, ...s.params);
   const total = rows.reduce((acc, r) => acc + Number(r.cnt), 0) || 1;
   return rows.map((r) => ({ product: r.prod, count: Number(r.cnt), sharePct: Math.round((Number(r.cnt) / total) * 100) }));
 }
@@ -421,15 +427,15 @@ export async function computePersonEngagement({ personId, allowedCompanyIds, tea
     { key: 'claims', label: 'Havuzdan üstlenme', value: claims, teamValue: teamClaims, unit: 'adet',
       tone: claims == null || teamClaims == null ? 'flat' : (claims >= teamClaims * 0.7 ? 'good' : (claims < teamClaims * 0.3 ? 'warn' : 'flat')),
       hint: 'kendi seçip aldığı iş — atanmayı bekleyen değil' },
-    { key: 'idleOwned', label: 'Dokunulmayan iş · top sende', value: idleOwned, teamValue: null, unit: 'vaka',
+    { key: 'idleOwned', label: 'Bekleyen kendi işi', value: idleOwned, teamValue: null, unit: 'vaka',
       tone: idleOwned <= 2 ? 'good' : (idleOwned >= 5 ? 'warn' : 'flat'),
-      hint: '7+ gün hareketsiz kendi işi; müşteri/3.taraf/erteleme beklemesi HARİÇ' },
-    { key: 'hardSharePct', label: 'Zor iş payı', value: hardSharePct, teamValue: teamHardSharePct, unit: '%',
+      hint: '7+ gündür hareket görmemiş, sırasını bekleyen kendi işi (müşteri/3.taraf/erteleme beklemeleri hariç)' },
+    { key: 'hardSharePct', label: 'Zorlayıcı iş payı', value: hardSharePct, teamValue: teamHardSharePct, unit: '%',
       tone: hardSharePct == null || teamHardSharePct == null ? 'flat' : (hardSharePct >= teamHardSharePct ? 'good' : (hardSharePct < teamHardSharePct * 0.4 && resolved >= MIN_SAMPLE.agentPerformance ? 'warn' : 'flat')),
-      hint: 'eskalasyon/yüksek öncelik oranı — sadece kolay iş mi seçiyor' },
-    { key: 'transferOutPct', label: 'Hızlı devretme', value: transferOutPct, teamValue: null, unit: '%',
+      hint: 'eskalasyon veya yüksek öncelikli işlerin payı — zorlayıcı işlere ne kadar giriyor' },
+    { key: 'transferOutPct', label: 'Devretme eğilimi', value: transferOutPct, teamValue: null, unit: '%',
       tone: transferOutPct == null ? 'flat' : (transferOutPct <= 15 ? 'good' : (transferOutPct >= 40 ? 'warn' : 'flat')),
-      hint: 'işi tutup çözüyor mu, sıcak-patates gibi başkasına mı atıyor' },
+      hint: 'devraldığı işi kendisi mi sonuçlandırıyor — sahiplenme göstergesi' },
   ];
 
   // Verdict — CONCERN TETİKLİ, tek skor DEĞİL. Gizlenme = warn sinyalleri BİRLİKTE

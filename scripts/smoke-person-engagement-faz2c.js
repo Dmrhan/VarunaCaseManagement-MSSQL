@@ -32,8 +32,8 @@ ok('2.3 verdict CONCERN-TETİKLİ (tek skor değil) + tek warn ≠ kaytarma',
   /const concerns = signals\.filter\(\(x\) => x\.tone === 'warn'\)\.length/.test(agg)
   && /concerns === 0 && resolved >= MIN_SAMPLE\.default[\s\S]{0,20}'active'/.test(agg)
   && /concerns >= 3[\s\S]{0,20}'watch'/.test(agg));
-ok('2.4 dokunulmayan iş beklemeleri HARİÇ (müşteri/3.taraf/erteleme)',
-  /müşteri\/3\.taraf\/erteleme beklemesi HARİÇ/.test(agg));
+ok('2.4 bekleyen kendi işi — beklemeler hariç (müşteri/3.taraf/erteleme)',
+  /müşteri\/3\.taraf\/erteleme beklemeleri hariç/.test(agg));
 ok('2.5 PII-free — customerContact/customerCompany/exampleTitles payload\'a girmez',
   !/exampleTitles/.test(agg) && !/customerContact/.test(agg) && !/customerCompanyName/.test(agg));
 ok('2.6 team scope engagement sinyallerine de uygulanır (Codex #457 P2 — çapraz-takım sızıntısı yok)',
@@ -69,14 +69,16 @@ ok('2.15 kapsam kanıtı BÜTÜNCÜL — 3 kaynak (atanmış+devir+aktivite), ak
   && /FROM \[CaseActivity\] a JOIN \[Case\] cs ON cs\.\[id\]=a\.\[caseId\]\s+WHERE a\.\[actorUserId\] = \$\{apUid\} AND cs\.\[companyId\] IN[\s\S]{0,40}cs\.\[isArchived\] = 0/.test(agg));
 
 console.log('── UI (PersonProfileView) ──');
-ok('3.1 EngagementSection + verdict banner (4 durum) + anti-toksik caption',
+ok('3.1 EngagementSection + verdict banner (4 durum) + insancıl/koçluk dili (kaba ifade YOK)',
   /function EngagementSection/.test(prof) && /VERDICT_UI/.test(prof)
   && /active:/.test(prof) && /watch:/.test(prof) && /inconclusive:/.test(prof)
-  && /Suçlama değil|suçlama değil/i.test(prof));
+  && /koçluk konuşmasına değer/.test(prof)
+  // kaba/acımasız ifadeler kaldırıldı (kullanıcı direktifi 2026-07-07)
+  && !/kaytarma|Gizlenme deseni|sıcak-patates|sadece kolay iş|gerçekten çalışıyor mu/.test(prof));
 ok('3.2 5 sinyal kartı — değer + ekip kıyası + tone noktası',
   /eng\.signals\.map/.test(prof) && /ekip \{s\.teamValue == null/.test(prof) && /toneDot\(s\.tone\)/.test(prof));
-ok('3.3 "gizlenme deseni neye benzer" açıklayıcı + tek-sinyal guardrail',
-  /Gizlenme deseni neye benzer/.test(prof) && /aynı anda/.test(prof) && /Tek bir sinyal/.test(prof));
+ok('3.3 "Deseni nasıl okumalı?" açıklayıcı + tek-sinyal=uzmanlık guardrail',
+  /Deseni nasıl okumalı/.test(prof) && /aynı anda/.test(prof) && /uzmanlıktır/.test(prof));
 ok('3.4 profilde render (trend sonrası) + boş-veri koruması',
   /engagement && engagement\.signals\.length > 0 && <EngagementSection/.test(prof));
 
