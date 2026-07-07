@@ -696,7 +696,11 @@ router.patch('/patterns/:id/dismiss', requireSupervisorAnalytics, async (req, re
 // docs/OPERATIONS_DASHBOARD_DESIGN.md §2.1, §2.6
 // ─────────────────────────────────────────────────────────────────
 
-const MAX_PERIOD_DAYS = 90;
+// Analytics tarih-aralığı üst sınırı. 90 → 365 (kullanıcı kararı 2026-07-07):
+// koçluk/performans yıllık trend + uzmanlık için 90 gün kısıtlıydı. Sorgular
+// resolvedAt/createdAt indeksli; medyan/P90 pencere fonksiyonları 1 yılda da kabul
+// edilebilir. Tüm analytics uçları (ops/drilldown/people-performance/detail/engagement) paylaşır.
+const MAX_PERIOD_DAYS = 365;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DRILLDOWN_PAGE_SIZE = 200;
 
@@ -732,7 +736,7 @@ router.post('/cases/overview', requireOverviewAnalytics, async (req, res) => {
   try {
     const body = req.body ?? {};
 
-    // 1) Validation — from/to zorunlu + 90 gun cap
+    // 1) Validation — from/to zorunlu + 365 gun cap
     const validation = validateOverviewBody(body);
     if (validation.error) {
       return res.status(400).json({ error: 'invalid_input', message: validation.error });
@@ -1170,7 +1174,7 @@ router.post('/monthly-bulletin', requireOverviewAnalytics, async (req, res) => {
   try {
     const body = req.body ?? {};
 
-    // 1) Validation — accountId + from/to + 90-gün cap (mevcut helper reuse)
+    // 1) Validation — accountId + from/to + 365-gün cap (mevcut helper reuse)
     if (!body.accountId || typeof body.accountId !== 'string') {
       return res.status(400).json({ error: 'invalid_input', message: 'accountId zorunlu.' });
     }

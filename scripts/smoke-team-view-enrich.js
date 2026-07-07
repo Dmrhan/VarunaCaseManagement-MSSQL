@@ -14,6 +14,11 @@ const svc = read('src/services/analyticsService.ts');
 const page = read('src/features/analytics/PeoplePerformancePage.tsx');
 const pdet = read('server/analytics/personDetailAggregator.js');
 const prof = read('src/features/analytics/PersonProfileView.tsx');
+const routes = read('server/routes/analytics.js');
+
+console.log('── Periyot sınırı (kullanıcı kararı 2026-07-07: 90→365) ──');
+ok('0.0 analytics tarih-aralığı üst sınırı 365 gün',
+  /const MAX_PERIOD_DAYS = 365;/.test(routes));
 
 console.log('── KB-tabanlı uzmanlık (kullanıcı direktifi 2026-07-07) ──');
 ok('0.1 uzmanlık/ürün/sorun KB etiketleriyle (category/subCategory DEĞİL)',
