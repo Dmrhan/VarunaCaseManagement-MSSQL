@@ -434,6 +434,10 @@ async function buildReplyContext(caseId, { emailId } = {}) {
   const REPLY_FIELDS = {
     fromAddress: true, fromName: true, toAddresses: true, ccAddresses: true,
     subject: true, messageId: true, direction: true,
+    // Alıntı gövdesi için (2026-07-08 — Yanıtla'da geçmiş yazışma korunur;
+    // standart nested quoting: parent gövde blockquote'a sarılır, zincir
+    // kendiliğinden iç içe gelir — buildForwardContext ile aynı yaklaşım):
+    bodyHtml: true, sentAt: true, receivedAt: true,
   };
   if (emailId) {
     refRow = await prisma.caseEmail.findFirst({
@@ -499,9 +503,29 @@ async function buildReplyContext(caseId, { emailId } = {}) {
   let cc = [];
   let subject = '';
   let inReplyTo = null;
+  let quotedBodyHtml = '';
+  // Reply From önerisi (2026-07-08) — Multi-inbox: cevap, mailin İLGİLİ
+  // OLDUĞU paylaşımlı kutudan çıkmalı (uzmandestek@'e gelen maile yanıt
+  // From=uzmandestek@), bireysel ajanın/global default'un adresi DEĞİL.
+  //   - gelen mail: hangi tanımlı kutuya geldiyse (To sonra Cc'de eşleşen
+  //     ilk alias) → o kutu.
+  //   - giden maile yanıt: o mail hangi kutudan gittiyse (fromAddress) → o
+  //     kutu (aynı gönderen kimliğiyle devam).
+  // aliasByKey lowercased anahtar → kanonik alias adresi.
+  const aliasByKey = new Map(aliases.map((a) => [a.address.trim().toLowerCase(), a.address]));
+  let suggestedFromAddress = null;
   if (refRow) {
     const refTo = parse(refRow.toAddresses);
     const refCc = parse(refRow.ccAddresses);
+    if (refRow.direction === 'inbound') {
+      for (const r of [...refTo, ...refCc]) {
+        const k = (r?.address ?? '').trim().toLowerCase();
+        if (k && aliasByKey.has(k)) { suggestedFromAddress = aliasByKey.get(k); break; }
+      }
+    } else {
+      const k = (refRow.fromAddress ?? '').trim().toLowerCase();
+      if (k && aliasByKey.has(k)) suggestedFromAddress = aliasByKey.get(k);
+    }
     if (refRow.direction === 'inbound') {
       // K6 reply-all: To = [inbound.from] + inbound.to; Cc = inbound.cc
       const senderEntry = { address: refRow.fromAddress, name: refRow.fromName ?? null };
@@ -519,6 +543,25 @@ async function buildReplyContext(caseId, { emailId } = {}) {
     const baseSubject = refRow.subject ?? '';
     subject = /^re:\s*/i.test(baseSubject) ? baseSubject : `Re: ${baseSubject}`;
     inReplyTo = refRow.messageId;
+
+    // Standart yanıt alıntısı — "‹tarih› tarihinde ‹gönderen› şunu yazdı:"
+    // + parent gövdesini blockquote'a sar. Parent gövdesi zaten önceki
+    // alıntıyı (nested blockquote) taşıdığından zincir kendiliğinden iç içe
+    // gelir; ayrı thread birleştirme/dedup gerekmez (Option A).
+    const ts = refRow.sentAt ?? refRow.receivedAt;
+    const who = refRow.fromName
+      ? `${refRow.fromName} <${refRow.fromAddress}>`
+      : (refRow.fromAddress ?? '');
+    const attribution = ts
+      ? `${new Date(ts).toLocaleString('tr-TR')} tarihinde ${who} şunu yazdı:`
+      : `${who} şunu yazdı:`;
+    quotedBodyHtml = [
+      '<br><br>',
+      `<div>${escapeHtml(attribution)}</div>`,
+      '<blockquote style="margin:0 0 0 8px;padding-left:12px;border-left:2px solid #ccc;color:#555">',
+      refRow.bodyHtml ?? '',
+      '</blockquote>',
+    ].join('');
   }
 
   return {
@@ -528,6 +571,8 @@ async function buildReplyContext(caseId, { emailId } = {}) {
     bcc: [],
     subject,
     inReplyTo,
+    quotedBodyHtml,
+    suggestedFromAddress,
   };
 }
 
