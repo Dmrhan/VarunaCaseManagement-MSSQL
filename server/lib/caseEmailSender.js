@@ -148,6 +148,70 @@ async function loadAttachmentsForCase(caseId, attachmentIds, inlineCids) {
 }
 
 /**
+ * Alıntı gövdesindeki inline `cid:` görselleri giden maile yeniden ekler.
+ *
+ * Sorun (saha, UNV-1001056): "Yanıtla"da alıntı gövdesi, gelen mailin
+ * `<img src="cid:ii_...">` referanslarını taşır ama o görseller composer
+ * ekleri (`CaseAttachment`, `cmsa_...`) arasında DEĞİL — orijinal mesajın
+ * `CaseEmailAttachment.contentId`'sine ait. loadAttachmentsForCase yalnız
+ * composer eklerini yüklediğinden bu cid'ler MIME'a hiç konmuyordu →
+ * alıcının Gmail'i çözemiyor → kırık görsel.
+ *
+ * Bu fonksiyon gövdedeki cid'lerden composer ekiyle KARŞILANMAYANLARı,
+ * vakanın `CaseEmailAttachment` kayıtlarından (tenant/case-scope) contentId
+ * eşleştirerek çeker ve aynı cid ile inline ekler. Böylece alıntı görselleri
+ * de alıcıya gider.
+ *
+ * Kullanıcı kararı (2026-07-08): boyut SINIRI yok — büyük görseller dahil
+ * hepsi gönderilir. Dedup var (aynı cid tek sefer). Mail sağlayıcı boyut
+ * limitini aşarsa gönderim mevcut hata yolundan AÇIKÇA başarısız olur
+ * (sessiz kayıp yok) — cap koyup görsel düşürmüyoruz.
+ *
+ * @param {string} caseId
+ * @param {Set<string>|string[]} bodyCids — gövdedeki tüm cid string'leri
+ * @param {Set<string>} coveredCanon — composer ekiyle zaten karşılanan cid'ler
+ *   (canonical: bracket-sız + lowercase)
+ * @returns {Promise<Array>} nodemailer attachment[] (cid'li inline)
+ */
+async function loadQuotedInlineAttachments(caseId, bodyCids, coveredCanon) {
+  const canon = (s) => (s ?? '').trim().replace(/^<|>$/g, '').toLowerCase();
+  const covered = coveredCanon instanceof Set ? coveredCanon : new Set();
+  const needed = [...bodyCids].filter((c) => c && !covered.has(canon(c)));
+  if (!needed.length) return [];
+  // Vakanın TÜM email eklerinden contentId → satır (case-scope guard: yalnız
+  // bu vakanın maillerine ait ekler). Cross-case sızıntı yok.
+  const rows = await prisma.caseEmailAttachment.findMany({
+    where: { email: { caseId } },
+    select: { contentId: true, storageKey: true, fileName: true, mimeType: true },
+  });
+  const byCanon = new Map();
+  for (const r of rows) {
+    if (!r.contentId || !r.storageKey) continue;
+    const k = canon(r.contentId);
+    if (k && !byCanon.has(k)) byCanon.set(k, r);
+  }
+  const seen = new Set();
+  const items = [];
+  for (const cid of needed) {
+    const k = canon(cid);
+    if (seen.has(k)) continue; // dedup — aynı görsel bir kez
+    const row = byCanon.get(k);
+    if (!row) continue; // vakada eşleşen ek yok → gövdede placeholder kalır
+    const st = await statObject(row.storageKey);
+    if (!st) continue; // dosya diskte yok → atla (send yine gider)
+    seen.add(k);
+    items.push({
+      filename: row.fileName,
+      content: createObjectStream(row.storageKey),
+      contentType: row.mimeType,
+      // Content-ID gövdedeki referansla birebir eşleşsin (bracket-sız).
+      cid: String(cid).replace(/^<|>$/g, ''),
+    });
+  }
+  return items;
+}
+
+/**
  * Thread'deki son inbound CaseEmail.messageId — In-Reply-To/References
  * için referans. Composer reply mod'unda kullanır.
  */
@@ -294,6 +358,20 @@ async function sendCaseEmail(params, opts = {}) {
   const att = await loadAttachmentsForCase(caseId, attachments ?? [], inlineCids);
   if (!att.ok) return { ok: false, code: att.code, message: 'Ek erişimi başarısız.' };
 
+  // ─── 6b. Alıntı görselleri (saha fix, UNV-1001056) ───
+  // Composer ekiyle karşılanmayan cid'ler (alıntıdaki gelen-mail görselleri)
+  // vakanın CaseEmailAttachment'ından yeniden eklenir → alıcının Gmail'inde
+  // de görünür. Composer'ın kendi inline cid'leri (att.items[].cid) hariç.
+  const coveredCanon = new Set(
+    att.items
+      .filter((i) => i.cid)
+      .map((i) => String(i.cid).trim().replace(/^<|>$/g, '').toLowerCase()),
+  );
+  const quotedInline = await loadQuotedInlineAttachments(caseId, inlineCids, coveredCanon);
+  const outboundAttachments = quotedInline.length
+    ? [...att.items, ...quotedInline]
+    : att.items;
+
   // ─── 7. mailProvider.sendMail ───
   const send = await sendFn(
     {
@@ -305,7 +383,7 @@ async function sendCaseEmail(params, opts = {}) {
       html: safeHtml,
       text: safeText,
       headers,
-      attachments: att.items,
+      attachments: outboundAttachments,
     },
     { companyId: caseRow.companyId },
   );
