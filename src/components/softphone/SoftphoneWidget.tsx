@@ -1,9 +1,10 @@
 // AloTech softphone — Varuna İÇİNE ENTEGRE, sağda DAR (300px) tam-yükseklik dock.
 // embedded: AloTech hosted softphone IFRAME'i — login + cevaplama + ses + durum hepsi
-//   AloTech'in kendi arayüzünde. Panel VARSAYILAN küçültülmüş (sağ-altta küçük "pill");
-//   pill'e ya da header'daki "Softphone" butonuna tıklayınca açılır, GELEN ÇAĞRIDA
-//   otomatik öne gelir. Bir kez açıldıktan sonra iframe HEP MOUNTED kalır — küçültülünce
-//   yalnız GÖRSEL gizlenir (opacity-0), register/oturum DÜŞMEZ.
+//   AloTech'in kendi arayüzünde. Panel VARSAYILAN küçültülmüş; header'daki "Softphone"
+//   butonuna tıklayınca açılır (ayrı pill YOK), GELEN ÇAĞRIDA otomatik öne gelir. Bir kez
+//   açıldıktan sonra iframe HEP MOUNTED kalır — küçültme yalnız className'i değiştirir
+//   (görsel gizlenir, opacity-0), DOM yapısı aynı kaldığından register/oturum DÜŞMEZ,
+//   tekrar login OLMAZ.
 // ENTEGRE: Panel açıkken main.tsx'teki AppShell katmanı (position:fixed + right:300px +
 //   contain:layout) uygulamanın TAMAMINI sağdan 300px içerlek tutar → içerik VE açılan
 //   drawer/modal'lar panelin ALTINA girmez, arkasındaki butonlar TIKLANABİLİR kalır
@@ -49,26 +50,6 @@ export function SoftphoneWidget() {
     />
   );
 
-  // Küçültülmüş durum — sağ-altta küçük pill; tıklama kartı açar. Aktif/gelen çağrı
-  // varken vurgulu (yeşil) + nabız.
-  const activeRing = !!activeCall || !!incomingCall;
-  const pill = (
-    <button
-      onClick={openPanel}
-      className={`fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium shadow-lg transition-colors ${
-        activeRing
-          ? 'animate-pulse border-emerald-300 bg-emerald-500 text-white hover:bg-emerald-600'
-          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
-      }`}
-      title="Softphone'u aç"
-      aria-label="Softphone'u aç"
-    >
-      <Phone className={`h-4 w-4 ${activeRing ? 'text-white' : 'text-brand-600 dark:text-brand-400'}`} />
-      <span>Softphone</span>
-      {!activeRing && statusDot}
-    </button>
-  );
-
   const header = (
     <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 dark:border-slate-700">
       <span className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
@@ -100,40 +81,23 @@ export function SoftphoneWidget() {
     </div>
   );
 
-  // GÖMÜLÜ — iframe bir kez açıldıysa (activated) HEP mount.
+  // GÖMÜLÜ — iframe bir kez açıldıysa (activated) HEP MOUNT kalır. Küçültme YALNIZ
+  // className'i değiştirir (cardVisible↔cardHidden); DOM yapısı AYNI olduğundan React
+  // iframe'i remount ETMEZ → küçültünce AloTech oturumu/register DÜŞMEZ, tekrar login
+  // OLMAZ, çağrı almaya devam eder. Küçültülünce görsel gizli; geri açmak header'daki
+  // "Softphone" butonuyla (ayrı pill YOK — header'da zaten mevcut).
   if (isEmbedded) {
-    if (!activated) return null; // header launcher / pill açana kadar hiçbir şey
-    if (panelCollapsed) {
-      // Küçültülmüş: iframe gizli-mount (register düşmez) + geri açan pill.
-      return (
-        <>
-          <div className={cardHidden} aria-hidden="true">
-            {iframeUrl && (
-              <iframe
-                title="AloTech Softphone"
-                src={iframeUrl}
-                allow="microphone; autoplay; camera; clipboard-write"
-                className="w-full flex-1 border-0 bg-white"
-              />
-            )}
-          </div>
-          {pill}
-        </>
-      );
-    }
+    if (!activated) return null; // header launcher açana kadar hiçbir şey
     return (
-      <div className={cardVisible}>
+      <div className={panelCollapsed ? cardHidden : cardVisible} aria-hidden={panelCollapsed}>
         {header}
         {embeddedIframe}
       </div>
     );
   }
 
-  // click2call — kapalıyken pill (header de açar); açıkken küçük kart.
-  if (panelCollapsed) {
-    if (!activated) return null; // hiç açılmadıysa header butonu açsın
-    return pill;
-  }
+  // click2call — kapalıyken hiçbir şey (header butonu açar); açıkken küçük kart.
+  if (panelCollapsed) return null;
   return (
     <div className={cardVisible}>
       {header}
