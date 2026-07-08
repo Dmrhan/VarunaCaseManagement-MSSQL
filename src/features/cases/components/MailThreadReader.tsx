@@ -208,9 +208,9 @@ async function processBodyHtml(
       // BAŞKA mailin ekinde olabilir (yanıt/ilet alıntısı orijinalin cid'ini
       // taşır). Sahibi mailin id'siyle indir — download endpoint emailId↔
       // attachmentId sahipliğini doğrular, caseId guard aynı.
-      const t = threadCidIndex?.get(cid)
-        ?? threadCidIndex?.get(stripped)
-        ?? threadCidIndex?.get(stripped.toLowerCase());
+      // İndeks TEK KANONİK anahtar (bracket-sız + lowercase) tutar → aynı
+      // biçimle ara (Codex #482 alias sızıntısı guard'ı).
+      const t = threadCidIndex?.get(stripped.toLowerCase());
       if (t) {
         const tm = t;
         jobs.push((async () => {
