@@ -261,6 +261,51 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
     [emails, selectedId],
   );
 
+  // Thread-seviye cid indeksi (Madde 1, 2026-07-08) — GÖRÜNTÜLENEN mailin inline
+  // eklerinde bulunamayan cid'i aynı vakadaki diğer mailin ekiyle çözer (yanıt/
+  // ilet alıntısı orijinalin cid'ini taşır ama görseli yeni maile eklenmez).
+  //
+  // Codex #480 P2 — kaynak KISITI: bir mail yalnız KENDİNDEN ÖNCEKİ mesajları
+  // alıntılar. İndeks yalnız selectedEmail'den THREAD SIRASINDA önceki mailleri
+  // kaynak alır. Ham timestamp yerine SIRALI POZİSYON: aynı ts kovasındaki
+  // sonraki mail eski maile sızmasın (Codex #482 — ts + kararlı tiebreak).
+  //
+  // Codex #481/#482 P2 — BELİRSİZLİK + KANONİKLEŞTİRME: cid tek kanonik anahtara
+  // (bracket-sız + lowercase) indirilir; `<Logo>`/`logo`/`LOGO` alias'ları aynı
+  // anahtara düşer. Bir cid önceki maillerde AYRI eke işaret ediyorsa çözülmez
+  // (placeholder) — tek anahtar sayesinde alias sızıntısı yok. Normal alıntı
+  // zincirinde cid'i yalnız köken mail EKLER (tek kaynak) → güvenle çözülür.
+  const threadCidIndex = useMemo(() => {
+    const m = new Map<string, { emailId: string; attachmentId: string; fileName: string }>();
+    if (!selectedEmail) return m;
+    const canon = (s: string) => s.trim().replace(/^<|>$/g, '').toLowerCase();
+    const tsOf = (e: CaseEmailItem) => new Date(e.sentAt ?? e.receivedAt ?? e.createdAt).getTime();
+    // Kararlı thread sırası: ts → createdAt → id. Seçili mailin pozisyonundan
+    // ÖNCEKİLER kaynak (kendisi ve sonrakiler hariç).
+    const ordered = [...emails].sort((a, b) =>
+      tsOf(a) - tsOf(b)
+      || a.createdAt.localeCompare(b.createdAt)
+      || a.id.localeCompare(b.id));
+    const curIdx = ordered.findIndex((e) => e.id === selectedEmail.id);
+    const sources = curIdx < 0 ? [] : ordered.slice(0, curIdx);
+    const ambiguous = new Set<string>();
+    for (const e of sources) {
+      for (const a of e.attachments) {
+        if (!a.contentId) continue;
+        const k = canon(a.contentId);
+        if (!k) continue;
+        const existing = m.get(k);
+        if (existing) {
+          if (existing.attachmentId !== a.id) ambiguous.add(k); // farklı ek → belirsiz
+        } else {
+          m.set(k, { emailId: e.id, attachmentId: a.id, fileName: a.fileName });
+        }
+      }
+    }
+    for (const k of ambiguous) m.delete(k); // belirsizleri çözme
+    return m;
+  }, [emails, selectedEmail]);
+
   // R5+R8 — Reader alt bölge (bottomSlot) YALNIZ hızlı-yanıt button
   // (composer kapalı iken). Composer AÇIK ise bottomSlot=null: composer
   // asla reader.bottomSlot'ta render EDİLMEZ. Böylece composer TEK JSX
@@ -432,6 +477,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                         bottomSlot={renderReaderBottom(selectedEmail)}
                         currentUserId={currentUserId}
                         escEnabled={!composerOpen}
+                        threadCidIndex={threadCidIndex}
                       />
                     </div>
                   )}
@@ -565,6 +611,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                 bottomSlot={renderReaderBottom(selectedEmail)}
                 currentUserId={currentUserId}
                 escEnabled={!composerOpen}
+                threadCidIndex={threadCidIndex}
               />
             </div>
           </div>

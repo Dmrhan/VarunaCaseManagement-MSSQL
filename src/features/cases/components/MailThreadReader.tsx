@@ -76,6 +76,13 @@ interface Props {
    * Default true → geriye uyum.
    */
   escEnabled?: boolean;
+  /**
+   * Thread-seviye cid indeksi (parent CommunicationTab tüm maillerin
+   * eklerinden kurar). Reader kendi ekinde bulamadığı `cid:`'i aynı vakadaki
+   * diğer mailin ekiyle çözer — alıntı geçmişindeki inline görsel tutarlı
+   * görünür (2026-07-08 Madde 1).
+   */
+  threadCidIndex?: ThreadCidIndex;
 }
 
 function joinAddresses(arr: CaseEmailItem['to']): string {
@@ -103,10 +110,16 @@ function escapeHtml(s: string): string {
  *  - Src'siz img heuristic (byName + legacy) — MailMessageCard'daki kural.
  *    Kapsam gereği burada tekrar yazıldı; ileride ortak hook'a alınacak.
  */
+/** Thread-seviye cid indeksi — cid → sahibi mailin id'si + ek id'si. Reader
+ *  kendi ekinde cid'i bulamazsa (yanıt/ilet alıntısı orijinalin cid'ini taşır
+ *  ama görseli bu maile eklenmez) aynı vakadaki diğer mailin ekiyle çözer. */
+type ThreadCidIndex = Map<string, { emailId: string; attachmentId: string; fileName: string }>;
+
 async function processBodyHtml(
   email: CaseEmailItem,
   caseId: string,
   cidMap: Map<string, { id: string; fileName: string }>,
+  threadCidIndex?: ThreadCidIndex,
 ): Promise<string> {
   const html = email.bodyHtml ?? '';
   if (!html) return '';
@@ -191,6 +204,29 @@ async function processBodyHtml(
     const stripped = cid.replace(/^<|>$/g, '');
     const found = cidMap.get(cid) ?? cidMap.get(stripped) ?? cidMap.get(stripped.toLowerCase());
     if (!found) {
+      // Thread-seviye fallback: görsel kendi ekinde yok ama aynı vakadaki
+      // BAŞKA mailin ekinde olabilir (yanıt/ilet alıntısı orijinalin cid'ini
+      // taşır). Sahibi mailin id'siyle indir — download endpoint emailId↔
+      // attachmentId sahipliğini doğrular, caseId guard aynı.
+      // İndeks TEK KANONİK anahtar (bracket-sız + lowercase) tutar → aynı
+      // biçimle ara (Codex #482 alias sızıntısı guard'ı).
+      const t = threadCidIndex?.get(stripped.toLowerCase());
+      if (t) {
+        const tm = t;
+        jobs.push((async () => {
+          const out = await caseEmailService.getAttachmentDownload(caseId, tm.emailId, tm.attachmentId);
+          if (out?.url) {
+            img.setAttribute('src', out.url);
+            if (!img.getAttribute('alt')) img.setAttribute('alt', tm.fileName);
+          } else {
+            const ph = doc.createElement('span');
+            ph.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500');
+            ph.textContent = `🖼 ${escapeHtml(tm.fileName)}`;
+            img.replaceWith(ph);
+          }
+        })());
+        continue;
+      }
       const ph = doc.createElement('span');
       ph.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700');
       ph.textContent = `🖼 ${img.getAttribute('alt') || 'görsel'} (cid eşleşmedi)`;
@@ -227,6 +263,7 @@ export function MailThreadReader({
   bottomSlot,
   currentUserId = null,
   escEnabled = true,
+  threadCidIndex,
 }: Props) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [renderedHtml, setRenderedHtml] = useState<string | null>(null);
@@ -251,7 +288,7 @@ export function MailThreadReader({
     let alive = true;
     setRewriting(true);
     setRenderedHtml(null);
-    void processBodyHtml(email, caseId, cidMap).then((html) => {
+    void processBodyHtml(email, caseId, cidMap, threadCidIndex).then((html) => {
       if (!alive) return;
       setRenderedHtml(html);
       setRewriting(false);
@@ -261,7 +298,7 @@ export function MailThreadReader({
       setRewriting(false);
     });
     return () => { alive = false; };
-  }, [email, caseId, cidMap]);
+  }, [email, caseId, cidMap, threadCidIndex]);
 
   // R10 B2+B3 — ESC katman sahipliği: tek tuş = tek katman.
   //   - Lightbox açıksa fs kapatma (Lightbox kendi ESC'ini tüketir)
