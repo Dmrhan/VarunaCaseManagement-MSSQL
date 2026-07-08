@@ -165,6 +165,11 @@ export function MailComposer({
   const [to, setTo] = useState<ContactPickerValue[]>(initialReplyContext?.to ?? []);
   const [cc, setCc] = useState<ContactPickerValue[]>(initialReplyContext?.cc ?? []);
   const [bcc, setBcc] = useState<ContactPickerValue[]>(initialReplyContext?.bcc ?? []);
+  // Yanıt VEYA ilet alıntısı — composer örneği ikisinden yalnız biridir.
+  // Baseline body'nin sonuna eklenir ve imza-swap'larında korunur (Option A:
+  // standart nested quoting; parent gövde zinciri kendiliğinden taşır).
+  const activeQuotedHtml =
+    initialForwardContext?.quotedBodyHtml ?? initialReplyContext?.quotedBodyHtml ?? '';
   // M6.3-realign — Cc/Bcc her zaman görünür (n4b spec). Setter
   // gerekmiyor; sadece downstream handleSubmit kullanımına string
   // kalsın diye sabit readonly.
@@ -238,7 +243,7 @@ export function MailComposer({
     (() => {
       let html = '<p></p>';
       if (initialSelectedSignatureHtml) html += initialSelectedSignatureHtml;
-      if (initialForwardContext?.quotedBodyHtml) html += initialForwardContext.quotedBodyHtml;
+      if (activeQuotedHtml) html += activeQuotedHtml;
       return html;
     })(),
   );
@@ -251,9 +256,8 @@ export function MailComposer({
     setBodyHtml((cur) => {
       // Body hala baseline durumunda mı? → append güvenli.
       if (cur === initialBaselineBodyRef.current) {
-        // Codex P2 fix — forward quotedBodyHtml KORUNMALI.
-        const quoted = initialForwardContext?.quotedBodyHtml ?? '';
-        const next = `<p></p>${initialSelectedSignatureHtml}${quoted}`;
+        // Codex P2 fix — yanıt/ilet alıntısı (activeQuotedHtml) KORUNMALI.
+        const next = `<p></p>${initialSelectedSignatureHtml}${activeQuotedHtml}`;
         initialBaselineBodyRef.current = next;
         signatureAppendedRef.current = true;
         // Codex P2 fix — late-loaded signature tracking:
@@ -277,7 +281,7 @@ export function MailComposer({
       signatureAppendedRef.current = true;
       return cur;
     });
-  }, [initialSelectedSignatureHtml, initialSignatureChoice, initialForwardContext]);
+  }, [initialSelectedSignatureHtml, initialSignatureChoice, activeQuotedHtml]);
 
   // Codex P2 fix — Dropdown değişimi: body'deki ESKİ imzayı yeni seçimle
   // SWAP et. Aksi halde agent "İmzasız" seçse bile başlangıç imzası
@@ -325,8 +329,8 @@ export function MailComposer({
         }
       }
       if (newSig && !newSigInsertHandled) {
-        // forward bağlamı varsa quoted body'nin BAŞINA imza enjekte et.
-        const quoted = initialForwardContext?.quotedBodyHtml ?? '';
+        // yanıt/ilet alıntısı varsa quoted body'nin BAŞINA imza enjekte et.
+        const quoted = activeQuotedHtml;
         if (quoted && next.endsWith(quoted)) {
           next = next.slice(0, -quoted.length) + newSig + quoted;
         } else {
@@ -336,7 +340,7 @@ export function MailComposer({
       currentSignatureHtmlRef.current = newSig;
       return next;
     });
-  }, [signatureSelection, agentHtml, composedHtml, initialForwardContext]);
+  }, [signatureSelection, agentHtml, composedHtml, activeQuotedHtml]);
   const [attachments, setAttachments] = useState<UploadedFileRef[]>([]);
   const [uploading, setUploading] = useState(false);
 
@@ -412,11 +416,18 @@ export function MailComposer({
     void caseEmailService.getFromAliases(item.id).then((items) => {
       if (!alive) return;
       setAliases(items);
-      const def = items.find((a) => a.isDefault) ?? items[0] ?? null;
+      // From varsayılanı (2026-07-08) — Multi-inbox: mail hangi paylaşımlı
+      // kutuya geldiyse cevap o kutudan çıksın. reply-context'in önerdiği
+      // adrese eşleşen alias öncelikli; yoksa tenant default; o da yoksa ilk.
+      const suggested = initialReplyContext?.suggestedFromAddress?.trim().toLowerCase();
+      const byInbox = suggested
+        ? items.find((a) => a.address.trim().toLowerCase() === suggested)
+        : null;
+      const def = byInbox ?? items.find((a) => a.isDefault) ?? items[0] ?? null;
       if (def) setFromId(def.id);
     });
     return () => { alive = false; };
-  }, [item.id]);
+  }, [item.id, initialReplyContext]);
 
   // M6.3b Faz 3 — Mail Şablonu dropdown beslemesi.
   const [templates, setTemplates] = useState<import('@/services/caseEmailService').CaseEmailTemplateItem[]>([]);
@@ -488,7 +499,7 @@ export function MailComposer({
   function insertTemplateBody(bodyHtml: string) {
     setBodyHtml((cur) => {
       const sig = currentSignatureHtmlRef.current ?? '';
-      const quoted = initialForwardContext?.quotedBodyHtml ?? '';
+      const quoted = activeQuotedHtml;
       // 1. Önce signature varsa onun başlangıcını bul
       if (sig && cur.includes(sig)) {
         const i = cur.indexOf(sig);

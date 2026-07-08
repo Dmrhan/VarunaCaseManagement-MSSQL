@@ -114,6 +114,11 @@ export interface ReplyContext {
   bcc: CaseEmailAddress[];
   subject: string;
   inReplyTo: string | null;
+  /** Yanıtlanan mesajın standart nested alıntısı (composer baseline'a eklenir). */
+  quotedBodyHtml: string;
+  /** Multi-inbox: mailin geldiği/ilgili paylaşımlı kutu adresi — composer From
+   *  varsayılanı buna eşleşen alias'a ayarlanır. Eşleşme yoksa null. */
+  suggestedFromAddress: string | null;
 }
 
 /**
