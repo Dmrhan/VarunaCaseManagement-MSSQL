@@ -559,7 +559,7 @@ async function buildReplyContext(caseId, { emailId } = {}) {
       '<br><br>',
       `<div>${escapeHtml(attribution)}</div>`,
       '<blockquote style="margin:0 0 0 8px;padding-left:12px;border-left:2px solid #ccc;color:#555">',
-      refRow.bodyHtml ?? '',
+      stripCidImagesForQuote(refRow.bodyHtml ?? ''),
       '</blockquote>',
     ].join('');
   }
@@ -670,6 +670,28 @@ function escapeHtml(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+/**
+ * Alıntı gövdesindeki inline `cid:` görselleri metin placeholder'a çevirir.
+ * Neden (Codex #478 P2, 2026-07-08): yanıt alıntısı orijinal mesajın gövdesini
+ * kopyalar; içindeki `<img src="cid:...">` orijinal mesajın inline MIME
+ * part'larına bakar. Giden mailde bu part'lar yeniden eklenmez (sendCaseEmail
+ * yalnız composer eklerini yükler) → müşteri alıntı geçmişinde kırık görsel
+ * görür. Orijinal inline dosyalar çok büyük olabildiğinden (thread başına
+ * birikir) re-attach etmek yerine placeholder'a çeviriyoruz; metin geçmişi
+ * korunur. `cid:` DIŞI (http/https) görsellere dokunulmaz — onlar zaten çözülür.
+ */
+function stripCidImagesForQuote(html) {
+  if (!html) return '';
+  return html.replace(
+    /<img\b[^>]*\bsrc\s*=\s*["']cid:[^"']*["'][^>]*>/gi,
+    (tag) => {
+      const m = tag.match(/\balt\s*=\s*["']([^"']*)["']/i);
+      const alt = m && m[1] ? m[1] : 'görsel';
+      return `<span style="color:#888">🖼 ${escapeHtml(alt)}</span>`;
+    },
+  );
 }
 
 export const caseEmailSender = {
