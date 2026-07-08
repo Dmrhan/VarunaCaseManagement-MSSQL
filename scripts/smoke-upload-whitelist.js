@@ -135,6 +135,54 @@ if (!srvIsAccepted('', 'unknown.xyz') && !srvIsAccepted(undefined, 'noext')) {
   bad('5) Deny-by-default ihlal');
 }
 
+// 5b) .s3db (SQLite) — UNV-1001065 kararı. sqlite MIME'ları + boş MIME
+//     (uzantı tolerantlığı) + application/octet-stream ÖZEL istisnası.
+const s3dbAcceptCases = [
+  ['application/vnd.sqlite3', 'UniMobPack_DB.s3db'],
+  ['application/x-sqlite3', 'UniMobPack_DB.s3db'],
+  ['application/octet-stream', 'UniMobPack_DB.s3db'],
+  ['', 'UniMobPack_DB.s3db'],
+];
+const allS3dbAccept = s3dbAcceptCases.every(([m, n]) => srvIsAccepted(m, n));
+if (allS3dbAccept) {
+  ok('5b) .s3db kabul (sqlite MIME + boş MIME + octet-stream istisnası)');
+} else {
+  const reject = s3dbAcceptCases.filter(([m, n]) => !srvIsAccepted(m, n));
+  bad('5b) .s3db kabul edilmesi gereken bazı kombinasyonlar reddedildi', reject.map(([m, n]) => `${n}/${m}`).join(' '));
+}
+
+// 5c) application/octet-stream GENEL olarak serbest bırakılmadı — .s3db
+//     dışındaki dosyalarda hâlâ reddedilmeli (forge guard bozulmadı).
+const octetStreamNotGeneral = [
+  ['application/octet-stream', 'malware.exe'],
+  ['application/pdf', 'malware.exe'],
+];
+const allOctetReject = octetStreamNotGeneral.every(([m, n]) => !srvIsAccepted(m, n));
+if (allOctetReject) {
+  ok('5c) application/octet-stream genel serbest değil (.s3db dışında hâlâ reddediliyor)');
+} else {
+  const accept = octetStreamNotGeneral.filter(([m, n]) => srvIsAccepted(m, n));
+  bad('5c) application/octet-stream yanlışlıkla genel serbest bırakılmış', accept.map(([m, n]) => `${n}/${m}`).join(' '));
+}
+
+// 5d) .mov / .rar / .dot kabul (MIME ile ve boş-MIME uzantı tolerantlığıyla).
+const newFormatCases = [
+  ['video/quicktime', 'clip.mov'],
+  ['', 'clip.mov'],
+  ['application/vnd.rar', 'archive.rar'],
+  ['application/x-rar-compressed', 'archive.rar'],
+  ['', 'archive.rar'],
+  ['application/msword', 'template.dot'],
+  ['', 'template.dot'],
+];
+const allNewFormatsAccept = newFormatCases.every(([m, n]) => srvIsAccepted(m, n));
+if (allNewFormatsAccept) {
+  ok('5d) .mov / .rar / .dot kabul');
+} else {
+  const reject = newFormatCases.filter(([m, n]) => !srvIsAccepted(m, n));
+  bad('5d) .mov/.rar/.dot kabul edilmesi gereken bazı kombinasyonlar reddedildi', reject.map(([m, n]) => `${n}/${m}`).join(' '));
+}
+
 // ─── Sync check (backend + frontend list senkron) ─────────────────
 
 // 6) Frontend mirror MIME listesi sync.

@@ -37,11 +37,20 @@ export const UPLOAD_ALLOWED_MIME_TYPES = [
   // Arşiv
   'application/zip',
   'application/x-zip-compressed',
+  'application/vnd.rar',
+  'application/x-rar-compressed', // eski/yaygın tarayıcı-OS eşlemesi
+  // SQLite (.s3db) — UNV-1001065 karari. application/octet-stream
+  // buraya BILEREK eklenmedi, backend dosyasindaki docblock ile ayni.
+  'application/vnd.sqlite3',
+  'application/x-sqlite3',
+  // Video
+  'video/quicktime',
 ] as const;
 
 export const UPLOAD_ALLOWED_EXTENSIONS = [
   // Belge
   '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+  '.dot', // eski Word sablonu, application/msword ile ayni MIME
   // Görsel
   '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
   // Metin
@@ -50,6 +59,11 @@ export const UPLOAD_ALLOWED_EXTENSIONS = [
   '.xml',
   // Arşiv
   '.zip',
+  '.rar',
+  // SQLite
+  '.s3db',
+  // Video
+  '.mov',
 ] as const;
 
 /**
@@ -62,6 +76,13 @@ export function isAcceptedUpload(mimeType: string | undefined, fileName: string 
   const name = typeof fileName === 'string' ? fileName.toLowerCase() : '';
   const dotIdx = name.lastIndexOf('.');
   const ext = dotIdx >= 0 ? name.slice(dotIdx) : '';
+
+  // .s3db (SQLite) özel istisnası — backend ile birebir aynı (bkz.
+  // server/lib/uploadWhitelist.js). application/octet-stream GENEL
+  // olarak listeye eklenmez, sadece .s3db ile birlikte geldiğinde kabul.
+  if (mime === 'application/octet-stream' && ext === '.s3db') {
+    return true;
+  }
 
   const hasMime = mime.length > 0;
   const hasExt = ext.length > 0;
