@@ -261,27 +261,36 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
     [emails, selectedId],
   );
 
-  // Thread-seviye cid indeksi (Madde 1, 2026-07-08) — vakadaki TÜM maillerin
-  // inline eklerinden cid → {sahibi mailin id'si, ek id'si}. MailThreadReader
-  // kendi ekinde bulamadığı cid'i (yanıt/ilet alıntısı orijinalin cid'ini
-  // taşır) buradan çözer → alıntı geçmişindeki görsel tutarlı görünür.
-  // İlk-gelen kazanır: aynı cid birden fazla mailde olsa görselin ilk
-  // göründüğü mail otoriter (çakışma nadir; Gmail/Outlook cid'leri benzersiz).
+  // Thread-seviye cid indeksi (Madde 1, 2026-07-08) — GÖRÜNTÜLENEN mailin inline
+  // eklerinde bulunamayan cid'i aynı vakadaki diğer mailin ekiyle çözer (yanıt/
+  // ilet alıntısı orijinalin cid'ini taşır ama görseli yeni maile eklenmez).
+  //
+  // Codex #480 P2 — kaynak KISITI: bir mail yalnız KENDİNDEN ÖNCEKİ mesajları
+  // alıntılar. İndeksi selectedEmail'e göre kurup yalnız ondan önce/aynı anda
+  // gelen mailleri kaynak alıyoruz; aksi halde sonraki alakasız bir mailin
+  // generic cid'i (image001/logo) eski maile YANLIŞ görsel bağlar. Eskiden
+  // yeniye tarayıp overwrite → çakışmada en YAKIN önceki kaynak kazanır.
   const threadCidIndex = useMemo(() => {
     const m = new Map<string, { emailId: string; attachmentId: string; fileName: string }>();
-    for (const e of emails) {
+    if (!selectedEmail) return m;
+    const tsOf = (e: CaseEmailItem) => new Date(e.sentAt ?? e.receivedAt ?? e.createdAt).getTime();
+    const currentTs = tsOf(selectedEmail);
+    const sources = emails
+      .filter((e) => tsOf(e) <= currentTs)
+      .sort((a, b) => tsOf(a) - tsOf(b));
+    for (const e of sources) {
       for (const a of e.attachments) {
         if (!a.contentId) continue;
         const raw = a.contentId.trim();
         const stripped = raw.replace(/^<|>$/g, '');
         const val = { emailId: e.id, attachmentId: a.id, fileName: a.fileName };
         for (const k of [raw, stripped, stripped.toLowerCase()]) {
-          if (k && !m.has(k)) m.set(k, val);
+          if (k) m.set(k, val);
         }
       }
     }
     return m;
-  }, [emails]);
+  }, [emails, selectedEmail]);
 
   // R5+R8 — Reader alt bölge (bottomSlot) YALNIZ hızlı-yanıt button
   // (composer kapalı iken). Composer AÇIK ise bottomSlot=null: composer
