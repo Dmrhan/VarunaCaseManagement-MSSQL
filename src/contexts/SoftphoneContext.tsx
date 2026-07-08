@@ -69,7 +69,8 @@ interface SoftphoneState {
   activated: boolean;
   /** Softphone panelini aç (header'daki launcher'dan) — activated=true + panelCollapsed=false. */
   openPanel: () => void;
-  /** Embedded panel açık → ana layout sağdan 380px boşluk ayırır (içerik örtülmez). */
+  /** Embedded panel AÇIK → ana layout sağdan panel genişliği (300px) kadar boşluk
+   *  ayırır → içerik panelin ALTINA girmez, arkasındaki butonlar tıklanabilir kalır. */
   dockReserved: boolean;
   endCall: () => void;
   toggleMute: () => void;
@@ -295,7 +296,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     status, agentEmail, agentStatus, error, activeCall, incomingCall, muted,
     connect, refreshStatus, dialNumber, answerCall, iframeUrl, endCall, toggleMute, toggleHold, dismissIncoming, changeStatus, saveAgentEmail,
     panelCollapsed, setPanelCollapsed, activated, openPanel,
-    dockReserved: isEmbedded && status !== 'disabled' && !panelCollapsed,
+    // Yalnız panel gerçekten görünürken (embedded + açıldı + küçültülmedi) yer ayır.
+    dockReserved: isEmbedded && status !== 'disabled' && activated && !panelCollapsed,
   };
   return <SoftphoneContext.Provider value={value}>{children}</SoftphoneContext.Provider>;
 }

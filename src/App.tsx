@@ -195,10 +195,12 @@ export default function App() {
     };
   }, []);
   const { user, signOut } = useAuth();
-  // Gömülü softphone (sağ-dock) açıkken ana içeriği sağdan 380px daralt →
-  // içerik panelin altında kalmaz, panelin başladığı yerde kesilir.
+  // Softphone sağda DAR (300px) tam-yükseklik dock. Ana içeriğin daralması +
+  // açılan drawer/modal'ların panelin ALTINA girmemesi main.tsx'teki AppShell
+  // wrapper'ında (width calc + contain:layout) yönetilir — bu yüzden App root'ta
+  // ayrı rezervasyon YOK.
   const {
-    dockReserved, incomingCall,
+    incomingCall,
     status: spStatus, panelCollapsed: spCollapsed,
     setPanelCollapsed: setSpCollapsed, openPanel: openSoftphonePanel,
   } = useSoftphone();
@@ -484,7 +486,7 @@ export default function App() {
   }
 
   return (
-    <div className={`flex flex-col bg-slate-50 transition-[padding] duration-200 dark:bg-ndark-bg ${isFixedHeight ? 'h-screen' : 'min-h-screen'} ${dockReserved ? 'pr-[380px]' : ''}`}>
+    <div className={`flex flex-col bg-slate-50 dark:bg-ndark-bg ${isFixedHeight ? 'h-screen' : 'min-h-screen'}`}>
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3 dark:border-ndark-border dark:bg-ndark-card">
         <div className="flex items-center gap-3">
           <BrandLogo />
