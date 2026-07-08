@@ -267,28 +267,37 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
   //
   // Codex #480 P2 — kaynak KISITI: bir mail yalnız KENDİNDEN ÖNCEKİ mesajları
   // alıntılar. İndeksi selectedEmail'e göre kurup yalnız ondan önce/aynı anda
-  // gelen mailleri kaynak alıyoruz; aksi halde sonraki alakasız bir mailin
-  // generic cid'i (image001/logo) eski maile YANLIŞ görsel bağlar. Eskiden
-  // yeniye tarayıp overwrite → çakışmada en YAKIN önceki kaynak kazanır.
+  // gelen mailleri kaynak alıyoruz (sonraki mailler eski maile bağlanmaz).
+  //
+  // Codex #481 P2 — BELİRSİZLİK: aynı generic cid (image001/logo) birden fazla
+  // önceki mailde AYRI eke işaret ediyorsa, alıntılanan mailin hangisi olduğu
+  // güvenle bilinemez → tahmin YOK, o cid çözülmez (placeholder). Normal alıntı
+  // zincirinde cid'i yalnız köken mail EKLER (tek kaynak) → güvenle çözülür.
   const threadCidIndex = useMemo(() => {
     const m = new Map<string, { emailId: string; attachmentId: string; fileName: string }>();
     if (!selectedEmail) return m;
     const tsOf = (e: CaseEmailItem) => new Date(e.sentAt ?? e.receivedAt ?? e.createdAt).getTime();
     const currentTs = tsOf(selectedEmail);
-    const sources = emails
-      .filter((e) => tsOf(e) <= currentTs)
-      .sort((a, b) => tsOf(a) - tsOf(b));
-    for (const e of sources) {
+    const ambiguous = new Set<string>();
+    for (const e of emails) {
+      if (tsOf(e) > currentTs) continue; // yalnız önce/aynı anda gelenler
       for (const a of e.attachments) {
         if (!a.contentId) continue;
         const raw = a.contentId.trim();
         const stripped = raw.replace(/^<|>$/g, '');
         const val = { emailId: e.id, attachmentId: a.id, fileName: a.fileName };
         for (const k of [raw, stripped, stripped.toLowerCase()]) {
-          if (k) m.set(k, val);
+          if (!k) continue;
+          const existing = m.get(k);
+          if (existing) {
+            if (existing.attachmentId !== a.id) ambiguous.add(k); // farklı ek → belirsiz
+          } else {
+            m.set(k, val);
+          }
         }
       }
     }
+    for (const k of ambiguous) m.delete(k); // belirsizleri çözme
     return m;
   }, [emails, selectedEmail]);
 
