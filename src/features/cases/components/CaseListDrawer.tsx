@@ -20,6 +20,7 @@ import { accountService, type CaseCustomerContext } from '@/services/accountServ
 import { aiService } from '@/services/aiService';
 import { MentionTextarea } from '@/features/cases/components/MentionTextarea';
 import { MentionContent } from '@/features/cases/components/MentionContent';
+import { ExpandableText } from '@/components/ui/ExpandableText';
 import type { Case, CaseFilters, CasePriority, CaseStatus, NoteVisibility } from '@/features/cases/types';
 
 /**
@@ -641,8 +642,12 @@ function QuickEditPanel({
               </span>
               <StatusPill status={caseItem.status} />
             </div>
-            <div className="mt-0.5 truncate text-sm font-semibold text-slate-900 dark:text-ndark-text">
-              {caseItem.title}
+            <div className="mt-0.5">
+              <ExpandableText
+                text={caseItem.title}
+                maxLines={2}
+                className="text-sm font-semibold text-slate-900 dark:text-ndark-text"
+              />
             </div>
           </div>
           <button
