@@ -100,13 +100,19 @@ export function CaseListDrawer({
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  // Sayfa scroll'unu drawer açıkken kilitle
+  // Sayfa scroll'unu drawer açıkken kilitle. Uygulama scroll konteyneri artık
+  // #app-scroll (main.tsx AppShell) — body değil; onu kilitle, body'yi de defansif
+  // olarak kilitle (fallback).
   useEffect(() => {
     if (!open) return;
-    const prev = document.body.style.overflow;
+    const scroller = document.getElementById('app-scroll');
+    const prevBody = document.body.style.overflow;
+    const prevScroller = scroller?.style.overflow ?? '';
     document.body.style.overflow = 'hidden';
+    if (scroller) scroller.style.overflow = 'hidden';
     return () => {
-      document.body.style.overflow = prev;
+      document.body.style.overflow = prevBody;
+      if (scroller) scroller.style.overflow = prevScroller;
     };
   }, [open]);
 

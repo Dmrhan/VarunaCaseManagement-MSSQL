@@ -10,26 +10,26 @@ export function IncomingCallBanner() {
   const ringing = incomingCall.status === 'ringing';
 
   return (
-    <div className="fixed left-1/2 top-4 z-[60] w-[min(94vw,26rem)] -translate-x-1/2">
-      <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 shadow-lg dark:border-emerald-800 dark:bg-emerald-950">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
-          <PhoneIncoming className={`h-5 w-5 ${ringing ? 'animate-pulse' : ''}`} />
+    <div className="fixed left-1/2 top-3 z-[60] w-[min(92vw,20rem)] -translate-x-1/2">
+      <div className="flex items-center gap-2.5 rounded-full border border-emerald-200 bg-emerald-50 py-1.5 pl-2 pr-1.5 shadow-lg dark:border-emerald-800 dark:bg-emerald-950">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
+          <PhoneIncoming className={`h-3.5 w-3.5 ${ringing ? 'animate-pulse' : ''}`} />
         </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+        <div className="flex min-w-0 flex-1 items-baseline gap-2">
+          <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
             {ringing ? 'Gelen çağrı' : 'Görüşmede'}
-          </div>
-          <div className="truncate text-lg font-semibold text-slate-800 dark:text-slate-100">
+          </span>
+          <span className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
             {incomingCall.number}
-          </div>
+          </span>
         </div>
         <button
           onClick={dismissIncoming}
-          className="rounded-lg p-2 text-slate-400 hover:bg-emerald-100 dark:hover:bg-emerald-900"
+          className="rounded-full p-1.5 text-slate-400 hover:bg-emerald-100 dark:hover:bg-emerald-900"
           title="Bildirimi kapat"
           aria-label="Bildirimi kapat"
         >
-          <X className="h-4 w-4" />
+          <X className="h-3.5 w-3.5" />
         </button>
       </div>
     </div>
