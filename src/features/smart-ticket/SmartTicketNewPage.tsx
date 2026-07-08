@@ -1375,7 +1375,6 @@ export function SmartTicketNewPage({
 
   async function handleSubmitTransfer() {
     if (!createdCase || transferring) return;
-    const isSameTeam = transferToTeamId === createdCase.assignedTeamId;
     const trimmedNote = transferNote.trim();
     if (!trimmedNote) {
       setTransferError('Devir notu zorunlu.');
@@ -1394,32 +1393,26 @@ export function SmartTicketNewPage({
       // varsa ekle (network payload temiz, backend FieldUpdate row'u
       // duplicate yazmaz).
       const priorityChanged = transferPriority !== createdCase.priority;
-      let updated: Case | null | undefined;
-      if (isSameTeam) {
-        // Aynı takım: kişi seçildiyse belirli kişiye, boşsa havuza ata.
-        // transferCase değil update kullan — backend same_team guard var.
-        const targetPerson = transferPersonOptions.find((p) => p.id === transferToPersonId);
-        updated = await caseService.update(createdCase.id, {
-          assignedPersonId: transferToPersonId || null,
-          assignedPersonName: targetPerson?.name ?? null,
-        });
-      } else {
-        // Farklı takıma devir — mevcut transferCase akışı
-        const updated2 = await caseService.transferCase(createdCase.id, {
-          toTeamId: transferToTeamId,
-          toPersonId: transferToPersonId || undefined,
-          reason: trimmedNote,
-          reasonCode: 'expertise',
-          smartTicketTransfer: {
-            transferNote: trimmedNote,
-            ...(summary ? { composedSummary: summary } : {}),
-            attemptedStepIds: transferAttemptedStepIds,
-            ...(transferStepOutcomes ? { stepOutcomesSummary: transferStepOutcomes } : {}),
-          },
-          ...(priorityChanged ? { priority: transferPriority } : {}),
-        });
-        updated = updated2 ?? null;
-      }
+      // Review fix — takımdan bağımsız HER ZAMAN transferCase() çağrılır.
+      // Eskiden aynı takım içi devirde caseService.update() kullanılıyordu
+      // ("backend same_team guard var" varsayımıyla) — ama transferCase()
+      // aynı takıma devri de sorunsuz kabul ediyor (böyle bir guard yok,
+      // bkz. caseRepository.transferCase()). update() yolu CaseTransfer
+      // kaydı hiç oluşturmadığı için devir notu "Devir Notu" bölümünde
+      // hiç görünmüyordu.
+      const updated = await caseService.transferCase(createdCase.id, {
+        toTeamId: transferToTeamId,
+        toPersonId: transferToPersonId || undefined,
+        reason: trimmedNote,
+        reasonCode: 'expertise',
+        smartTicketTransfer: {
+          transferNote: trimmedNote,
+          ...(summary ? { composedSummary: summary } : {}),
+          attemptedStepIds: transferAttemptedStepIds,
+          ...(transferStepOutcomes ? { stepOutcomesSummary: transferStepOutcomes } : {}),
+        },
+        ...(priorityChanged ? { priority: transferPriority } : {}),
+      });
       if (!updated) {
         setTransferError('Vaka aktarılamadı.');
         return;
