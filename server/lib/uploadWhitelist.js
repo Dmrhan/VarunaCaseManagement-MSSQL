@@ -9,10 +9,15 @@
  * bazen boş MIME döner, uzantıdan yakalanır.
  *
  * Kabul listesi:
- *   - Belge: PDF, Word, Excel, PowerPoint
+ *   - Belge: PDF, Word (.doc/.docx/.dot), Excel, PowerPoint
  *   - Görsel: PNG, JPEG, GIF, WebP, SVG
  *   - Metin: TXT, CSV, JSON, XML
- *   - Arşiv: ZIP
+ *   - Arşiv: ZIP, RAR
+ *   - Video: .mov (video/quicktime)
+ *   - SQLite: .s3db (UNV-1001065 — gerçek mail eki/manuel upload olarak
+ *     gelirse kabul edilir; application/octet-stream GENEL olarak
+ *     serbest bırakılmaz, sadece .s3db ile birlikte geldiğinde dar bir
+ *     istisnayla kabul edilir — bkz. isAcceptedUpload())
  *
  * Yasaklı (deny-by-default zaten reddeder, explicit liste bilgi amaçlı):
  *   - Executable: .exe, .sh, .bat, .cmd, .ps1, .com, .scr, .msi, .dmg
@@ -57,11 +62,20 @@ export const UPLOAD_ALLOWED_MIME_TYPES = [
   // Arşiv
   'application/zip',
   'application/x-zip-compressed',
+  'application/vnd.rar',
+  'application/x-rar-compressed', // eski/yaygın tarayıcı-OS eşlemesi
+  // SQLite (.s3db) — UNV-1001065 karari. application/octet-stream
+  // buraya BILEREK eklenmedi, detay yukaridaki docblock icinde.
+  'application/vnd.sqlite3',
+  'application/x-sqlite3',
+  // Video
+  'video/quicktime',
 ];
 
 export const UPLOAD_ALLOWED_EXTENSIONS = [
   // Belge
   '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+  '.dot', // eski Word sablonu, application/msword ile ayni MIME
   // Görsel
   '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
   // Metin
@@ -70,6 +84,11 @@ export const UPLOAD_ALLOWED_EXTENSIONS = [
   '.xml',
   // Arşiv
   '.zip',
+  '.rar',
+  // SQLite
+  '.s3db',
+  // Video
+  '.mov',
 ];
 
 /**
@@ -88,6 +107,16 @@ export function isAcceptedUpload(mimeType, fileName) {
   const name = typeof fileName === 'string' ? fileName.toLowerCase() : '';
   const dotIdx = name.lastIndexOf('.');
   const ext = dotIdx >= 0 ? name.slice(dotIdx) : '';
+
+  // .s3db (SQLite) özel istisnası — tarayıcı/mail istemcisi bilinmeyen
+  // ikili dosyalar için çoğunlukla application/octet-stream döner.
+  // application/octet-stream'i UPLOAD_ALLOWED_MIME_TYPES'a GENEL olarak
+  // eklemek yerine, sadece uzantı KESİNLİKLE .s3db ise bu kombinasyonu
+  // kabul ediyoruz — böylece octet-stream hiçbir zaman genel bir
+  // "güvenli MIME" sayılmaz (forge guard'ı zayıflamaz).
+  if (mime === 'application/octet-stream' && ext === '.s3db') {
+    return true;
+  }
 
   const hasMime = mime.length > 0;
   const hasExt = ext.length > 0;
