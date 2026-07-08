@@ -261,6 +261,28 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
     [emails, selectedId],
   );
 
+  // Thread-seviye cid indeksi (Madde 1, 2026-07-08) — vakadaki TÜM maillerin
+  // inline eklerinden cid → {sahibi mailin id'si, ek id'si}. MailThreadReader
+  // kendi ekinde bulamadığı cid'i (yanıt/ilet alıntısı orijinalin cid'ini
+  // taşır) buradan çözer → alıntı geçmişindeki görsel tutarlı görünür.
+  // İlk-gelen kazanır: aynı cid birden fazla mailde olsa görselin ilk
+  // göründüğü mail otoriter (çakışma nadir; Gmail/Outlook cid'leri benzersiz).
+  const threadCidIndex = useMemo(() => {
+    const m = new Map<string, { emailId: string; attachmentId: string; fileName: string }>();
+    for (const e of emails) {
+      for (const a of e.attachments) {
+        if (!a.contentId) continue;
+        const raw = a.contentId.trim();
+        const stripped = raw.replace(/^<|>$/g, '');
+        const val = { emailId: e.id, attachmentId: a.id, fileName: a.fileName };
+        for (const k of [raw, stripped, stripped.toLowerCase()]) {
+          if (k && !m.has(k)) m.set(k, val);
+        }
+      }
+    }
+    return m;
+  }, [emails]);
+
   // R5+R8 — Reader alt bölge (bottomSlot) YALNIZ hızlı-yanıt button
   // (composer kapalı iken). Composer AÇIK ise bottomSlot=null: composer
   // asla reader.bottomSlot'ta render EDİLMEZ. Böylece composer TEK JSX
@@ -432,6 +454,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                         bottomSlot={renderReaderBottom(selectedEmail)}
                         currentUserId={currentUserId}
                         escEnabled={!composerOpen}
+                        threadCidIndex={threadCidIndex}
                       />
                     </div>
                   )}
@@ -565,6 +588,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                 bottomSlot={renderReaderBottom(selectedEmail)}
                 currentUserId={currentUserId}
                 escEnabled={!composerOpen}
+                threadCidIndex={threadCidIndex}
               />
             </div>
           </div>
