@@ -273,6 +273,32 @@ async function loadQuotedInlineAttachments(caseId, bodyCids, coveredCanon) {
 }
 
 /**
+ * Composer taslak hydration'ı (2026-07-09) — alıntılanan mailin gövdesindeki
+ * cid görsellerini, o mailin KENDİ CaseEmailAttachment kayıtlarıyla eşler.
+ * FE bu referanslarla görselleri indirim-URL'inden blob'a çekip taslakta
+ * gösterir (tarayıcı cid: çözemez), gönderirken blob→cid geri çevrilir.
+ * Yalnız kaynak mailin kendi ekleri (message-scoped) — thread taraması yok.
+ */
+async function listQuotedInlineRefs(sourceEmailId, bodyHtml) {
+  if (!sourceEmailId || !bodyHtml) return [];
+  const canon = (s) => (s ?? '').trim().replace(/^<|>$/g, '').toLowerCase();
+  const cids = extractInlineCidsFromHtml(bodyHtml);
+  if (!cids.size) return [];
+  const rows = await prisma.caseEmailAttachment.findMany({
+    where: { emailId: sourceEmailId, contentId: { not: null } },
+    select: { id: true, contentId: true },
+  });
+  const byCanon = new Map(rows.map((r) => [canon(r.contentId), r.id]));
+  const refs = [];
+  for (const cid of cids) {
+    const attachmentId = byCanon.get(canon(cid));
+    // cid değeri GÖVDEDEKİ biçim (FE string-replace birebir eşleşsin diye).
+    if (attachmentId) refs.push({ cid, emailId: sourceEmailId, attachmentId });
+  }
+  return refs;
+}
+
+/**
  * Thread'deki son inbound CaseEmail.messageId — In-Reply-To/References
  * için referans. Composer reply mod'unda kullanır.
  */
@@ -603,6 +629,8 @@ async function buildReplyContext(caseId, { emailId } = {}) {
   // KALDIRILDI — outbound satıra doğrudan yanıt kullanıcı niyeti.
   let refRow = null;
   const REPLY_FIELDS = {
+    // id: quotedInlineRefs (taslak hydration) kaynak-mail eşlemesi için.
+    id: true,
     fromAddress: true, fromName: true, toAddresses: true, ccAddresses: true,
     subject: true, messageId: true, direction: true,
     // Alıntı gövdesi için (2026-07-08 — Yanıtla'da geçmiş yazışma korunur;
@@ -675,6 +703,7 @@ async function buildReplyContext(caseId, { emailId } = {}) {
   let subject = '';
   let inReplyTo = null;
   let quotedBodyHtml = '';
+  let quotedInlineRefs = [];
   // Reply From önerisi (2026-07-08) — Multi-inbox: cevap, mailin İLGİLİ
   // OLDUĞU paylaşımlı kutudan çıkmalı (uzmandestek@'e gelen maile yanıt
   // From=uzmandestek@), bireysel ajanın/global default'un adresi DEĞİL.
@@ -727,16 +756,20 @@ async function buildReplyContext(caseId, { emailId } = {}) {
       ? `${new Date(ts).toLocaleString('tr-TR')} tarihinde ${who} şunu yazdı:`
       : `${who} şunu yazdı:`;
     // Kullanıcı direktifi (2026-07-09) — Gmail tarzı FLU GRİ AYIRICI:
-    // eski mail nerede bitti / yenisi nereden başladı net görünsün. İnce
-    // açık-gri çizgi + soluk gri attribution satırı; gövdeye gömülü olduğu
-    // için hem alıcının istemcisinde hem Varuna reader'ında görünür.
+    // eski mail nerede bitti / yenisi nereden başladı net görünsün.
+    // R2 saha bulgusu: stilli <div> ayırıcı TipTap composer'ında DÜŞÜYOR
+    // (şema tanımıyor) → <hr> kullan: TipTap horizontalRule ✓, sanitizer
+    // allowlist ✓, mail istemcileri + reader prose ince çizgi render eder.
+    // Her iç içe alıntı seviyesi kendi <hr>'ını taşır → seviye sınırları net.
     quotedBodyHtml = [
-      '<div style="border-top:1px solid #e0e0e0;margin:20px 0 10px"></div>',
+      '<hr>',
       `<div style="color:#8a8a8a;font-size:12px;margin:0 0 6px">${escapeHtml(attribution)}</div>`,
       '<blockquote style="margin:0 0 0 8px;padding-left:12px;border-left:2px solid #ccc;color:#555">',
       refRow.bodyHtml ?? '',
       '</blockquote>',
     ].join('');
+    // Composer taslak hydration'ı — alıntı görselleri taslakta görünsün.
+    quotedInlineRefs = await listQuotedInlineRefs(refRow.id, refRow.bodyHtml);
   }
 
   return {
@@ -747,6 +780,7 @@ async function buildReplyContext(caseId, { emailId } = {}) {
     subject,
     inReplyTo,
     quotedBodyHtml,
+    quotedInlineRefs,
     suggestedFromAddress,
   };
 }
@@ -817,14 +851,21 @@ async function buildForwardContext(caseId, emailId, { companyId } = {}) {
     `Kime: ${joinAddresses(parse(ref.toAddresses))}`,
     parse(ref.ccAddresses).length ? `Cc: ${joinAddresses(parse(ref.ccAddresses))}` : null,
   ].filter(Boolean);
+  // 2026-07-09 — <hr> ayırıcı: stilli div'in border-top'u TipTap'te düşer;
+  // hr editörde/mailde/reader'da görünür (reply quote ile aynı desen).
   const quotedBodyHtml = [
-    '<br><br>',
-    '<div style="border-top:1px solid #ccc;margin-top:12px;padding-top:8px">',
+    '<hr>',
+    '<div>',
     headerLines.map((l) => `<div>${escapeHtml(l)}</div>`).join(''),
     '<br>',
     ref.bodyHtml ?? '',
     '</div>',
   ].join('');
+
+  // Composer taslak hydration'ı (2026-07-09): alıntı gövdesindeki cid
+  // görsellerinin kaynak ek referansları — FE bunları blob URL'e çevirip
+  // taslakta GÖSTERİR, gönderirken cid'e geri çevirir.
+  const quotedInlineRefs = await listQuotedInlineRefs(emailId, ref.bodyHtml);
 
   return {
     caseNumber: caseRow.caseNumber,
@@ -833,6 +874,7 @@ async function buildForwardContext(caseId, emailId, { companyId } = {}) {
     bcc: [],
     subject,
     quotedBodyHtml,
+    quotedInlineRefs,
     inReplyTo: null,
   };
 }

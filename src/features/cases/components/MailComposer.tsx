@@ -66,6 +66,8 @@ export interface MailComposerProps {
     caseNumber: string | null;
     subject: string;
     quotedBodyHtml: string;
+    /** Taslak hydration'ı — alıntı cid görsellerinin kaynak ek referansları. */
+    quotedInlineRefs?: Array<{ cid: string; emailId: string; attachmentId: string }>;
   } | null;
   /**
    * @deprecated M6.3b Faz 2 — Yerine initialTenantSignatureHtml +
@@ -168,8 +170,12 @@ export function MailComposer({
   // Yanıt VEYA ilet alıntısı — composer örneği ikisinden yalnız biridir.
   // Baseline body'nin sonuna eklenir ve imza-swap'larında korunur (Option A:
   // standart nested quoting; parent gövde zinciri kendiliğinden taşır).
-  const activeQuotedHtml =
-    initialForwardContext?.quotedBodyHtml ?? initialReplyContext?.quotedBodyHtml ?? '';
+  // 2026-07-09 hydration — STATE: alıntıdaki cid görselleri blob URL'e
+  // çevrilince bu değer de güncellenir; imza-swap/şablon efektleri hydrate
+  // edilmiş alıntıyla string-eşleşmeye devam eder.
+  const [activeQuotedHtml, setActiveQuotedHtml] = useState<string>(
+    () => initialForwardContext?.quotedBodyHtml ?? initialReplyContext?.quotedBodyHtml ?? '',
+  );
   // M6.3-realign — Cc/Bcc her zaman görünür (n4b spec). Setter
   // gerekmiyor; sadece downstream handleSubmit kullanımına string
   // kalsın diye sabit readonly.
@@ -413,6 +419,57 @@ export function MailComposer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Alıntı görseli HYDRATION (kullanıcı direktifi 2026-07-09) ──
+  // Tarayıcı `cid:` çözemez → alıntıdaki görseller taslakta kırık görünüyordu
+  // ("forward'da foto yok"). Paste akışıyla AYNI desen: kaynak eki indirim
+  // URL'inden blob'a çek → taslakta blob URL göster → gönderirken cid'e
+  // geri çevir (aşağıda handleSubmit; sender snapshot compiler cid'i
+  // yeniden ekler). Dosya storage'da yoksa (404) o cid atlanır — mevcut
+  // kırık-görünüm davranışı korunur, gönderim etkilenmez.
+  const quoteBlobsRef = useRef<Array<{ blobUrl: string; cid: string }>>([]);
+  useEffect(() => {
+    const refs = initialReplyContext?.quotedInlineRefs
+      ?? initialForwardContext?.quotedInlineRefs
+      ?? [];
+    if (!refs.length) return undefined;
+    let alive = true;
+    void (async () => {
+      const swaps: Array<{ blobUrl: string; cid: string }> = [];
+      for (const r of refs) {
+        try {
+          const dl = await caseEmailService.getAttachmentDownload(item.id, r.emailId, r.attachmentId);
+          if (!dl?.url) continue;
+          const resp = await fetch(dl.url);
+          if (!resp.ok) continue;
+          const blob = await resp.blob();
+          swaps.push({ blobUrl: URL.createObjectURL(blob), cid: r.cid });
+        } catch {
+          // tek görsel hata → atla; taslak yine açılır
+        }
+      }
+      if (!alive || !swaps.length) {
+        swaps.forEach((s) => URL.revokeObjectURL(s.blobUrl));
+        return;
+      }
+      quoteBlobsRef.current = swaps;
+      const apply = (html: string) => {
+        let out = html;
+        for (const s of swaps) out = out.split(`cid:${s.cid}`).join(s.blobUrl);
+        return out;
+      };
+      // Baseline + aktif alıntı + body ÜÇÜNÜ birden güncelle → dirty-check
+      // ve imza-swap string-eşleşmeleri tutarlı kalır.
+      initialBaselineBodyRef.current = apply(initialBaselineBodyRef.current);
+      setActiveQuotedHtml((cur) => apply(cur));
+      setBodyHtml((cur) => apply(cur));
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => () => {
+    for (const s of quoteBlobsRef.current) URL.revokeObjectURL(s.blobUrl);
+  }, []);
+
   // Suggestions kaynağı — şimdilik vakanın customerContact alanları.
   // Genişletilmiş account contacts öneri listesi M6.3'te.
   const suggestions = useMemo(() => {
@@ -642,6 +699,15 @@ export function MailComposer({
         if (a.inline && a.blobUrl && payloadHtml.includes(a.blobUrl)) {
           payloadHtml = payloadHtml.split(a.blobUrl).join(`cid:${a.id}`);
           activeInlineIds.add(a.id);
+        }
+      }
+      // Hydration geri-çevirimi (2026-07-09) — alıntı görsellerinin blob
+      // URL'leri orijinal cid'lerine döner; sender snapshot compiler bu
+      // cid'leri vakanın ekinden yeniden ekler (alıcı görür). Kullanıcı
+      // görseli taslaktan sildiyse blobUrl body'de yoktur → no-op.
+      for (const q of quoteBlobsRef.current) {
+        if (payloadHtml.includes(q.blobUrl)) {
+          payloadHtml = payloadHtml.split(q.blobUrl).join(`cid:${q.cid}`);
         }
       }
       // DOMPurify ile final pass (defense-in-depth; backend de sanitize eder)

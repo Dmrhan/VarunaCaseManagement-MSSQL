@@ -119,6 +119,10 @@ export interface ReplyContext {
   inReplyTo: string | null;
   /** Yanıtlanan mesajın standart nested alıntısı (composer baseline'a eklenir). */
   quotedBodyHtml: string;
+  /** Taslak hydration'ı — alıntıdaki cid görsellerinin kaynak ek referansları.
+   *  Composer bunları blob URL'e çevirip taslakta gösterir (tarayıcı cid:
+   *  çözemez), gönderirken cid'e geri çevirir. */
+  quotedInlineRefs?: Array<{ cid: string; emailId: string; attachmentId: string }>;
   /** Multi-inbox: mailin geldiği/ilgili paylaşımlı kutu adresi — composer From
    *  varsayılanı buna eşleşen alias'a ayarlanır. Eşleşme yoksa null. */
   suggestedFromAddress: string | null;
@@ -203,6 +207,8 @@ export interface ForwardContext {
   subject: string;
   /** Composer gövdesinin SONUNA eklenen alıntılı orijinal mesaj (HTML). */
   quotedBodyHtml: string;
+  /** Taslak hydration'ı — bkz. ReplyContext.quotedInlineRefs. */
+  quotedInlineRefs?: Array<{ cid: string; emailId: string; attachmentId: string }>;
   inReplyTo: string | null;
 }
 
