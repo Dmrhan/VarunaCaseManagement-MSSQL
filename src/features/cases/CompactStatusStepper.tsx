@@ -44,7 +44,7 @@ import {
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { StatusPill } from '@/components/ui/StatusPill';
-import { caseService } from '@/services/caseService';
+import { caseService, lookupService, type SmartTicketTaxonomyResponse } from '@/services/caseService';
 import { useAuth } from '@/services/AuthContext';
 import { externalKbService } from '@/services/externalKbService';
 import { StatusTransitionPanel } from './StatusTransitionPanel';
@@ -216,14 +216,37 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false, 
       .catch(() => { if (alive) setKbEnabled(null); });
     return () => { alive = false; };
   }, [item.companyId]);
+  // P2 review fix — backend YALNIZ o şirkette en az bir aktif TaxonomyDef
+  // tanımlı olan alanları zorunlu sayar; StatusTransitionPanel'deki
+  // definedOpeningTagKeys ile aynı desen (closureTax[key].length > 0 ⇔
+  // backend'in definedTypes.has(key)). Eskiden 5 alan koşulsuz zorunluydu —
+  // backend kapatmaya izin verse bile bu düğüm hiç tıklanamıyordu.
+  const [openingTax, setOpeningTax] = useState<SmartTicketTaxonomyResponse['taxonomies'] | null>(null);
+  const [openingTaxLoading, setOpeningTaxLoading] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (item.companyId !== 'COMP-UNIVERA') return;
+    setOpeningTaxLoading(true);
+    void lookupService
+      .smartTicketTaxonomies(item.companyId)
+      .then((res) => { if (alive) setOpeningTax(res.taxonomies); })
+      .catch(() => { if (alive) setOpeningTax(null); })
+      .finally(() => { if (alive) setOpeningTaxLoading(false); });
+    return () => { alive = false; };
+  }, [item.companyId]);
   const smartTicketOpening = (
     item.customFields as { smartTicket?: Record<string, unknown> } | undefined
   )?.smartTicket;
+  const definedOpeningTagKeys = new Set(
+    OPENING_TAG_FIELDS.filter((key) => (openingTax?.[key]?.length ?? 0) > 0),
+  );
   const openingTagsMissing =
     item.companyId === 'COMP-UNIVERA' &&
     kbEnabled !== false &&
     user?.role !== 'SystemAdmin' &&
-    OPENING_TAG_FIELDS.some((key) => !smartTicketOpening?.[key]);
+    (openingTaxLoading
+      ? OPENING_TAG_FIELDS.some((key) => !smartTicketOpening?.[key])
+      : [...definedOpeningTagKeys].some((key) => !smartTicketOpening?.[key]));
 
   // Reason gerekmeyen geçişler için direkt API; gerekenlerde modal.
   const [reasonTarget, setReasonTarget] = useState<CaseStatus | null>(null);
