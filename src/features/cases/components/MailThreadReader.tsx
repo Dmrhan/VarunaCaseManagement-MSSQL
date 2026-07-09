@@ -182,7 +182,7 @@ async function processBodyHtml(
           } else {
             const ph = doc.createElement('span');
             ph.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500');
-            ph.textContent = `🖼 ${escapeHtml(m.fileName)}`;
+            ph.textContent = `🖼 ${escapeHtml(m.fileName)} — dosya sunucuda bulunamadı`;
             img.replaceWith(ph);
           }
         })());
@@ -221,15 +221,21 @@ async function processBodyHtml(
           } else {
             const ph = doc.createElement('span');
             ph.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500');
-            ph.textContent = `🖼 ${escapeHtml(tm.fileName)}`;
+            ph.textContent = `🖼 ${escapeHtml(tm.fileName)} — dosya sunucuda bulunamadı`;
             img.replaceWith(ph);
           }
         })());
         continue;
       }
+      // Evidence Preservation PR-3 — sebepli placeholder. Bu noktaya gelen
+      // cid ne mailin kendi ekinde ne thread'de var → görsel bize hiç
+      // ULAŞMADI (tipik: Outlook'un local-path imzası `c:/users/...` ya da
+      // göndericinin MIME'a eklemediği görsel). Sessiz kırık ikon yerine
+      // insancıl açıklama.
       const ph = doc.createElement('span');
       ph.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700');
-      ph.textContent = `🖼 ${img.getAttribute('alt') || 'görsel'} (cid eşleşmedi)`;
+      ph.setAttribute('title', `cid:${stripped}`);
+      ph.textContent = `🖼 ${img.getAttribute('alt') || 'görsel'} — ekte gelmedi (gönderici tarafında kaldı)`;
       img.replaceWith(ph);
       continue;
     }
@@ -243,7 +249,7 @@ async function processBodyHtml(
       } else {
         const ph = doc.createElement('span');
         ph.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500');
-        ph.textContent = `🖼 ${escapeHtml(m.fileName)}`;
+        ph.textContent = `🖼 ${escapeHtml(m.fileName)} — dosya sunucuda bulunamadı`;
         img.replaceWith(ph);
       }
     })());
@@ -495,37 +501,63 @@ export function MailThreadReader({
             <p className="text-sm text-slate-500 italic">(içerik yok)</p>
           )}
 
-          {/* Ek chip'leri — HoverPreview + Lightbox */}
-          {email.attachments.length > 0 && (
-            <div className="mt-4 flex flex-wrap gap-1.5 border-t border-slate-100 pt-3 dark:border-ndark-border">
-              {email.attachments.map((a) => {
-                const isImage = (a.mimeType ?? '').toLowerCase().startsWith('image/');
-                return (
-                  <HoverPreview<LightboxItem & { uploadedBy?: string | null; uploadedAt?: string | null }>
-                    key={a.id}
-                    item={{
-                      id: a.id,
-                      fileName: a.fileName,
-                      fileSize: a.fileSize,
-                      mimeType: a.mimeType,
-                    }}
-                    getPreviewUrl={getAttachmentPreviewUrlHover}
+          {/* Ek chip'leri — HoverPreview + Lightbox.
+              Evidence Preservation PR-3: GERÇEK EK ≠ GÖVDE-İÇİ GÖRSEL ayrımı.
+              Gerçek ekler (dosya olarak gönderilenler) önde/belirgin; gövde
+              içine gömülü görseller (imza logosu, yapıştırılan screenshot)
+              ayrı soluk grupta — agent hangisinin "dosya eki" olduğunu
+              karıştırmaz. İkisi de önizlenebilir (kanıt erişimi aynı). */}
+          {email.attachments.length > 0 && (() => {
+            const realAtts = email.attachments.filter((a) => !a.isInline);
+            const inlineAtts = email.attachments.filter((a) => a.isInline);
+            const renderChip = (a: (typeof email.attachments)[number], faded: boolean) => {
+              const isImage = (a.mimeType ?? '').toLowerCase().startsWith('image/');
+              return (
+                <HoverPreview<LightboxItem & { uploadedBy?: string | null; uploadedAt?: string | null }>
+                  key={a.id}
+                  item={{
+                    id: a.id,
+                    fileName: a.fileName,
+                    fileSize: a.fileSize,
+                    mimeType: a.mimeType,
+                  }}
+                  getPreviewUrl={getAttachmentPreviewUrlHover}
+                >
+                  <button
+                    type="button"
+                    onClick={() => openAttachment(a.id, isImage)}
+                    className={`inline-flex min-h-[36px] items-center gap-1 rounded-full px-2 py-1 text-xs ${
+                      faded
+                        ? 'bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-ndark-card dark:text-ndark-muted'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-ndark-bg dark:text-ndark-text'
+                    }`}
+                    title={isImage ? 'Önizle' : 'İndir'}
                   >
-                    <button
-                      type="button"
-                      onClick={() => openAttachment(a.id, isImage)}
-                      className="inline-flex min-h-[36px] items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700 hover:bg-slate-200 dark:bg-ndark-bg dark:text-ndark-text"
-                      title={isImage ? 'Önizle' : 'İndir'}
-                    >
-                      <Paperclip size={11} />
-                      <span className="max-w-[220px] truncate">{a.fileName}</span>
-                      <span className={`${MAIL_TYPE.t1} opacity-60`}>{formatBytes(a.fileSize)}</span>
-                    </button>
-                  </HoverPreview>
-                );
-              })}
-            </div>
-          )}
+                    <Paperclip size={11} />
+                    <span className="max-w-[220px] truncate">{a.fileName}</span>
+                    <span className={`${MAIL_TYPE.t1} opacity-60`}>{formatBytes(a.fileSize)}</span>
+                  </button>
+                </HoverPreview>
+              );
+            };
+            return (
+              <div className="mt-4 border-t border-slate-100 pt-3 dark:border-ndark-border">
+                {realAtts.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {realAtts.map((a) => renderChip(a, false))}
+                  </div>
+                )}
+                {inlineAtts.length > 0 && (
+                  <div className={`flex flex-wrap items-center gap-1.5 ${realAtts.length > 0 ? 'mt-2' : ''}`}>
+                    <span className={`${MAIL_TYPE.t1} text-slate-400 dark:text-ndark-muted`}>
+                      gövde içi görseller:
+                    </span>
+                    {inlineAtts.map((a) => renderChip(a, true))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
 

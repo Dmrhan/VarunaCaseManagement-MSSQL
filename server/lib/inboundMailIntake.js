@@ -80,11 +80,16 @@ const SYSTEM_UPLOADER = 'E-posta';
  * Wrapped şekilde { ok, attachmentId, fileName, size } veya { ok:false, error }
  * döner. Caller intake throw etmez — stored/skipped counts'a yansır.
  */
+/** Storage relatif path'i — writeCaseFile ile inline-görsel yolu ortak kullanır. */
+function buildMailFilePath(caseId, attachmentId, filename) {
+  return `cases/${caseId}/${attachmentId}-${(filename ?? 'unnamed').replace(/[^\w.\-]+/g, '_').slice(0, 120)}`;
+}
+
 async function writeCaseFile({ caseId, companyId, filename, contentType, content, prisma }) {
   const attachmentId = randomUUID();
   // buildPath storage.js internal; orada safeName + caseId path normalize.
   // saveObject mkdir + writeFile yapar.
-  const relPath = `cases/${caseId}/${attachmentId}-${(filename ?? 'unnamed').replace(/[^\w.\-]+/g, '_').slice(0, 120)}`;
+  const relPath = buildMailFilePath(caseId, attachmentId, filename);
   await saveObject(relPath, content);
   const row = await prisma.caseAttachment.create({
     data: {
@@ -125,9 +130,12 @@ async function writeCaseFile({ caseId, companyId, filename, contentType, content
  */
 async function persistAttachmentsForCase({ caseId, companyId, attachments, prisma, emailId = null }) {
   const stored = [];
+  // PR-4 — gövde-içi görseller (CaseEmailAttachment-only; Dosyalar'a girmez,
+  // cap tüketmez, "dosya eklendi" aktivitesine sayılmaz).
+  const storedInline = [];
   const skipped = [];
   if (!Array.isArray(attachments) || attachments.length === 0) {
-    return { stored: 0, skipped: [] };
+    return { stored: 0, storedInline: 0, skipped: [] };
   }
   // Codex P2 fix — Cap enforcement. Mevcut attachment count alınır;
   // remaining slots hesaplanır. Cap aşımı → skipped:
@@ -139,23 +147,61 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
     const filename = a?.filename ?? null;
     const contentType = a?.contentType ?? null;
     const content = a?.content;
+    const cid = a?.cid ?? null;
     if (!content || !Buffer.isBuffer(content) || content.length === 0) {
-      skipped.push({ filename, reason: 'empty_content' });
+      skipped.push({ filename, cid, reason: 'empty_content' });
       continue;
     }
     if (content.length > MAIL_ATTACHMENT_MAX_BYTES) {
-      skipped.push({ filename, reason: 'too_large' });
+      skipped.push({ filename, cid, reason: 'too_large' });
       continue;
     }
     if (!isAcceptedUpload(contentType, filename ?? '')) {
-      skipped.push({ filename, reason: 'mime_not_accepted' });
+      skipped.push({ filename, cid, reason: 'mime_not_accepted' });
       continue;
     }
-    // Cap check — geçerli (allowlist + boyut) ek için kontrol.
+
+    // Evidence Preservation PR-4 (2026-07-09) — INLINE GÖRSEL ≠ GERÇEK EK.
+    // Gövde-içi (cid'li) görseller vaka Dosyaları'na (CaseAttachment)
+    // YAZILMAZ; yalnız storage + mailin kendi ek kaydı (CaseEmailAttachment).
+    // Gerekçe:
+    //   1. Her imza logosu/screenshot 20'lik vaka dosya hakkını tüketiyordu →
+    //      uzun thread'de GERÇEK kanıt eki 'attachment_cap_reached' ile
+    //      reddedilebiliyordu. Inline görseller cap'ten MUAF.
+    //   2. Dosyalar sekmesi imza logolarıyla kirlenmez.
+    // Kural: inline + cid + image/* + emailId mevcut (CaseEmailAttachment
+    // yazılabiliyor). emailId yoksa eski yol (dosya kaybolmasın).
+    const isInlineImage = !!a?.inline && !!cid
+      && String(contentType ?? '').toLowerCase().startsWith('image/');
+    if (isInlineImage && emailId) {
+      try {
+        const attachmentId = randomUUID();
+        const relPath = buildMailFilePath(caseId, attachmentId, filename);
+        await saveObject(relPath, content);
+        await prisma.caseEmailAttachment.create({
+          data: {
+            emailId,
+            storageKey: relPath,
+            fileName: filename ?? 'dosya',
+            mimeType: contentType ?? 'application/octet-stream',
+            fileSize: content.length,
+            contentId: cid,
+            isInline: true,
+          },
+        });
+        storedInline.push({ fileName: filename ?? 'dosya' });
+      } catch (err) {
+        skipped.push({ filename, cid, reason: 'write_failed' });
+      }
+      continue;
+    }
+
+    // Cap check — geçerli (allowlist + boyut) GERÇEK ek için kontrol.
     // Format kontrolleri ile sonra: mime-reject'i cap'e SAYMAYIZ; yalnız
-    // gerçekten yazılacak ekler slot tüketir.
+    // gerçekten yazılacak ekler slot tüketir. Inline görseller yukarıda
+    // ayrıldı — cap yalnız gerçek ekleri sayar.
     if (remaining <= 0) {
-      skipped.push({ filename, reason: 'attachment_cap_reached' });
+      skipped.push({ filename, cid, reason: 'attachment_cap_reached' });
       continue;
     }
     try {
@@ -200,7 +246,7 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
       }
     } catch (err) {
       // Disk/DB write fail → atla + skipped (intake düşürülmez)
-      skipped.push({ filename, reason: 'write_failed' });
+      skipped.push({ filename, cid, reason: 'write_failed' });
     }
   }
 
@@ -257,7 +303,44 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
     }
   }
 
-  return { stored: stored.length, skipped };
+  // Evidence Preservation PR-3 (2026-07-09) — SESSİZ KAYIP YOK: alınamayan
+  // ekler vaka aktivitesine yazılır (önceden yalnız log'a düşüyordu →
+  // kullanıcı "görsel/ek nerede?" diye kod aramak zorunda kalıyordu).
+  // İnsancıl sebep etiketiyle: kanıt kaybının nedeni ekranda görünür.
+  if (skipped.length > 0) {
+    const SKIP_REASON_TR = {
+      empty_content: 'içerik boş geldi',
+      too_large: '25MB boyut sınırını aşıyor',
+      mime_not_accepted: 'izin verilmeyen dosya türü',
+      attachment_cap_reached: 'vaka dosya limiti (20) dolu',
+      write_failed: 'dosya kaydedilemedi',
+    };
+    try {
+      const parts = skipped.map((s) =>
+        `${s.filename ?? 'isimsiz'} — ${SKIP_REASON_TR[s.reason] ?? s.reason}`);
+      let note = parts.join('; ');
+      if (note.length > 180) note = `${note.slice(0, 160)}… +${skipped.length} ek`;
+      await prisma.caseActivity.create({
+        data: {
+          caseId,
+          companyId,
+          action: skipped.length > 1
+            ? `E-postadaki ${skipped.length} ek alınamadı`
+            : 'E-postadaki ek alınamadı',
+          actionType: 'FileUploadSkipped',
+          fieldName: 'files',
+          toValue: skipped.length > 1 ? `${skipped.length} ek` : (skipped[0].filename ?? 'isimsiz'),
+          note,
+          actor: SYSTEM_UPLOADER,
+          actorUserId: null,
+        },
+      });
+    } catch (err) {
+      console.warn('[intake] skip caseActivity failed', err?.message ?? err);
+    }
+  }
+
+  return { stored: stored.length, storedInline: storedInline.length, skipped };
 }
 
 // Subject'te [PREFIX-xxx] token ararız. Case caseNumber iki format:
