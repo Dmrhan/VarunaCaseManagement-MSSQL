@@ -41,6 +41,9 @@ ok('1.7 (Codex #509 P1) yazışma taraması vaka görünürlüğüyle sınırlı
   /listSuggestions\(companyId, \{ securityWhere = null \} = \{\}\)/.test(repo)
   && /case: caseVisibility/.test(repo)
   && /isArchived: false/.test(repo));
+ok('1.8 (Codex #510 P2) Bcc de taranır — yalnız-Bcc adres havuza girer',
+  /bccAddresses: true/.test(repo)
+  && /parseAddressList\(e\.bccAddresses\)/.test(repo));
 
 console.log('── Backend: route (from-aliases parite) ──');
 const routeBlock = routes.split("'/:id/email-recipients'")[1]?.slice(0, 800) ?? '';

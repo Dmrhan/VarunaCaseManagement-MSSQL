@@ -118,6 +118,11 @@ export const emailRecipientSuggestionRepo = {
           fromName: true,
           toAddresses: true,
           ccAddresses: true,
+          // Codex #510 P2 — Bcc de taranır: yalnız Bcc'ye yazılan adres
+          // "sonraki açılışta havuzda" vaadinin dışında kalmasın. Görünürlük
+          // güvenli: havuz zaten securityWhere ile aktörün görebildiği
+          // vakalarla sınırlı (Bcc o vakalarda ekrana da çıkıyor).
+          bccAddresses: true,
           createdAt: true,
         },
       }),
@@ -145,6 +150,7 @@ export const emailRecipientSuggestionRepo = {
       pushCorrespondence(e.fromAddress, e.fromName);
       for (const r of parseAddressList(e.toAddresses)) pushCorrespondence(r?.address, r?.name);
       for (const r of parseAddressList(e.ccAddresses)) pushCorrespondence(r?.address, r?.name);
+      for (const r of parseAddressList(e.bccAddresses)) pushCorrespondence(r?.address, r?.name);
     }
 
     // B) Ekip — yazışmada zaten görünen meslektaş 'correspondence' kalır
