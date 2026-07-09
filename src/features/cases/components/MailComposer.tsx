@@ -474,18 +474,48 @@ export function MailComposer({
     for (const s of quoteBlobsRef.current) URL.revokeObjectURL(s.blobUrl);
   }, []);
 
-  // Suggestions kaynağı — şimdilik vakanın customerContact alanları.
-  // Genişletilmiş account contacts öneri listesi M6.3'te.
+  // Alıcı önerisi v1 (2026-07-10) — havuz: vaka kişisi (en üstte, mevcut
+  // davranış) + yazışma geçmişi + iç ekip (kaynak etiketiyle). Composer
+  // açılışında TEK fetch ile önyüklenir; filtre ContactPicker'da client-side.
+  // KİLL-SWITCH: fetch hatası sessizce yutulur → öneri havuzu yalnız vaka
+  // kişisine düşer (bugünkü davranışın aynısı). Mail GÖNDERİMİ bu listeden
+  // bağımsızdır — öneri sadece To/Cc/Bcc state'ine adres yazar.
+  const [fetchedSuggestions, setFetchedSuggestions] = useState<
+    { email: string; name: string | null; source: 'correspondence' | 'team' }[]
+  >([]);
+  useEffect(() => {
+    let alive = true;
+    caseEmailService
+      .getRecipientSuggestions(item.id)
+      .then((items) => {
+        if (!alive) return;
+        setFetchedSuggestions(items.map((i) => ({ email: i.address, name: i.name, source: i.source })));
+      })
+      .catch(() => {
+        /* sessiz düşüş — composer eski davranışıyla çalışmaya devam eder */
+      });
+    return () => { alive = false; };
+  }, [item.id]);
+
   const suggestions = useMemo(() => {
-    const out: { email: string; name: string | null }[] = [];
+    const out: { email: string; name: string | null; source?: 'case_contact' | 'correspondence' | 'team' }[] = [];
+    const seen = new Set<string>();
     if (item.customerContactEmail) {
       out.push({
         email: item.customerContactEmail,
         name: item.customerContactName ?? null,
+        source: 'case_contact',
       });
+      seen.add(item.customerContactEmail.trim().toLowerCase());
+    }
+    for (const s of fetchedSuggestions) {
+      const key = s.email.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(s);
     }
     return out;
-  }, [item]);
+  }, [item, fetchedSuggestions]);
 
   // From alias'ları yükle
   useEffect(() => {
