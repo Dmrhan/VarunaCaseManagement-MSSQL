@@ -88,7 +88,10 @@ const STATUS_META: Record<CaseStatus, {
 }> = {
   'Açık': {
     icon: <Inbox size={18} />,
-    description: 'Yeni oluşturuldu, atama bekliyor.',
+    // 2026-07-09 — artık yalnız "yeni vaka" anlamına gelmiyor; atama/devir
+    // sonrası da otomatik bu duruma alınıyor (bkz. caseRepository
+    // shouldResetStatusOnReassignment).
+    description: 'Yeni veya yeniden atanmış, henüz incelemeye alınmamış vaka.',
     ring: 'ring-blue-200',
     bg: 'bg-blue-50/40',
     text: 'text-blue-700',
@@ -193,6 +196,41 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     !item.productGroup &&
     !productGroupSet &&
     user?.role !== 'SystemAdmin';
+  // Fix — Ürün Kataloğu'nda (ProductGroup) tanımlı ama henüz hiçbir vakada
+  // kullanılmamış gruplar da bu kapı select'ine düşsün diye (bkz. aynı fix
+  // CaseDetailPage.tsx'te); lookupService.productGroups() yalnız daha önce
+  // vakalarda kullanılmış distinct değerleri döner — kataloğa yeni eklenen
+  // bir grup bu kapıda hiç seçilemezdi.
+  const [catalogProductGroupNames, setCatalogProductGroupNames] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    if (!productGroupGateActive || !item.companyId) return;
+    void lookupService
+      .caseCatalog({ companyId: item.companyId, accountId: item.accountId || null })
+      .then((data) => {
+        if (alive) setCatalogProductGroupNames(data.productGroups.map((g) => g.name));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [productGroupGateActive, item.companyId, item.accountId]);
+  const productGroupSelectOptions = (() => {
+    const names = new Set<string>();
+    const merged: string[] = [];
+    for (const name of catalogProductGroupNames) {
+      if (!names.has(name)) {
+        names.add(name);
+        merged.push(name);
+      }
+    }
+    for (const p of lookupService.productGroups()) {
+      if (!names.has(p)) {
+        names.add(p);
+        merged.push(p);
+      }
+    }
+    return merged;
+  })();
   async function handleSaveProductGroup() {
     if (!productGroupDraft) return;
     setProductGroupSaving(true);
@@ -297,9 +335,14 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   // Çözüldü kararı seçildiğinde taxonomy listelerini çek. Kapanış-tüm-vakalar
   // genişletmesi: klasik (mail/telefon) vakalarda da kapanış etiketi yazılır;
   // dropdown'lar herkese görünür. Endpoint per-tenant; companyId Case'de var.
+  // COMP-UNIVERA için ayrıca ERKEN çekilir (pending seçilmeden) — açılış
+  // etiketleri kapısı (openingTagsMissing) "Çöz" kartının SEÇİLEBİLİRLİĞİNİ
+  // belirlerken hangi taksonomi tiplerinin bu şirkette tanımlı olduğunu
+  // bilmesi gerekiyor (P2 review — bkz. openingTagsMissing yorumu).
   useEffect(() => {
     let alive = true;
-    if (pending !== 'Çözüldü' || closureTax) return;
+    if (closureTax) return;
+    if (pending !== 'Çözüldü' && item.companyId !== 'COMP-UNIVERA') return;
     setClosureTaxLoading(true);
     void lookupService
       .smartTicketTaxonomies(item.companyId)
@@ -441,8 +484,37 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
       item.escalationLevel === 'Direktör' ||
       item.escalationLevel === 'ÜstYönetim');
 
+  // Açılış etiketleri kapanış kapısı — caseRepository.js transitionStatus
+  // guard'ının (opening_tags_required_for_closure) client-side aynası.
+  // P2 review fix — backend YALNIZ o şirkette en az bir aktif TaxonomyDef
+  // tanımlı olan alanları zorunlu sayar (admin tanımlamadıysa vaka
+  // tıkanmasın); bu panel eskiden 5 alanı KOŞULSUZ zorunlu sayıyordu —
+  // backend kapatmaya izin verse bile UI "Çöz" yolunu tamamen kapatıyordu.
+  // Artık closureTax (yukarıda taxonomy fetch) ile aynı "tanımlı tip" seti
+  // kullanılır: closureTax[key].length > 0 ⇔ backend'in definedTypes.has(key).
+  // closureTaxLoading sırasında (kısa geçiş penceresi) eski konservatif
+  // davranış korunur — kbEnabled===null ile aynı "güvenli taraf" deseni.
+  // Fetch başarısız olup closureTax null'da kalırsa (loading bitmiş) HİÇBİR
+  // alan zorunlu sayılmaz — backend'in "sorgu başarısız → zorunluluk
+  // UYGULANMAZ" fail-safe'iyle hizalı.
+  const OPENING_TAG_FIELDS = ['platform', 'businessProcess', 'operationType', 'affectedObject', 'impact'] as const;
+  const smartTicketOpening = (
+    item.customFields as { smartTicket?: Record<string, unknown> } | undefined
+  )?.smartTicket;
+  const definedOpeningTagKeys = new Set(
+    OPENING_TAG_FIELDS.filter((key) => (closureTax?.[key]?.length ?? 0) > 0),
+  );
+  const openingTagsMissing =
+    item.companyId === 'COMP-UNIVERA' &&
+    kbEnabled !== false &&
+    user?.role !== 'SystemAdmin' &&
+    (closureTaxLoading
+      ? OPENING_TAG_FIELDS.some((key) => !smartTicketOpening?.[key])
+      : [...definedOpeningTagKeys].some((key) => !smartTicketOpening?.[key]));
+
   function isCardDisabled(target: CaseStatus): boolean {
     if (target === item.status) return true;
+    if (target === 'Çözüldü' && openingTagsMissing) return true;
     return !allowedTransitions.includes(target);
   }
 
@@ -495,6 +567,12 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     !closureAlreadyAnalyzed &&
     !(closureRcg || closureRcd || closureRt || closurePp);
 
+  // openingTagsMissing yukarıda (isCardDisabled yakınında) tanımlı — "Çöz"
+  // kartı zaten seçilemez durumda olur. Bu, panel açıkken (örn. Compact
+  // Stepper'dan initialPending ile önceden seçilmiş gelirse) Uygula'yı da
+  // kilitleyen ikinci savunma hattı.
+  const openingTagsGateActive = pending === 'Çözüldü' && openingTagsMissing;
+
   function applyDisabled(): boolean {
     if (!pending) return true;
     if (customerGateActive) return true; // müşterisiz Çözüldü engeli (SystemAdmin muaf)
@@ -502,6 +580,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     if (pending === 'Çözüldü' && !resolutionNote.trim()) return true;
     if (pending === 'Çözüldü' && requiredChecklistPending.length > 0) return true;
     if (pending === 'Çözüldü' && closureLabelsPending) return true;
+    if (openingTagsGateActive) return true;
     if (pending === 'İptalEdildi' && !cancelReason.trim()) return true;
     if (pending === '3rdPartyBekleniyor' && !thirdPartyId) return true;
     if (pending === 'Eskalasyon' && (!escalationLevel || !escalationReason.trim())) return true;
@@ -720,6 +799,22 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
 
           {pending === 'Çözüldü' && (
             <>
+              {/* Açılış etiketleri kapısı — Univera'da 5 sınıflandırma alanı
+                  (platform/iş süreci/işlem tipi/etkilenen nesne/etki) boşken
+                  Çözüldü uygulanamaz. Düzenleme burada değil, Detay
+                  sekmesindeki "Akıllı Tanımlar" kartında yapılır — kullanıcı
+                  önce oraya yönlendirilir. */}
+              {openingTagsGateActive && (
+                <div className="flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">
+                  <span>⚠️</span>
+                  <span>
+                    Açılış etiketleri (platform / iş süreci / işlem türü / etkilenen nesne / etki)
+                    tamamlanmadan vaka çözülemez. Lütfen önce{' '}
+                    <strong>Detay sekmesindeki Akıllı Tanımlar</strong> kartından sınıflandırmayı
+                    tamamlayın.
+                  </span>
+                </div>
+              )}
               {/* 2026-07-06 — Müşteri kapısı: müşterisiz vaka çözülemez.
                   Öneriler (deterministik) + manuel ara; bağlanınca "Çöz"
                   butonu açılır. SystemAdmin bu bloğu görmez (istisna). */}
@@ -767,7 +862,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                       className="flex-1"
                     >
                       <option value="">— Seçin —</option>
-                      {lookupService.productGroups().map((g) => (
+                      {productGroupSelectOptions.map((g) => (
                         <option key={g} value={g}>{g}</option>
                       ))}
                     </Select>

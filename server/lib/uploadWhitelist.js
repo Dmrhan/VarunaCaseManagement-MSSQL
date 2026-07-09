@@ -59,6 +59,18 @@ export const UPLOAD_ALLOWED_MIME_TYPES = [
   // XML — Business review Madde 6 explicit kabul
   'application/xml',
   'text/xml',
+  // XSLT (.xslt/.xsl) — 2026-07-09 iş talebi (mail eki + case dosyası).
+  // Salt saklama/indirme; sunucu tarafında transform ÇALIŞTIRILMAZ
+  // (docblock'taki XML uyarısı aynen geçerli).
+  'application/xslt+xml',
+  // E-posta (.eml) — 2026-07-09 iş talebi. RFC 822 mesaj dosyası; render
+  // edilmez, ek olarak saklanır/indirilir.
+  'message/rfc822',
+  // SQL script (.sql) — 2026-07-09 iş talebi. Tarayıcılar çoğunlukla
+  // text/plain veya boş MIME yollar (uzantı fallback yakalar); bu ikisi
+  // yaygın explicit eşleme.
+  'application/sql',
+  'text/x-sql',
   // Arşiv
   'application/zip',
   'application/x-zip-compressed',
@@ -82,6 +94,12 @@ export const UPLOAD_ALLOWED_EXTENSIONS = [
   '.txt', '.csv', '.json',
   // XML — Business review Madde 6 explicit kabul
   '.xml',
+  // XSLT — 2026-07-09 iş talebi (.xsl eski/eşdeğer uzantı, aynı içerik)
+  '.xslt', '.xsl',
+  // E-posta — 2026-07-09 iş talebi
+  '.eml',
+  // SQL script — 2026-07-09 iş talebi
+  '.sql',
   // Arşiv
   '.zip',
   '.rar',
@@ -108,13 +126,16 @@ export function isAcceptedUpload(mimeType, fileName) {
   const dotIdx = name.lastIndexOf('.');
   const ext = dotIdx >= 0 ? name.slice(dotIdx) : '';
 
-  // .s3db (SQLite) özel istisnası — tarayıcı/mail istemcisi bilinmeyen
-  // ikili dosyalar için çoğunlukla application/octet-stream döner.
-  // application/octet-stream'i UPLOAD_ALLOWED_MIME_TYPES'a GENEL olarak
-  // eklemek yerine, sadece uzantı KESİNLİKLE .s3db ise bu kombinasyonu
-  // kabul ediyoruz — böylece octet-stream hiçbir zaman genel bir
-  // "güvenli MIME" sayılmaz (forge guard'ı zayıflamaz).
-  if (mime === 'application/octet-stream' && ext === '.s3db') {
+  // application/octet-stream DAR istisna seti — tarayıcı/mail istemcisi
+  // OS'te MIME eşlemesi olmayan tipler için çoğunlukla octet-stream (veya
+  // boş type; FE caseService bunu octet-stream'e çevirir — Codex #506 P2)
+  // döner. octet-stream'i UPLOAD_ALLOWED_MIME_TYPES'a GENEL olarak eklemek
+  // yerine yalnız bu uzantılarla kabul ediyoruz — octet-stream hiçbir zaman
+  // genel "güvenli MIME" sayılmaz (forge guard'ı zayıflamaz). Güvenlik notu:
+  // boş-MIME + izinli-uzantı zaten kabul edildiğinden bu istisna eşdeğerdir.
+  //   .s3db → UNV-1001065 · .sql/.xslt/.xsl/.eml → 2026-07-09 iş talebi
+  const OCTET_STREAM_EXT_EXCEPTIONS = ['.s3db', '.sql', '.xslt', '.xsl', '.eml'];
+  if (mime === 'application/octet-stream' && OCTET_STREAM_EXT_EXCEPTIONS.includes(ext)) {
     return true;
   }
 

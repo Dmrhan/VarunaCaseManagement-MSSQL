@@ -14,6 +14,7 @@ import {
   type TemplateCreateInput,
 } from '@/services/notificationService';
 import { lookupService } from '@/services/caseService';
+import { sanitizeMailHtml } from '@/lib/sanitizeMailHtml';
 import { AdminListLayout } from './AdminListLayout';
 import { NOTIFICATION_TEMPLATES_HELP } from './helpContents';
 
@@ -33,6 +34,13 @@ const VARIABLE_OPTIONS = [
   'resolution.customerMessage',
   'approval.rejectionReason',
   'approval.approverName',
+  // Müşteri-yüzü + HTML şablon değişkenleri (BE ALLOWED_VARIABLE_PATHS ile hizalı)
+  'requester.name',
+  'requester.email',
+  'case.url',
+  'company.logoUrl',
+  'app.logoUrl',
+  'case.lastCustomerMessage',
 ];
 
 interface EditorState {
@@ -211,7 +219,7 @@ function TemplateEditor({
   const [requiredVariables, setRequiredVariables] = useState<string[]>(initial?.requiredVariables ?? []);
   const [isActive, setIsActive] = useState(initial?.isActive ?? true);
   const [saving, setSaving] = useState(false);
-  const [preview, setPreview] = useState<{ subject: string; body: string; missing: string[] } | null>(null);
+  const [preview, setPreview] = useState<{ subject: string; body: string; missing: string[]; format: 'plain' | 'html' } | null>(null);
 
   // Local preview render (mirrors BE renderTemplate). For Phase 2 we render
   // with placeholder sample vars; admin can also call BE preview for case-
@@ -219,20 +227,28 @@ function TemplateEditor({
   function localPreview() {
     const sampleVars: Record<string, string> = {
       'case.number': 'VK-PREVIEW',
-      'case.title': '[Örnek başlık]',
-      'case.description': '[Örnek açıklama]',
-      'case.priority': 'Medium',
-      'case.status': 'Açık',
-      'case.category': '[Kategori]',
-      'case.subCategory': '[Alt Kategori]',
-      'account.name': '[Örnek Müşteri]',
-      'company.name': '[Şirket]',
-      'assignee.name': '[Atanan]',
-      'team.name': '[Takım]',
-      'resolution.summary': '',
-      'resolution.customerMessage': '',
-      'approval.rejectionReason': '',
-      'approval.approverName': '',
+      'case.title': 'Örnek talep başlığı',
+      'case.description': 'Örnek açıklama metni.',
+      'case.priority': 'Yüksek',
+      'case.status': 'İş Ortağında Bekliyor',
+      'case.category': 'Örnek Kategori',
+      'case.subCategory': 'Örnek Alt Kategori',
+      'account.name': 'Örnek Müşteri A.Ş.',
+      'company.name': 'Univera',
+      'assignee.name': 'Örnek Uzman',
+      'team.name': 'Destek Ekibi',
+      'resolution.summary': 'Örnek çözüm özeti.',
+      'resolution.customerMessage': 'Talebiniz çözülmüştür; ayrıntılar için örnek çözüm açıklaması metni burada yer alır.',
+      'approval.rejectionReason': 'Örnek ret gerekçesi.',
+      'approval.approverName': 'Örnek Onaylayan',
+      // Müşteri-yüzü + HTML şablon değişkenleri. Logo'lar public/ altından
+      // (dev sunucusu + build dist) kök yoldan servis edilir → önizlemede yüklenir.
+      'requester.name': 'Ayşe Demir',
+      'requester.email': 'ayse.demir@ornekmusteri.com',
+      'case.url': '#',
+      'company.logoUrl': '/univera-logo.png',
+      'app.logoUrl': '/varuna-logo.png',
+      'case.lastCustomerMessage': 'Merhaba, konuyla ilgili son durumu öğrenebilir miyim?',
     };
     const VAR_RE = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
     const missing: string[] = [];
@@ -249,6 +265,7 @@ function TemplateEditor({
       subject: render(subjectTemplate),
       body: render(bodyTemplate),
       missing: Array.from(new Set(missing)),
+      format,
     });
   }
 
@@ -365,7 +382,17 @@ function TemplateEditor({
               <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Önizleme</h4>
               <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs dark:border-ndark-border dark:bg-ndark-bg/40">
                 <div className="mb-1 font-semibold text-slate-800 dark:text-ndark-text">{preview.subject}</div>
-                <pre className="whitespace-pre-wrap font-sans text-slate-700 dark:text-ndark-muted">{preview.body}</pre>
+                {preview.format === 'html' ? (
+                  // HTML şablon: tasarımı render et (sanitizeMailHtml = BE allowlist
+                  // ile birebir; AdminEmailTemplatesPage önizlemesiyle aynı desen).
+                  // Beyaz zeminde göster ki mailin kendi arka planı görünsün.
+                  <div
+                    className="overflow-x-auto rounded bg-white"
+                    dangerouslySetInnerHTML={{ __html: sanitizeMailHtml(preview.body) }}
+                  />
+                ) : (
+                  <pre className="whitespace-pre-wrap font-sans text-slate-700 dark:text-ndark-muted">{preview.body}</pre>
+                )}
               </div>
               {preview.missing.length > 0 && (
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">

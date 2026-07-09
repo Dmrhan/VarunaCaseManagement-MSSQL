@@ -29,7 +29,7 @@
  *  - StatusTransitionPanel mevcut reason/closure/checklist modal'ı
  * bütün halinde reuse edilir.
  */
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   Ban,
@@ -44,7 +44,9 @@ import {
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { StatusPill } from '@/components/ui/StatusPill';
-import { caseService } from '@/services/caseService';
+import { caseService, lookupService, type SmartTicketTaxonomyResponse } from '@/services/caseService';
+import { useAuth } from '@/services/AuthContext';
+import { externalKbService } from '@/services/externalKbService';
 import { StatusTransitionPanel } from './StatusTransitionPanel';
 import {
   CASE_STATUS_LABELS,
@@ -191,9 +193,60 @@ const STATUS_ACTION_LABEL: Record<CaseStatus, string | null> = {
   'İptalEdildi':         'İptal et',
 };
 
+const OPENING_TAG_FIELDS = ['platform', 'businessProcess', 'operationType', 'affectedObject', 'impact'] as const;
+
 export function CompactStatusStepper({ item, onApplied, wideConnectors = false, readOnly = false }: CompactStatusStepperProps) {
   const { toast } = useToast();
+  const { user } = useAuth();
   const allowed = useMemo(() => STATUS_TRANSITIONS[item.status], [item.status]);
+
+  // Açılış etiketleri kapanış kapısı — StatusTransitionPanel'deki
+  // openingTagsMissing'in aynası (caseRepository.js transitionStatus
+  // guard'ı: opening_tags_required_for_closure). Burada da uygulanır ki
+  // kullanıcı "Çöz" düğümüne hiç basamasın — panele girip çözüm notu
+  // yazdıktan sonra reddedilmesin. kbEnabled === null (yükleniyor) →
+  // güvenli taraf: aktif kalır.
+  const [kbEnabled, setKbEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    if (!item.companyId) return;
+    void externalKbService
+      .settingsStatus(item.companyId)
+      .then((st) => { if (alive) setKbEnabled(st?.enabled === true); })
+      .catch(() => { if (alive) setKbEnabled(null); });
+    return () => { alive = false; };
+  }, [item.companyId]);
+  // P2 review fix — backend YALNIZ o şirkette en az bir aktif TaxonomyDef
+  // tanımlı olan alanları zorunlu sayar; StatusTransitionPanel'deki
+  // definedOpeningTagKeys ile aynı desen (closureTax[key].length > 0 ⇔
+  // backend'in definedTypes.has(key)). Eskiden 5 alan koşulsuz zorunluydu —
+  // backend kapatmaya izin verse bile bu düğüm hiç tıklanamıyordu.
+  const [openingTax, setOpeningTax] = useState<SmartTicketTaxonomyResponse['taxonomies'] | null>(null);
+  const [openingTaxLoading, setOpeningTaxLoading] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (item.companyId !== 'COMP-UNIVERA') return;
+    setOpeningTaxLoading(true);
+    void lookupService
+      .smartTicketTaxonomies(item.companyId)
+      .then((res) => { if (alive) setOpeningTax(res.taxonomies); })
+      .catch(() => { if (alive) setOpeningTax(null); })
+      .finally(() => { if (alive) setOpeningTaxLoading(false); });
+    return () => { alive = false; };
+  }, [item.companyId]);
+  const smartTicketOpening = (
+    item.customFields as { smartTicket?: Record<string, unknown> } | undefined
+  )?.smartTicket;
+  const definedOpeningTagKeys = new Set(
+    OPENING_TAG_FIELDS.filter((key) => (openingTax?.[key]?.length ?? 0) > 0),
+  );
+  const openingTagsMissing =
+    item.companyId === 'COMP-UNIVERA' &&
+    kbEnabled !== false &&
+    user?.role !== 'SystemAdmin' &&
+    (openingTaxLoading
+      ? OPENING_TAG_FIELDS.some((key) => !smartTicketOpening?.[key])
+      : [...definedOpeningTagKeys].some((key) => !smartTicketOpening?.[key]));
 
   // Reason gerekmeyen geçişler için direkt API; gerekenlerde modal.
   const [reasonTarget, setReasonTarget] = useState<CaseStatus | null>(null);
@@ -281,7 +334,8 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false, 
         {NODE_ORDER.map((target, idx) => {
           const v = STATUS_VISUAL[target];
           const isCurrent = target === item.status;
-          const isAllowed = allowed.includes(target);
+          const isOpeningTagsBlocked = target === 'Çözüldü' && openingTagsMissing;
+          const isAllowed = allowed.includes(target) && !isOpeningTagsBlocked;
           // 4 GÖRSEL DURUM — kullanıcı dilinde net ayrılır:
           //   • PAST       (geçmiş)        → lineer geçmiş VE allowed DEĞİL
           //   • CURRENT    (mevcut)        → item.status (BURADASIN)
@@ -339,7 +393,9 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false, 
                 ? needsReason
                   ? `${actionLabel ?? STATUS_NOUN_LABEL[target]} — gerekçe penceresi açılır`
                   : actionLabel ?? STATUS_NOUN_LABEL[target]
-                : `${STATUS_NOUN_LABEL[target]} — bu durumdan geçilemez`;
+                : isOpeningTagsBlocked
+                  ? 'Açılış etiketleri (platform / iş süreci / işlem türü / etkilenen nesne / etki) tamamlanmadan çözülemez — önce Detay sekmesindeki Akıllı Tanımlar kartını doldurun.'
+                  : `${STATUS_NOUN_LABEL[target]} — bu durumdan geçilemez`;
 
           return (
             <li
