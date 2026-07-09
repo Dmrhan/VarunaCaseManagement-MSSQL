@@ -2,6 +2,7 @@ import express, { Router } from 'express';
 import { createHash } from 'crypto';
 import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError, SMART_TICKET_ANALYSIS_CACHE_VERSION } from '../db/caseRepository.js';
 import { caseEmailRepository } from '../db/caseEmailRepository.js';
+import { emailRecipientSuggestionRepo } from '../db/emailRecipientSuggestionRepository.js';
 import { externalMailFromAliasRepo } from '../db/externalMailFromAliasRepository.js';
 import { caseEmailSender } from '../lib/caseEmailSender.js';
 import { prisma } from '../db/client.js';
@@ -2687,6 +2688,30 @@ router.get(
         isDefault: a.isDefault,
       })),
     });
+  }),
+);
+
+/**
+ * Alıcı önerisi v1 (2026-07-10) — GET /api/cases/:id/email-recipients
+ *
+ * Composer To/Cc/Bcc autocomplete havuzu: yazışma geçmişi + iç ekip
+ * (kaynak etiketiyle). SALT-OKUR; gönderim/intake koduna dikişi yok.
+ * Scope: from-aliases ile birebir aynı guard zinciri. FE tek fetch ile
+ * önyükler (tuş-başı sorgu yok); hata halinde FE sessizce eski davranışa
+ * düşer — bu endpoint mail akışı için hiçbir koşulda kritik değildir.
+ */
+router.get(
+  '/:id/email-recipients',
+  asyncRoute(async (req, res) => {
+    const c = await caseRepository.get(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+    const items = await emailRecipientSuggestionRepo.listSuggestions(c.companyId);
+    res.json({ items });
   }),
 );
 
