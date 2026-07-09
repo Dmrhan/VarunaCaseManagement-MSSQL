@@ -355,6 +355,14 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
       productGroupId: string;
     }>
   >([]);
+  // Fix — Sınıflandırma kartındaki "Ürün Grubu" seçeneklerine admin
+  // kataloğunda (ProductGroup) tanımlı ama henüz hiçbir vakada kullanılmamış
+  // grupları da eklemek için (bkz. lookupService.productGroups() aşağıda —
+  // yalnız vakalardaki distinct değerleri döner, yeni eklenen katalog kaydı
+  // ilk vakaya seçilene kadar hiç görünmezdi).
+  const [catalogProductGroups, setCatalogProductGroups] = useState<
+    Array<{ id: string; code: string; name: string }>
+  >([]);
 
   // Parent caseId değişirse içerideki state ve breadcrumb sıfırlanır
   useEffect(() => {
@@ -455,6 +463,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
     if (!item?.companyId) {
       setCatalogPackages([]);
       setCatalogProducts([]);
+      setCatalogProductGroups([]);
       return;
     }
     void lookupService
@@ -463,6 +472,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
         if (!alive) return;
         setCatalogPackages(data.packages);
         setCatalogProducts(data.products);
+        setCatalogProductGroups(data.productGroups);
       });
     return () => {
       alive = false;
@@ -1348,6 +1358,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
                 thirdParties={thirdParties}
                 catalogPackages={catalogPackages}
                 catalogProducts={catalogProducts}
+                catalogProductGroups={catalogProductGroups}
                 previousCases={previousCases}
                 onSelectPrevious={navigateToCase}
                 drafts={drafts}
@@ -3410,6 +3421,7 @@ function DetailTab({
   thirdParties,
   catalogPackages,
   catalogProducts,
+  catalogProductGroups,
   previousCases,
   onSelectPrevious,
   drafts,
@@ -3437,6 +3449,7 @@ function DetailTab({
     supportLevel: SupportLevel;
     productGroupId: string;
   }>;
+  catalogProductGroups: Array<{ id: string; code: string; name: string }>;
   previousCases: Case[];
   onSelectPrevious: (id: string) => void;
   drafts: Partial<Case>;
@@ -3748,7 +3761,26 @@ function DetailTab({
               onStart={() => onStartEdit('productGroup')}
               onCommit={(val) => onCommitDraft('productGroup', val)}
               onCancel={onCancelEdit}
-              options={[{ value: '', label: '— Seçin —' }, ...lookupService.productGroups().map((p) => ({ value: p, label: p }))]}
+              options={[
+                { value: '', label: '— Seçin —' },
+                ...(() => {
+                  const names = new Set<string>();
+                  const merged: string[] = [];
+                  for (const g of catalogProductGroups) {
+                    if (!names.has(g.name)) {
+                      names.add(g.name);
+                      merged.push(g.name);
+                    }
+                  }
+                  for (const p of lookupService.productGroups()) {
+                    if (!names.has(p)) {
+                      names.add(p);
+                      merged.push(p);
+                    }
+                  }
+                  return merged.map((name) => ({ value: name, label: name }));
+                })(),
+              ]}
             />
           ),
         };

@@ -193,6 +193,41 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     !item.productGroup &&
     !productGroupSet &&
     user?.role !== 'SystemAdmin';
+  // Fix — Ürün Kataloğu'nda (ProductGroup) tanımlı ama henüz hiçbir vakada
+  // kullanılmamış gruplar da bu kapı select'ine düşsün diye (bkz. aynı fix
+  // CaseDetailPage.tsx'te); lookupService.productGroups() yalnız daha önce
+  // vakalarda kullanılmış distinct değerleri döner — kataloğa yeni eklenen
+  // bir grup bu kapıda hiç seçilemezdi.
+  const [catalogProductGroupNames, setCatalogProductGroupNames] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    if (!productGroupGateActive || !item.companyId) return;
+    void lookupService
+      .caseCatalog({ companyId: item.companyId, accountId: item.accountId || null })
+      .then((data) => {
+        if (alive) setCatalogProductGroupNames(data.productGroups.map((g) => g.name));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [productGroupGateActive, item.companyId, item.accountId]);
+  const productGroupSelectOptions = (() => {
+    const names = new Set<string>();
+    const merged: string[] = [];
+    for (const name of catalogProductGroupNames) {
+      if (!names.has(name)) {
+        names.add(name);
+        merged.push(name);
+      }
+    }
+    for (const p of lookupService.productGroups()) {
+      if (!names.has(p)) {
+        names.add(p);
+        merged.push(p);
+      }
+    }
+    return merged;
+  })();
   async function handleSaveProductGroup() {
     if (!productGroupDraft) return;
     setProductGroupSaving(true);
@@ -767,7 +802,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                       className="flex-1"
                     >
                       <option value="">— Seçin —</option>
-                      {lookupService.productGroups().map((g) => (
+                      {productGroupSelectOptions.map((g) => (
                         <option key={g} value={g}>{g}</option>
                       ))}
                     </Select>
