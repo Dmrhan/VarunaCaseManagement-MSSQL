@@ -4030,6 +4030,52 @@ export const caseRepository = {
       );
     }
 
+    // Açılış etiketleri zorunluluğu (kapanış kapısı) — TÜM Univera vakalarında
+    // (müşteri/proje eşleşmiş olsun olmasın): platform/businessProcess/
+    // operationType/affectedObject/impact taksonomi alanlarının kaydın
+    // kesinliği için dolu olması gerekiyor. Smart Ticket akışında bu alanlar
+    // açılışta zaten zorunlu ama YALNIZ o admin ilgili alan için taksonomi
+    // tanımlamışsa (canCreate ile aynı fail-safe); mail intake gibi diğer
+    // kanallar açılış anında etkilenmez. Karar: yalnız Cozuldu (IptalEdildi
+    // muaf); SystemAdmin istisna. Frontend'deki gibi, bir alan yalnız o
+    // şirkette en az bir aktif taksonomi tanımı VARSA zorunlu sayılır — admin
+    // tanımlamamışsa vaka tıkanmasın. Fail-safe: taksonomi sorgusu başarısız
+    // olursa zorunluluk UYGULANMAZ (kapatma bloklanmaz).
+    // KB tenant kapısı (kbEnabled) ile aynı koşula bağlıdır — düzeltme
+    // arayüzü olan SmartClassificationCard, kbEnabled=false + veri yok
+    // durumunda hiç render edilmiyor (bkz. bileşen içi TENANT KAPISI notu);
+    // düzeltme yolu yokken kapanışı bloklamak vakayı çıkmaza sokar.
+    if (
+      dbNext === 'Cozuldu' &&
+      prev.status !== 'Cozuldu' &&
+      prev.companyId === 'COMP-UNIVERA' &&
+      actorObject?.role !== 'SystemAdmin' &&
+      (await prisma.externalKbSetting
+        .findUnique({ where: { companyId: 'COMP-UNIVERA' }, select: { enabled: true } })
+        .then((s) => s?.enabled === true)
+        .catch(() => false))
+    ) {
+      const OPENING_TAXONOMY_FIELDS = ['platform', 'businessProcess', 'operationType', 'affectedObject', 'impact'];
+      const definedTypes = await prisma.taxonomyDef
+        .findMany({
+          where: { companyId: 'COMP-UNIVERA', taxonomyType: { in: OPENING_TAXONOMY_FIELDS }, isActive: true },
+          select: { taxonomyType: true },
+          distinct: ['taxonomyType'],
+        })
+        .then((rows) => new Set(rows.map((r) => r.taxonomyType)))
+        .catch(() => new Set());
+      const smartTicketFields = prev.customFields?.smartTicket ?? {};
+      const missing = OPENING_TAXONOMY_FIELDS.filter(
+        (key) => definedTypes.has(key) && !smartTicketFields[key],
+      );
+      if (missing.length > 0) {
+        throw new CaseValidationError(
+          'Vaka açılış etiketleri (platform / iş süreci / işlem türü / etkilenen nesne / etki) tamamlanmadan çözülemez. Lütfen önce sınıflandırma alanlarını doldurun.',
+          { status: 400, code: 'opening_tags_required_for_closure' },
+        );
+      }
+    }
+
     // Kapanış analizi zorunluluğu — vaka (açılış kanalı fark etmeksizin:
     // Smart Ticket, mail, telefon…) Cozuldu'ya geçerken "KB ile Analiz Et"
     // en az bir kez çalıştırılmış (closureSuggestion telemetrisi payload'da)
