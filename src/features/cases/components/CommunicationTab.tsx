@@ -476,7 +476,18 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                   {/* ALT — Reader AYRI KART (R15 M4 görsel hiyerarşi:
                       "üstte liste, altta AÇIK MAİL" okunmalı). */}
                   {selectedEmail && (
-                    <div className="rounded-lg bg-white shadow-sm ring-1 ring-slate-200 dark:bg-ndark-card dark:ring-ndark-border">
+                    <div
+                      // Alan israfı fix'i (kullanıcı direktifi 2026-07-09):
+                      // dikey (sekme-içi) modda composer açıkken reader
+                      // kompakt yüksekliğe (35vh) sıkıştırılır — gövde
+                      // İÇERİDE kayar, yanıt kutusu yukarıda başlar.
+                      // Composer kapaliyken kısıt yok (eski görünüm).
+                      className={`rounded-lg bg-white shadow-sm ring-1 ring-slate-200 dark:bg-ndark-card dark:ring-ndark-border ${
+                        composerOpen && composerLayout === 'inline'
+                          ? 'flex max-h-[35vh] min-h-0 flex-col overflow-hidden'
+                          : ''
+                      }`}
+                    >
                       <MailThreadReader
                         email={selectedEmail}
                         caseId={item.id}

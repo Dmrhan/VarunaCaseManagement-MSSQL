@@ -529,7 +529,11 @@ export function MailThreadReader({
       {/* Body — 2026-07-04 PR-2 R6 cilası: max-w-[760px] mx-auto padding.
           R15 M2 — mode='inline' iken doğal yükseklik (overflow-visible, sayfa
           akışı). Fullscreen'de flex-1 overflow-auto (kendi iç scroll'u). */}
-      <div className={mode === 'fullscreen' ? 'flex-1 overflow-auto p-6' : 'p-4'}>
+      {/* 2026-07-09 — inline modda da min-h-0/flex-1/overflow: parent
+          (CommunicationTab) composer açıkken reader'ı kompakt yüksekliğe
+          kısıtlar → gövde İÇERİDE kayar, composer yukarıda başlar (alan
+          israfı biter). Kısıtsız (composer kapalı) durumda etkisiz. */}
+      <div className={mode === 'fullscreen' ? 'flex-1 overflow-auto p-6' : 'min-h-0 flex-1 overflow-y-auto p-4'}>
         <div className="mx-auto max-w-[760px]">
           {rewriting && (
             <div className="text-xs text-slate-400">Görseller çözülüyor…</div>
