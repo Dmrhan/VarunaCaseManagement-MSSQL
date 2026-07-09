@@ -724,7 +724,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                 body={
                   resolutionNote
                     ? 'Taslak alana yazıldı; düzenleyebilirsiniz veya yeni bir taslak üretebilirsiniz.'
-                    : 'Vaka geçmişine ve notlara bakarak müşteri dostu bir çözüm notu önerilir.'
+                    : 'Vaka geçmişine ve notlara bakarak ekip içi bir çözüm özeti (iç kayıt) önerilir.'
                 }
                 isLoading={drafting}
                 primaryAction={{
@@ -736,7 +736,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
               <Field
                 label="Çözüm Notu"
                 required
-                hint="@ ile yardım eden kişi veya QA'yı etiketleyebilirsin."
+                hint="İç kayıt amaçlıdır, müşteriye gönderilmez. @ ile yardım eden kişi veya QA'yı etiketleyebilirsin."
                 actions={
                   <VoiceNoteButton
                     onTranscript={(chunk) =>
