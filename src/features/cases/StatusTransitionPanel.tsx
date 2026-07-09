@@ -88,7 +88,10 @@ const STATUS_META: Record<CaseStatus, {
 }> = {
   'Açık': {
     icon: <Inbox size={18} />,
-    description: 'Yeni oluşturuldu, atama bekliyor.',
+    // 2026-07-09 — artık yalnız "yeni vaka" anlamına gelmiyor; atama/devir
+    // sonrası da otomatik bu duruma alınıyor (bkz. caseRepository
+    // shouldResetStatusOnReassignment).
+    description: 'Yeni veya yeniden atanmış, henüz incelemeye alınmamış vaka.',
     ring: 'ring-blue-200',
     bg: 'bg-blue-50/40',
     text: 'text-blue-700',

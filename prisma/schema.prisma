@@ -1635,6 +1635,17 @@ model Case {
   updatedAt  DateTime  @updatedAt
   resolvedAt DateTime?
 
+  /// Atama/devir sonrası statü otomasyonu — mevcut sorumlu (kişi veya
+  /// ekip) her değiştiğinde damgalanır; pickedUpAt aynı anda null'a
+  /// sıfırlanır. "Açık" (yeniden atanmış, henüz incelemeye alınmamış)
+  /// bekleme süresini ölçmek için. Eski kayıtlarda NULL kalır (backfill
+  /// yok — kasıtlı, bkz. review notu).
+  assignedAt DateTime?
+  /// Mevcut sorumlu vakayı "Açık" → "İncelemede" alarak fiilen işe
+  /// başladığında damgalanır. Yeni atamada assignedAt ile birlikte
+  /// null'a sıfırlanır.
+  pickedUpAt DateTime?
+
   // Relations
   company        Company         @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   account        Account?        @relation(fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -1712,6 +1723,9 @@ model Case {
   @@index([companyId, assignedTeamId])
   @@index([companyId, category, subCategory])
   @@index([companyId, resolvedAt])
+  /// "Atanmış ama henüz incelemeye alınmamış" dashboard sorgusu için
+  /// (pickedUpAt IS NULL AND assignedAt < X).
+  @@index([companyId, pickedUpAt, assignedAt])
   // WR-A5 / PM-03 — tier filter / routing Phase 2 için.
   @@index([companyId, supportLevel])
   // PR-SD — list default exclude path için. companyId zaten her sorguda.
@@ -2193,6 +2207,12 @@ model CaseTransfer {
   reasonCode    String?  @db.NVarChar(255)
   transferredBy String   @db.NVarChar(Max)
   transferredAt DateTime @default(dbgenerated("sysutcdatetime()"))
+
+  /// Bu atamayı devralan kişi/ekip vakayı fiilen "İncelemede"ye aldığında
+  /// damgalanır (Case.pickedUpAt ile birlikte, aynı transitionStatus
+  /// çağrısında). Yalnızca vakanın EN SON transfer satırı için doldurulur
+  /// — atama→işe başlama süresi raporlaması bu alan üzerinden yapılır.
+  pickedUpAt DateTime?
 
   // AI önerisi snapshot (uygulandı/yok sayıldı analizi için)
   aiSuggestedTeamId String? @db.NVarChar(450)
