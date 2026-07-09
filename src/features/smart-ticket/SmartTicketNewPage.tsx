@@ -693,6 +693,11 @@ export function SmartTicketNewPage({
     // 2026-07-02 — Öncelik + Talep Türü ZORUNLU. Kullanıcı seçmezse advance yok.
     !!form.priority &&
     !!form.requestType &&
+    // Review fix — Ürün Grubu ZORUNLU (kayıtlarda bu bilginin kesin
+    // olması için; kapanış kapısıyla aynı gerekçe, ama burada açılışta
+    // uygulanıyor). Şirkette tanımlı hiç ürün grubu yoksa (dropdown boş)
+    // zorunluluk uygulanmaz — aksi halde o şirkette vaka HİÇ açılamazdı.
+    (catalogProductGroups.length === 0 || !!form.productGroupId) &&
     // Akıllı Tanımlar — item'ı olan alanların hepsi seçili olmadan buton pasif.
     taxonomyRequirementSatisfied &&
     !creating;
@@ -1802,21 +1807,25 @@ export function SmartTicketNewPage({
                 </Field>
               </div>
 
-              {/* 2026-07-02 — Ürün Grubu + Ürün (opsiyonel, cascade). Grup
-                  seçilince ürün dropdown'ı yalnız o grubun aktif ürünleri.
-                  Grup değişince ürün seçimi otomatik sıfırlanır (useEffect).
-                  Boş gruplar (Quest/ServiceCore) listede kalır — grup-only
-                  seçim anlamlı; Case.productGroup name'e yazılır, productId
-                  ürün seçilirse eklenir. */}
+              {/* 2026-07-02 — Ürün Grubu + Ürün (cascade). Grup seçilince ürün
+                  dropdown'ı yalnız o grubun aktif ürünleri. Grup değişince
+                  ürün seçimi otomatik sıfırlanır (useEffect). Boş gruplar
+                  (Quest/ServiceCore) listede kalır — grup-only seçim
+                  anlamlı; Case.productGroup name'e yazılır, productId ürün
+                  seçilirse eklenir.
+                  Review fix — Ürün Grubu artık ZORUNLU (şirkette hiç grup
+                  tanımlı değilse istisna, bkz. canCreate). Ürün seçimi hâlâ
+                  opsiyonel — grup tek başına yeterli. */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field
                   label="Ürün Grubu"
+                  required={catalogProductGroups.length > 0}
                   hint={
                     !form.companyId
                       ? 'Önce şirket seç.'
                       : catalogProductGroups.length === 0
                         ? 'Bu şirkette aktif ürün grubu tanımlı değil.'
-                        : 'Opsiyonel. Vakanın konu ürün grubu; emin değilsen boş bırak.'
+                        : 'Vakanın konu ürün grubu.'
                   }
                 >
                   <Select
@@ -2000,6 +2009,7 @@ export function SmartTicketNewPage({
                             if (form.description.trim().length === 0) return 'Açıklama boş olamaz.';
                             if (!projectRequirementSatisfied) return 'Proje seçimi zorunlu.';
                             if (!form.priority || !form.requestType) return 'Öncelik ve Talep Türü zorunlu.';
+                            if (catalogProductGroups.length > 0 && !form.productGroupId) return 'Ürün Grubu zorunlu.';
                             return undefined;
                           })()
                         : undefined
