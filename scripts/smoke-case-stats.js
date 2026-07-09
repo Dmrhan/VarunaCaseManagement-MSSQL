@@ -64,8 +64,9 @@ const truthAssigned = await prisma.case.count({
 const truthSlaRisk = await prisma.case.count({
   where: { companyId: { in: agentScope }, assignedPersonId: agent.personId, status: { in: OPEN_DB }, slaViolation: true, AND: [NOT_SNOOZED] },
 });
+// Review fix — "Bugün Çözüldü" İptalEdildi'yi kapsamaz (yalnız Cozuldu).
 const truthResolvedToday = await prisma.case.count({
-  where: { companyId: { in: agentScope }, assignedPersonId: agent.personId, resolvedAt: { gte: today0, lte: today23 } },
+  where: { companyId: { in: agentScope }, assignedPersonId: agent.personId, status: 'Cozuldu', resolvedAt: { gte: today0, lte: today23 } },
 });
 const truthSnoozedMine = await prisma.case.count({
   where: { companyId: { in: agentScope }, assignedPersonId: agent.personId, snoozeUntil: { gt: new Date() }, status: { in: OPEN_DB } },
@@ -122,8 +123,9 @@ const truthSlaViol = await prisma.case.count({
 const truthCritical = await prisma.case.count({
   where: { companyId: { in: adminScope }, status: { in: OPEN_DB }, priority: 'Critical', AND: [NOT_SNOOZED] },
 });
+// Review fix — "Bugün Çözüldü" İptalEdildi'yi kapsamaz (yalnız Cozuldu).
 const truthResolvedTodayAll = await prisma.case.count({
-  where: { companyId: { in: adminScope }, resolvedAt: { gte: today0, lte: today23 } },
+  where: { companyId: { in: adminScope }, status: 'Cozuldu', resolvedAt: { gte: today0, lte: today23 } },
 });
 
 const adminStats = await caseRepository.getStats({ user: { ...admin, allowedCompanyIds: adminScope } });
