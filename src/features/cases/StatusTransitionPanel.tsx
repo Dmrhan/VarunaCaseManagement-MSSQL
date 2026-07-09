@@ -280,6 +280,14 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     kbSuggestedAtRef.current = null;
     setLinkedCustomer(null); // 2026-07-06 — vaka değişince müşteri-bağla state'i sıfırla
     setCustomerPickerOpen(false);
+    // Codex #494 P2 fix — ürün-grubu gate state'i de vaka değişince sıfırla.
+    // Aksi halde bir vakada grup kaydedildikten sonra panel BAŞKA vakaya
+    // geçince productGroupSet dolu kalıyor → gate gizli + Uygula açık →
+    // backend product_group_required_for_closure ile reddediyor (kullanıcı
+    // sebepsiz duvara çarpıyordu).
+    setProductGroupSet(null);
+    setProductGroupDraft('');
+    setProductGroupSaving(false);
     // initialPending kasıtlı olarak dep değil — panel mount'unda Compact
     // Stepper'dan gelen preselect bir kez uygulanır. Sonraki kullanıcı
     // tıklamaları normal akışla pending'i değiştirir.
