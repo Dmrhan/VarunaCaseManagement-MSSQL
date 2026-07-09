@@ -3,10 +3,11 @@
 -- backfill YOK (kasıtlı — eski kayıtlarda assignedAt/pickedUpAt NULL
 -- kalır, yalnız bu migration'dan sonraki atama/devir olayları doldurur).
 --
--- DİKKAT: Bu dosya sadece şema değişikliğini tanımlar; bu oturumda hiçbir
--- veritabanına UYGULANMADI (çalıştırılmadı). Uygulamadan önce hedef
--- ortamda (özellikle canlıya bağlı olabilecek bir veritabanında) bu
--- migration'ın çalıştırılması ayrı, bilinçli bir onay/işlem gerektirir.
+-- CREATE INDEX BİLEREK bu migration'a DAHİL EDİLMEDİ — canlı/büyük bir
+-- tabloda index oluşturma işlemi kilitlenmeye yol açabilir (ONLINE=ON
+-- desteklenmeyebilir). Yeni alanları kullanan bir sorgu gerçekten
+-- gerektirdiğinde, düşük trafikli bir zamanda ayrı bir migration'la
+-- eklenmeli.
 
 BEGIN TRY
 
@@ -18,9 +19,6 @@ ALTER TABLE [dbo].[Case]
 
 ALTER TABLE [dbo].[CaseTransfer]
   ADD [pickedUpAt] DATETIME2 NULL;
-
-CREATE INDEX [Case_companyId_pickedUpAt_assignedAt_idx]
-  ON [dbo].[Case] ([companyId], [pickedUpAt], [assignedAt]);
 
 COMMIT TRAN;
 

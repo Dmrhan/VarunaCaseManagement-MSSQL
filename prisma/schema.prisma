@@ -1723,9 +1723,10 @@ model Case {
   @@index([companyId, assignedTeamId])
   @@index([companyId, category, subCategory])
   @@index([companyId, resolvedAt])
-  /// "Atanmış ama henüz incelemeye alınmamış" dashboard sorgusu için
-  /// (pickedUpAt IS NULL AND assignedAt < X).
-  @@index([companyId, pickedUpAt, assignedAt])
+  // "Atanmış ama henüz incelemeye alınmamış" dashboard sorgusu için bir
+  // index (companyId, pickedUpAt, assignedAt) faydalı olur — kasıtlı
+  // olarak BURADA eklenmedi, canlı/büyük tabloda CREATE INDEX kilitlenme
+  // riski taşıdığı için ayrı, düşük trafikli bir migration'a bırakıldı.
   // WR-A5 / PM-03 — tier filter / routing Phase 2 için.
   @@index([companyId, supportLevel])
   // PR-SD — list default exclude path için. companyId zaten her sorguda.
