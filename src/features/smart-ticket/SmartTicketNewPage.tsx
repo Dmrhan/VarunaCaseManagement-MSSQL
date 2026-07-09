@@ -489,14 +489,22 @@ export function SmartTicketNewPage({
   const [catalogProductGroups, setCatalogProductGroups] = useState<
     Array<{ id: string; code: string; name: string }>
   >([]);
+  // Codex #494 P2 fix — "yükleniyor" ile "yüklendi ve boş" AYRI durumlar.
+  // Fetch dönmeden catalogProductGroups=[] olduğundan hızlı davranan
+  // kullanıcı Ürün Grubu zorunluluğunu atlayıp ticket açabiliyordu →
+  // kapanışta product_group_required_for_closure duvarına çıkışsız
+  // takılıyordu. Yüklenene kadar create bloklanır.
+  const [catalogLoading, setCatalogLoading] = useState(false);
 
   useEffect(() => {
     if (stage !== 'opening' || !form.companyId) {
       setCatalogProducts([]);
       setCatalogProductGroups([]);
+      setCatalogLoading(false);
       return;
     }
     let alive = true;
+    setCatalogLoading(true);
     void lookupService
       .caseCatalog({ companyId: form.companyId, accountId: form.accountId || null })
       .then((data) => {
@@ -510,9 +518,13 @@ export function SmartTicketNewPage({
             productGroupId: p.productGroupId,
           })),
         );
+        setCatalogLoading(false);
       })
       .catch(() => {
         // Sessiz — apiFetch zaten toast gösterir. Alanlar boş kalır.
+        // Yükleme bitti sayılır (fail'de boş liste = zorunluluk uygulanmaz;
+        // aksi halde katalog servisi düşükken vaka HİÇ açılamazdı).
+        if (alive) setCatalogLoading(false);
       });
     return () => {
       alive = false;
@@ -693,6 +705,14 @@ export function SmartTicketNewPage({
     // 2026-07-02 — Öncelik + Talep Türü ZORUNLU. Kullanıcı seçmezse advance yok.
     !!form.priority &&
     !!form.requestType &&
+    // Review fix — Ürün Grubu ZORUNLU (kayıtlarda bu bilginin kesin
+    // olması için; kapanış kapısıyla aynı gerekçe, ama burada açılışta
+    // uygulanıyor). Şirkette tanımlı hiç ürün grubu yoksa (dropdown boş)
+    // zorunluluk uygulanmaz — aksi halde o şirkette vaka HİÇ açılamazdı.
+    // Codex #494 P2 — katalog YÜKLENİRKEN create bloklanır: geçici boş
+    // liste "grup yok" değildir; hızlı kullanıcı zorunluluğu atlayamaz.
+    !catalogLoading &&
+    (catalogProductGroups.length === 0 || !!form.productGroupId) &&
     // Akıllı Tanımlar — item'ı olan alanların hepsi seçili olmadan buton pasif.
     taxonomyRequirementSatisfied &&
     !creating;
@@ -1802,21 +1822,27 @@ export function SmartTicketNewPage({
                 </Field>
               </div>
 
-              {/* 2026-07-02 — Ürün Grubu + Ürün (opsiyonel, cascade). Grup
-                  seçilince ürün dropdown'ı yalnız o grubun aktif ürünleri.
-                  Grup değişince ürün seçimi otomatik sıfırlanır (useEffect).
-                  Boş gruplar (Quest/ServiceCore) listede kalır — grup-only
-                  seçim anlamlı; Case.productGroup name'e yazılır, productId
-                  ürün seçilirse eklenir. */}
+              {/* 2026-07-02 — Ürün Grubu + Ürün (cascade). Grup seçilince ürün
+                  dropdown'ı yalnız o grubun aktif ürünleri. Grup değişince
+                  ürün seçimi otomatik sıfırlanır (useEffect). Boş gruplar
+                  (Quest/ServiceCore) listede kalır — grup-only seçim
+                  anlamlı; Case.productGroup name'e yazılır, productId ürün
+                  seçilirse eklenir.
+                  Review fix — Ürün Grubu artık ZORUNLU (şirkette hiç grup
+                  tanımlı değilse istisna, bkz. canCreate). Ürün seçimi hâlâ
+                  opsiyonel — grup tek başına yeterli. */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field
                   label="Ürün Grubu"
+                  required={catalogLoading || catalogProductGroups.length > 0}
                   hint={
                     !form.companyId
                       ? 'Önce şirket seç.'
-                      : catalogProductGroups.length === 0
-                        ? 'Bu şirkette aktif ürün grubu tanımlı değil.'
-                        : 'Opsiyonel. Vakanın konu ürün grubu; emin değilsen boş bırak.'
+                      : catalogLoading
+                        ? 'Ürün grupları yükleniyor…'
+                        : catalogProductGroups.length === 0
+                          ? 'Bu şirkette aktif ürün grubu tanımlı değil.'
+                          : 'Vakanın konu ürün grubu.'
                   }
                 >
                   <Select
@@ -1825,7 +1851,8 @@ export function SmartTicketNewPage({
                       setForm((f) => ({ ...f, productGroupId: e.target.value }))
                     }
                     disabled={
-                      stage !== 'opening' || !form.companyId || catalogProductGroups.length === 0
+                      stage !== 'opening' || !form.companyId || catalogLoading
+                      || catalogProductGroups.length === 0
                     }
                   >
                     <option value="">— Grup seçme —</option>
@@ -2000,6 +2027,7 @@ export function SmartTicketNewPage({
                             if (form.description.trim().length === 0) return 'Açıklama boş olamaz.';
                             if (!projectRequirementSatisfied) return 'Proje seçimi zorunlu.';
                             if (!form.priority || !form.requestType) return 'Öncelik ve Talep Türü zorunlu.';
+                            if (catalogProductGroups.length > 0 && !form.productGroupId) return 'Ürün Grubu zorunlu.';
                             return undefined;
                           })()
                         : undefined

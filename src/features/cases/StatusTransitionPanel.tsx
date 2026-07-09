@@ -181,6 +181,28 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     const updated = await caseService.linkAccount(item.id, accountId);
     if (updated) setLinkedCustomer({ id: accountId, name: accountName });
   }
+  // Ürün Grubu kapısı — kapanışta veri kesinliği için zorunlu. Müşteri
+  // kapısıyla aynı desen: SystemAdmin istisna, local override state
+  // (productGroupSet) item prop'u bu turda tazelenmese bile ekranı
+  // un-gate eder (backend transitionStatus taze DB okur, guard geçer).
+  const [productGroupSet, setProductGroupSet] = useState<string | null>(null);
+  const [productGroupDraft, setProductGroupDraft] = useState('');
+  const [productGroupSaving, setProductGroupSaving] = useState(false);
+  const productGroupGateActive =
+    pending === 'Çözüldü' &&
+    !item.productGroup &&
+    !productGroupSet &&
+    user?.role !== 'SystemAdmin';
+  async function handleSaveProductGroup() {
+    if (!productGroupDraft) return;
+    setProductGroupSaving(true);
+    try {
+      const updated = await caseService.update(item.id, { productGroup: productGroupDraft });
+      if (updated) setProductGroupSet(productGroupDraft);
+    } finally {
+      setProductGroupSaving(false);
+    }
+  }
   const [thirdPartyId, setThirdPartyId] = useState('');
   const [escalationLevel, setEscalationLevel] = useState<EscalationLevel | ''>('');
   const [escalationReason, setEscalationReason] = useState('');
@@ -258,6 +280,14 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     kbSuggestedAtRef.current = null;
     setLinkedCustomer(null); // 2026-07-06 — vaka değişince müşteri-bağla state'i sıfırla
     setCustomerPickerOpen(false);
+    // Codex #494 P2 fix — ürün-grubu gate state'i de vaka değişince sıfırla.
+    // Aksi halde bir vakada grup kaydedildikten sonra panel BAŞKA vakaya
+    // geçince productGroupSet dolu kalıyor → gate gizli + Uygula açık →
+    // backend product_group_required_for_closure ile reddediyor (kullanıcı
+    // sebepsiz duvara çarpıyordu).
+    setProductGroupSet(null);
+    setProductGroupDraft('');
+    setProductGroupSaving(false);
     // initialPending kasıtlı olarak dep değil — panel mount'unda Compact
     // Stepper'dan gelen preselect bir kez uygulanır. Sonraki kullanıcı
     // tıklamaları normal akışla pending'i değiştirir.
@@ -468,6 +498,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   function applyDisabled(): boolean {
     if (!pending) return true;
     if (customerGateActive) return true; // müşterisiz Çözüldü engeli (SystemAdmin muaf)
+    if (productGroupGateActive) return true; // ürün grubu boşken Çözüldü engeli (SystemAdmin muaf)
     if (pending === 'Çözüldü' && !resolutionNote.trim()) return true;
     if (pending === 'Çözüldü' && requiredChecklistPending.length > 0) return true;
     if (pending === 'Çözüldü' && closureLabelsPending) return true;
@@ -719,12 +750,50 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                   ✓ Müşteri bağlandı: <strong>{linkedCustomer.name}</strong> — artık çözebilirsin.
                 </div>
               )}
+              {/* Ürün Grubu kapısı — kayıtlarda bu bilginin kesin olması için
+                  Çözüldü'ye geçişte zorunlu. Maille otomatik açılan vakalar da
+                  buradan geçer (oluşturma anında etkilenmezler, sadece
+                  kapanışta). SystemAdmin bu bloğu görmez (istisna). */}
+              {productGroupGateActive && (
+                <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/40">
+                  <div className="flex items-start gap-2 text-sm font-medium text-amber-900 dark:text-amber-200">
+                    <span>⚠️</span>
+                    <span>Ürün grubu seçilmedi — bu vaka ürün grubu belirtilmeden çözülemez.</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={productGroupDraft}
+                      onChange={(e) => setProductGroupDraft(e.target.value)}
+                      className="flex-1"
+                    >
+                      <option value="">— Seçin —</option>
+                      {lookupService.productGroups().map((g) => (
+                        <option key={g} value={g}>{g}</option>
+                      ))}
+                    </Select>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleSaveProductGroup()}
+                      disabled={!productGroupDraft || productGroupSaving}
+                      leftIcon={productGroupSaving ? <Loader2 size={12} className="animate-spin" /> : undefined}
+                    >
+                      Kaydet
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {productGroupSet && (
+                <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200">
+                  ✓ Ürün grubu kaydedildi: <strong>{productGroupSet}</strong> — artık çözebilirsin.
+                </div>
+              )}
               <RunaAiCard
                 title="Çözüm Notu Taslağı"
                 body={
                   resolutionNote
                     ? 'Taslak alana yazıldı; düzenleyebilirsiniz veya yeni bir taslak üretebilirsiniz.'
-                    : 'Vaka geçmişine ve notlara bakarak müşteri dostu bir çözüm notu önerilir.'
+                    : 'Vaka geçmişine ve notlara bakarak ekip içi bir çözüm özeti (iç kayıt) önerilir.'
                 }
                 isLoading={drafting}
                 primaryAction={{
@@ -736,7 +805,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
               <Field
                 label="Çözüm Notu"
                 required
-                hint="@ ile yardım eden kişi veya QA'yı etiketleyebilirsin."
+                hint="İç kayıt amaçlıdır, müşteriye gönderilmez. @ ile yardım eden kişi veya QA'yı etiketleyebilirsin."
                 actions={
                   <VoiceNoteButton
                     onTranscript={(chunk) =>

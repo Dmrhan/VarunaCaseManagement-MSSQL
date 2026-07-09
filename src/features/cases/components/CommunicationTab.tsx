@@ -272,11 +272,17 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
   //
   // Codex #481/#482 P2 — BELİRSİZLİK + KANONİKLEŞTİRME: cid tek kanonik anahtara
   // (bracket-sız + lowercase) indirilir; `<Logo>`/`logo`/`LOGO` alias'ları aynı
-  // anahtara düşer. Bir cid önceki maillerde AYRI eke işaret ediyorsa çözülmez
-  // (placeholder) — tek anahtar sayesinde alias sızıntısı yok. Normal alıntı
-  // zincirinde cid'i yalnız köken mail EKLER (tek kaynak) → güvenle çözülür.
+  // anahtara düşer. Bir cid önceki maillerde AYRI DOSYAYA işaret ediyorsa
+  // çözülmez (placeholder) — tek anahtar sayesinde alias sızıntısı yok.
+  //
+  // Evidence Preservation fix (adversarial review, 2026-07-09) — belirsizlik
+  // artık EK İD'siyle değil DOSYA KİMLİĞİYLE (fileKey = storageKey hash'i)
+  // ölçülür. Snapshot compiler aynı cid'i (aynı DOSYA) birden fazla mailin
+  // altına meşru olarak kopyalar; ek-id karşılaştırması bu kopyaları yanlışlıkla
+  // "belirsiz" sayıp legacy thread-fallback'i bozuyordu. Aynı fileKey = aynı
+  // görsel → belirsiz DEĞİL; farklı fileKey = gerçekten farklı dosya → belirsiz.
   const threadCidIndex = useMemo(() => {
-    const m = new Map<string, { emailId: string; attachmentId: string; fileName: string }>();
+    const m = new Map<string, { emailId: string; attachmentId: string; fileName: string; fileKey: string | null }>();
     if (!selectedEmail) return m;
     const canon = (s: string) => s.trim().replace(/^<|>$/g, '').toLowerCase();
     const tsOf = (e: CaseEmailItem) => new Date(e.sentAt ?? e.receivedAt ?? e.createdAt).getTime();
@@ -296,9 +302,14 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
         if (!k) continue;
         const existing = m.get(k);
         if (existing) {
-          if (existing.attachmentId !== a.id) ambiguous.add(k); // farklı ek → belirsiz
+          // Aynı dosyaya işaret eden kopya (snapshot) → belirsiz değil.
+          // fileKey herhangi birinde yoksa güvenli taraf: ek-id kıyası.
+          const sameFile = existing.fileKey != null && a.fileKey != null
+            ? existing.fileKey === a.fileKey
+            : existing.attachmentId === a.id;
+          if (!sameFile) ambiguous.add(k); // farklı DOSYA → belirsiz
         } else {
-          m.set(k, { emailId: e.id, attachmentId: a.id, fileName: a.fileName });
+          m.set(k, { emailId: e.id, attachmentId: a.id, fileName: a.fileName, fileKey: a.fileKey ?? null });
         }
       }
     }
@@ -465,7 +476,18 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                   {/* ALT — Reader AYRI KART (R15 M4 görsel hiyerarşi:
                       "üstte liste, altta AÇIK MAİL" okunmalı). */}
                   {selectedEmail && (
-                    <div className="rounded-lg bg-white shadow-sm ring-1 ring-slate-200 dark:bg-ndark-card dark:ring-ndark-border">
+                    <div
+                      // Alan israfı fix'i (kullanıcı direktifi 2026-07-09):
+                      // dikey (sekme-içi) modda composer açıkken reader
+                      // kompakt yüksekliğe (35vh) sıkıştırılır — gövde
+                      // İÇERİDE kayar, yanıt kutusu yukarıda başlar.
+                      // Composer kapaliyken kısıt yok (eski görünüm).
+                      className={`rounded-lg bg-white shadow-sm ring-1 ring-slate-200 dark:bg-ndark-card dark:ring-ndark-border ${
+                        composerOpen && composerLayout === 'inline'
+                          ? 'flex max-h-[35vh] min-h-0 flex-col overflow-hidden'
+                          : ''
+                      }`}
+                    >
                       <MailThreadReader
                         email={selectedEmail}
                         caseId={item.id}
@@ -631,10 +653,14 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
       {composerOpen && (
         <div
           className={
+            // UX fix (2026-07-09) — overlay/dock'ta overflow-auto KALDIRILDI:
+            // kaydırma composer İÇİNE taşındı (alanlar+editör kayar), aksiyon
+            // barı (Büyüt/Vazgeç/Önizleme/Gönder) hep görünür (footer freeze).
+            // Overlay'de composer inset-0'ı doldurur → bar gerçek sayfa dibinde.
             composerLayout === 'overlay'
-              ? 'fixed inset-0 z-50 flex flex-col overflow-auto bg-white dark:bg-ndark-bg'
+              ? 'fixed inset-0 z-50 flex flex-col overflow-hidden bg-white dark:bg-ndark-bg'
               : readerMode === 'fullscreen'
-                ? 'fixed bottom-0 right-0 z-50 max-h-[55%] overflow-auto border-t border-l border-slate-200 bg-white shadow-2xl dark:border-ndark-border dark:bg-ndark-bg'
+                ? 'fixed bottom-0 right-0 z-50 flex max-h-[55%] flex-col overflow-hidden border-t border-l border-slate-200 bg-white shadow-2xl dark:border-ndark-border dark:bg-ndark-bg'
                 : 'mt-3 rounded-lg ring-1 ring-slate-200 dark:ring-ndark-border'
           }
           style={

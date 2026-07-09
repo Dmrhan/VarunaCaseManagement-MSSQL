@@ -3729,8 +3729,16 @@ function DetailTab({
         const isBlankValue = (val: unknown) =>
           val === null || val === undefined || String(val).trim() === '' || String(val).trim() === '—';
 
-        const secondaryClassificationItems = [
-          { label: 'Ürün Grubu', icon: Boxes, isEmpty: isBlankValue(v('productGroup')), node: (
+        // Ürün Grubu — kapanışta zorunlu (bkz. transitionStatus
+        // product_group_required_for_closure guard'ı). Bu yüzden ne
+        // "Diğer sınıflandırma bilgileri" katlanabilir bölümüne (boşsa
+        // saklanır) ne de secondaryClassificationItems'ın dolu/boş
+        // ayrımına tabi — ayrı, her zaman görünen bir satır olarak
+        // render edilir (aşağıda, primaryClassificationItems'ın hemen
+        // altında). Diğer alanlarla aynı standart click-to-edit davranışı
+        // korunur — sürekli açık bir select DEĞİL, sadece hep GÖRÜNÜR.
+        const productGroupItem = {
+          label: 'Ürün Grubu', icon: Boxes, node: (
             <InlineEdit
               fieldKey="productGroup"
               type="select"
@@ -3742,7 +3750,10 @@ function DetailTab({
               onCancel={onCancelEdit}
               options={[{ value: '', label: '— Seçin —' }, ...lookupService.productGroups().map((p) => ({ value: p, label: p }))]}
             />
-          )},
+          ),
+        };
+
+        const secondaryClassificationItems = [
           // WR-A7b — Catalog Paket inline edit. BFF DI.3/4/5 enforce eder; role gate
           // (Supervisor/Admin/SystemAdmin) BFF tarafında, UI 403 ise toast gösterir.
           { label: 'Paket', icon: Package, isEmpty: !packageDisplayId && !item.packageName, node: (
@@ -3859,6 +3870,11 @@ function DetailTab({
                   <div className="min-w-0 flex-1 text-sm">{i.node}</div>
                 </div>
               ))}
+              <div key={productGroupItem.label} className="flex items-center gap-1 px-1.5 py-0.5">
+                <productGroupItem.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
+                <span className="shrink-0 text-[11px] font-medium text-slate-500">{productGroupItem.label}:</span>
+                <div className="min-w-0 flex-1 text-sm">{productGroupItem.node}</div>
+              </div>
               {filledSecondary.map((i) => (
                 <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
                   <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
@@ -4938,7 +4954,9 @@ const ACTIVITY_FILTERS: FilterDef[] = [
     match: (h) =>
       h.actionType === 'Transfer' ||
       (h.actionType === 'FieldUpdate' && ASSIGNMENT_FIELDS.has(h.fieldName ?? '')) },
-  { key: 'files',     label: 'Dosya',   types: ['FileUploaded', 'FileRemoved'],
+  // Evidence Preservation (2026-07-09) — FileUploadSkipped: e-posta ekinin
+  // NEDEN alınamadığı kaydı; "ek nerede?" arayan agent Dosya filtresinde görür.
+  { key: 'files',     label: 'Dosya',   types: ['FileUploaded', 'FileUploadSkipped', 'FileRemoved'],
     active:   'bg-blue-600 text-white shadow-sm',
     inactive: 'bg-blue-50 text-blue-700 hover:bg-blue-100',
     dot:      'bg-blue-500' },

@@ -1445,9 +1445,10 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, assignedPersonId: personId, status: { in: STATS_OPEN_STATUSES }, slaViolation: true, AND: [notSnoozed] }),
         }),
-        // resolvedToday: snooze irrelevant — case zaten Cozuldu
+        // resolvedToday: snooze irrelevant — case zaten Cozuldu. Review fix —
+        // İptalEdildi burada sayılmamalı (yalnız gerçekten çözülenler).
         prisma.case.count({
-          where: scoped({ ...scope, assignedPersonId: personId, resolvedAt: todayRange, status: { in: ['Cozuldu', 'IptalEdildi'] } }),
+          where: scoped({ ...scope, assignedPersonId: personId, resolvedAt: todayRange, status: 'Cozuldu' }),
         }),
         // snoozedMine: yalnız snooze-active vakalar (list /api/cases/snoozed ile aynı kontrat)
         prisma.case.count({
@@ -1512,8 +1513,9 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, ...teamFilter, status: 'Eskalasyon', AND: [notSnoozed] }),
         }),
+        // Review fix — İptalEdildi burada sayılmamalı (yalnız gerçekten çözülenler).
         prisma.case.count({
-          where: scoped({ ...scope, ...teamFilter, resolvedAt: todayRange, status: { in: ['Cozuldu', 'IptalEdildi'] } }),
+          where: scoped({ ...scope, ...teamFilter, resolvedAt: todayRange, status: 'Cozuldu' }),
         }),
         // chip sayıları — scope'taki tüm atanmamış/kritik açık + snooze-dışı vakalar
         prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
@@ -1542,7 +1544,8 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, status: { in: STATS_OPEN_STATUSES }, priority: 'Critical', AND: [notSnoozed] }),
         }),
-        prisma.case.count({ where: scoped({ ...scope, resolvedAt: todayRange, status: { in: ['Cozuldu', 'IptalEdildi'] } }) }),
+        // Review fix — İptalEdildi burada sayılmamalı (yalnız gerçekten çözülenler).
+        prisma.case.count({ where: scoped({ ...scope, resolvedAt: todayRange, status: 'Cozuldu' }) }),
         // chip sayısı — tüm scope'taki atanmamış açık + snooze-dışı vakalar
         prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
       ]);
@@ -3922,6 +3925,26 @@ export const caseRepository = {
       );
     }
 
+    // Ürün Grubu zorunluluğu (kapanış kapısı) — kayıtlarda bu bilginin
+    // kesin olması gerekiyor. Açılış kanalı fark etmeksizin (Smart Ticket,
+    // klasik form, mail intake) uygulanır: mail'den otomatik açılan
+    // vakalar oluşturma anında etkilenmez, sadece Cozuldu'ya geçerken
+    // agent'ın alanı doldurmuş olması gerekir. Karar: yalnız Cozuldu
+    // (IptalEdildi muaf — müşteri kapısıyla aynı gerekçe); SystemAdmin
+    // istisna. Frontend aynı koşulda inline seçim/kaydet gösterir; bu
+    // guard authoritative (her arayüzü kapsar).
+    if (
+      dbNext === 'Cozuldu' &&
+      prev.status !== 'Cozuldu' &&
+      !prev.productGroup &&
+      actorObject?.role !== 'SystemAdmin'
+    ) {
+      throw new CaseValidationError(
+        'Vaka ürün grubu belirtilmeden çözülemez. Lütfen önce ürün grubunu seçin.',
+        { status: 400, code: 'product_group_required_for_closure' },
+      );
+    }
+
     // Kapanış analizi zorunluluğu — vaka (açılış kanalı fark etmeksizin:
     // Smart Ticket, mail, telefon…) Cozuldu'ya geçerken "KB ile Analiz Et"
     // en az bir kez çalıştırılmış (closureSuggestion telemetrisi payload'da)
@@ -6086,7 +6109,10 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null, roleDefaultScope
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const end = new Date(); end.setHours(23, 59, 59, 999);
     where.resolvedAt = { gte: start, lte: end };
-    where.status = { in: ['Cozuldu', 'IptalEdildi'] };
+    // Review fix — "Bugün Çözüldü" İptalEdildi'yi kapsamaz. resolvedAt
+    // her iki terminal statüde de damgalanıyor (transitionStatus), bu
+    // yüzden burada status ile daraltılması ŞART; sadece Cozuldu.
+    where.status = 'Cozuldu';
   }
   // WR-A4 — Project-bazlı vaka filtresi.
   if (f.accountProjectId) where.accountProjectId = f.accountProjectId;

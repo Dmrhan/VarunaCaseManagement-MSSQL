@@ -31,6 +31,7 @@
  * alır ve bunu zorunlu kılar; ham FK insert'i kabul etmez.
  */
 
+import crypto from 'node:crypto';
 import { prisma } from './client.js';
 
 /** Visibility default. Plan K2: composer'dan toggle kaldırıldı; sabit 'Customer'. */
@@ -105,6 +106,16 @@ function shape(row) {
           fileSize: a.fileSize,
           contentId: a.contentId,
           isInline: a.isInline,
+          // Evidence Preservation (2026-07-09) — DOSYA KİMLİĞİ. Snapshot
+          // satırları aynı dosyaya (storageKey) birden fazla CaseEmailAttachment
+          // referansı yaratır (outbound alıntı kopyaları). FE thread-fallback
+          // belirsizlik guard'ı "aynı cid farklı EK id" yerine "aynı cid farklı
+          // DOSYA" ile ölçmeli — yoksa snapshot kopyaları meşru fallback'i
+          // zehirler. storageKey'in kendisi FE'ye sızdırılmaz (sunucu yolu);
+          // kısa hash yeterli eşitlik anahtarı.
+          fileKey: a.storageKey
+            ? crypto.createHash('sha1').update(a.storageKey).digest('hex').slice(0, 12)
+            : null,
         }))
       : [],
   };
@@ -425,7 +436,8 @@ async function listForCase(caseId, { allowedCompanyIds } = {}) {
     },
     include: {
       attachments: {
-        select: { id: true, fileName: true, mimeType: true, fileSize: true, contentId: true, isInline: true },
+        // storageKey yalnız fileKey hash'i için — shape() FE'ye ham yolu vermez.
+        select: { id: true, fileName: true, mimeType: true, fileSize: true, contentId: true, isInline: true, storageKey: true },
       },
       sentBy: { select: { fullName: true } },
     },

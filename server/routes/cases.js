@@ -2532,7 +2532,7 @@ router.get(
     const emailIdRaw = req.query?.emailId;
     const emailId = typeof emailIdRaw === 'string' && emailIdRaw ? emailIdRaw : undefined;
     const ctx = await caseEmailSender.buildReplyContext(req.params.id, { emailId });
-    res.json(ctx ?? { caseNumber: null, to: [], cc: [], bcc: [], subject: '', inReplyTo: null, quotedBodyHtml: '', suggestedFromAddress: null });
+    res.json(ctx ?? { caseNumber: null, to: [], cc: [], bcc: [], subject: '', inReplyTo: null, quotedBodyHtml: '', quotedInlineRefs: [], suggestedFromAddress: null });
   }),
 );
 

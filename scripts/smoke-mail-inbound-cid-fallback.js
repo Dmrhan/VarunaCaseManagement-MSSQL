@@ -45,7 +45,9 @@ const parser = read('server/lib/inboundMailParser.js');
 const parserCode = strip(parser);
 const intake = read('server/lib/inboundMailIntake.js');
 const intakeCode = strip(intake);
-const card = read('src/features/cases/components/MailMessageCard.tsx');
+// Evidence Preservation (2026-07-09): MailMessageCard SİLİNDİ (ölü zincir);
+// cid çözüm mantığı MailThreadReader'da yaşıyor — assert'ler oraya uyarlandı.
+const card = read('src/features/cases/components/MailThreadReader.tsx');
 const sanitizer = read('server/lib/htmlSanitizer.js');
 
 console.log('── 1) Parser: cid fallback + normalizeCid helper ─');
@@ -93,8 +95,11 @@ expect('2.10 sadece iç bracket (< ortada) — orta karakter etkilenmez',
 console.log('\n── 3) Intake — 3 yol contentId payload pariteni ─');
 // Tüm çağrılar parsed.attachments ?? [] geçiyor → parser fix hepsini kapsar.
 // persistAttachmentsForCase içinde contentId: a?.cid ?? null (parser çıktısı)
-expect('3.1 persistAttachmentsForCase içinde contentId: a?.cid',
-  /contentId:\s*a\?\.cid\s*\?\?\s*null,\s*isInline:\s*!!a\?\.inline/.test(intake), true);
+// R2 review fix (2026-07-09): isInline artık parser bayrağı DEĞİL,
+// gövde-referans gerçeği (bodyCidSet) — Outlook'un referanssız Content-ID'li
+// gerçek ekleri isInline=false persist edilir (fix B ↔ fix C hizası).
+expect('3.1 persistAttachmentsForCase içinde contentId: a?.cid + gövde-referanslı isInline',
+  /contentId:\s*a\?\.cid\s*\?\?\s*null,[\s\S]{0,700}isInline:\s*!!cidCanon && bodyCidSet\.has\(cidCanon\)/.test(intake), true);
 expect('3.2 Yeni vaka yolunda emailId geçer',
   /persistAttachmentsForCase\(\{[\s\S]{0,400}caseId:\s*created\.id,[\s\S]{0,300}emailId:\s*firstEmail\.id/.test(intakeCode), true);
 expect('3.3 Token flow append yolunda emailId geçer',
@@ -106,20 +111,20 @@ expect('3.4 Token + Header threading — İKİSİ de emailId geçen persist ça�
 
 console.log('\n── 4) UI — zarif düşüş placeholder (Codex R1: legacy-only heuristic) ─');
 expect('4.1 Eşleşmeyen cid için inline aday heuristic',
-  /email\.attachments\.filter\(\(x\)\s*=>\s*x\.isInline\)/.test(card), true);
+  /x\.isInline && !consumed\.has\(x\.id\)/.test(card), true);
 // Codex R1 fix: heuristic sadece contentId==null (legacy) durumda devrede
 expect('4.2 Heuristic guard — canUseLegacyFallback (contentId==null gerekli)',
-  /canUseLegacyFallback\s*=\s*[\s\S]{0,200}inlineCandidates\[0\]\.contentId == null/.test(card), true);
+  /canUseLegacyFallback = !looksLikePath[\s\S]{0,60}candidates\.length === 1 && candidates\[0\]\.contentId == null/.test(card), true);
 expect('4.3 REGRESYON: eski koşulsuz `length === 1 ? [0] : null` KALDIRILDI',
   !/const\s+fallback\s*=\s*inlineCandidates\.length === 1 \? inlineCandidates\[0\] : null/.test(card), true);
 expect('4.4 Fallback flag canUseLegacyFallback\'e bağlanır',
-  /const\s+fallback\s*=\s*canUseLegacyFallback\s*\?\s*inlineCandidates\[0\]\s*:\s*null/.test(card), true);
+  /candidates\.length === 1 && candidates\[0\]\.contentId == null\)[\s\S]{0,160}match = \{ id: candidates\[0\]\.id/.test(card), true);
 expect('4.5 Fallback aday yoksa → net placeholder metni ("Gömülü görsel — ekte: {names}")',
   /Gömülü görsel — ekte: \$\{inlineNames\}/.test(card), true);
 expect('4.6 Regresyon — "Eski mail" placeholder yolu korundu',
   /Eski mail — inline görsel desteklenmiyor/.test(card), true);
 expect('4.7 Regresyon — "cid eşleşmedi" son çare placeholder korundu',
-  /\(cid eşleşmedi\)/.test(card), true);
+  /görsel alınamadı \(neden için vaka aktivitesine bakın|ekte gelmedi \(gönderici tarafında kaldı\)/.test(card), true);
 
 console.log('\n── 5) Regresyon — sanitize cid img koruyor ─────');
 expect('5.1 sanitize allowedSchemesByTag img cid dahil',
