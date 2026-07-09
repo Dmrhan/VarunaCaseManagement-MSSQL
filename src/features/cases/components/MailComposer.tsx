@@ -413,7 +413,11 @@ export function MailComposer({
   useEffect(() => {
     if (layoutMode !== 'inline' || compactDock) return undefined;
     const t = window.setTimeout(() => {
-      rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Saha düzeltmesi (2026-07-09): block:'center' uzun composer'da başlığı
+      // yukarıda kesiyor, kullanıcı Gönder hizasına düşüyordu. 'start' +
+      // scroll-mt (root'ta) → composer BAŞI görünür alanın üstüne hizalanır
+      // ("E-Postayı Yanıtla" başlığından itibaren okunur).
+      rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 60);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -790,7 +794,7 @@ export function MailComposer({
     // olmadığından etkisiz — davranış aynı kalır.
     <div
       ref={rootRef}
-      className="relative flex min-h-0 max-h-full flex-1 flex-col rounded-lg border border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card"
+      className="relative flex min-h-0 max-h-full flex-1 scroll-mt-20 flex-col rounded-lg border border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card"
     >
       {/* Header — compactDock modunda gizli (fs bar zaten context taşır) */}
       {!compactDock && (
