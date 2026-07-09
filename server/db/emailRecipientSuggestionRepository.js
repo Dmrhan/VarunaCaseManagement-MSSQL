@@ -95,12 +95,22 @@ export const emailRecipientSuggestionRepo = {
   /**
    * Composer öneri havuzu (v1: yazışma + ekip).
    * @param {string} companyId — vaka üzerinden route'ta çözülür (tenant scope)
+   * @param {object} [opts]
+   * @param {object|null} [opts.securityWhere] — Codex #509 P1: aktörün vaka
+   *   görünürlük filtresi (buildCaseListSecurityWhere çıktısı; enforcement
+   *   kapalıysa null). Yazışma taraması yalnız aktörün GÖREBİLDİĞİ vakaların
+   *   mailleriyle sınırlanır — güvenlik filtreli kullanıcı, gizli vakaların
+   *   ad/adreslerini öneri havuzundan sızdıramaz. Arşivli vakalar da (liste
+   *   default'u ile hizalı) koşulsuz dışlanır.
    * @returns {Promise<Array<{address:string,name:string|null,source:'correspondence'|'team'}>>}
    */
-  async listSuggestions(companyId) {
+  async listSuggestions(companyId, { securityWhere = null } = {}) {
+    const caseVisibility = securityWhere
+      ? { AND: [{ isArchived: false }, securityWhere] }
+      : { isArchived: false };
     const [emails, users, exclusion] = await Promise.all([
       prisma.caseEmail.findMany({
-        where: { companyId },
+        where: { companyId, case: caseVisibility },
         orderBy: { createdAt: 'desc' },
         take: CORRESPONDENCE_SCAN_CAP,
         select: {
@@ -139,10 +149,13 @@ export const emailRecipientSuggestionRepo = {
 
     // B) Ekip — yazışmada zaten görünen meslektaş 'correspondence' kalır
     //    (dedup önceliği), görünmeyenler alfabetik sırayla eklenir.
+    //    Codex #509 P2: mailbox dışlaması BURADA DA uygulanır — paylaşımlı
+    //    mailbox/alias adresi aynı zamanda aktif User olarak tanımlıysa
+    //    'team' etiketiyle havuza geri sızamaz (loop önlemi garantisi).
     const team = [];
     for (const u of users) {
       const addr = extractEmail(u.email);
-      if (!addr || byAddress.has(addr)) continue;
+      if (!addr || exclusion.has(addr) || byAddress.has(addr)) continue;
       byAddress.set(addr, { address: addr, name: u.fullName ?? null, source: 'team' });
       team.push(addr);
     }

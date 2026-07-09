@@ -35,8 +35,12 @@ ok('1.4 tarama + sonuç sınırı (CAP) tanımlı',
   && /take: CORRESPONDENCE_SCAN_CAP/.test(repo) && /slice\(0, RESULT_CAP\)/.test(repo));
 ok('1.5 bozuk JSON zarif düşer (parse try/catch → [])',
   /function parseAddressList[\s\S]{0,200}try \{[\s\S]{0,120}catch \{[\s\S]{0,40}return \[\];/.test(repo));
-ok('1.6 dedup önceliği: yazışma kazanır (byAddress.has kontrolü ekipten ÖNCE)',
-  /if \(!addr \|\| byAddress\.has\(addr\)\) continue;/.test(repo));
+ok('1.6 dedup önceliği: yazışma kazanır + ekip yolu da mailbox dışlar (Codex #509 P2)',
+  /if \(!addr \|\| exclusion\.has\(addr\) \|\| byAddress\.has\(addr\)\) continue;/.test(repo));
+ok('1.7 (Codex #509 P1) yazışma taraması vaka görünürlüğüyle sınırlı (securityWhere + arşiv dışlama)',
+  /listSuggestions\(companyId, \{ securityWhere = null \} = \{\}\)/.test(repo)
+  && /case: caseVisibility/.test(repo)
+  && /isArchived: false/.test(repo));
 
 console.log('── Backend: route (from-aliases parite) ──');
 const routeBlock = routes.split("'/:id/email-recipients'")[1]?.slice(0, 800) ?? '';
@@ -47,8 +51,9 @@ ok('2.2 guard zinciri from-aliases ile aynı (get + 404 + assertCaseSecurityFilt
   && /allowedCompanyIds/.test(routeBlock)
   && /status\(404\)/.test(routeBlock)
   && /assertCaseSecurityFilterAccess/.test(routeBlock));
-ok('2.3 companyId vaka üzerinden çözülür (req parametresinden DEĞİL)',
-  /listSuggestions\(c\.companyId\)/.test(routeBlock));
+ok('2.3 companyId vaka üzerinden çözülür + securityWhere route\'tan geçirilir (Codex #509 P1)',
+  /buildCaseListSecurityWhere\(req\)/.test(routeBlock)
+  && /listSuggestions\(c\.companyId, \{ securityWhere \}\)/.test(routeBlock));
 
 console.log('── Regresyon guard: dokunulmayan yüzeyler ──');
 try {

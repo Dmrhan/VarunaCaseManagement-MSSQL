@@ -2710,7 +2710,11 @@ router.get(
     );
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
     await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
-    const items = await emailRecipientSuggestionRepo.listSuggestions(c.companyId);
+    // Codex #509 P1 — yazışma taraması aktörün vaka görünürlüğüyle sınırlanır
+    // (liste endpoint'leriyle aynı buildCaseListSecurityWhere; enforcement
+    // kapalıysa null → yalnız arşiv dışlaması uygulanır).
+    const securityWhere = await buildCaseListSecurityWhere(req);
+    const items = await emailRecipientSuggestionRepo.listSuggestions(c.companyId, { securityWhere });
     res.json({ items });
   }),
 );
