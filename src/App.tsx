@@ -345,6 +345,28 @@ export default function App() {
     setView('case-detail');
   }
 
+  // 2026-07-09 — Vaka deep-link'i (?case=<id>). customer_replied bildirim
+  // maili "vakayı aç" bağlantısı taşır; SPA'da path-router olmadığından
+  // login sonrası query parametresi okunup vaka açılır ve URL temizlenir
+  // (refresh/bookmark tekrar tetiklemesin). Ref guard: oturum başına bir kez.
+  const deepLinkHandledRef = useRef(false);
+  useEffect(() => {
+    if (!user || deepLinkHandledRef.current) return;
+    deepLinkHandledRef.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const caseId = params.get('case');
+    if (!caseId) return;
+    openCase(caseId);
+    params.delete('case');
+    const rest = params.toString();
+    window.history.replaceState(
+      {},
+      '',
+      `${window.location.pathname}${rest ? `?${rest}` : ''}`,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   function backToList() {
     setView(caseDetailOrigin);
     setSelectedCaseId(null);

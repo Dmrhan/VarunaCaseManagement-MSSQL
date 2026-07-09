@@ -759,6 +759,32 @@ export async function intakeInboundEmail({
               bodyHtml: sanitizedHtml,
               emailId: inboundEmail.id,
             });
+            // customer_replied bildirimi (2026-07-09, kullanıcı direktifi) —
+            // müşteri mevcut vakaya yanıt verdi; kural varsa üstlenen ajana
+            // e-posta gider (n4b paritesi). DÖNGÜ GUARD'I (2026-07-06 olayı
+            // dersi): İÇ adres göndericide EMIT YOK — ajanın OOO/auto-reply'ı
+            // paylaşımlı kutuya döner, [token]'lı subject vakaya append olur;
+            // emit edilseydi ajana yeni mail → sonsuz döngü. Fail-CLOSED:
+            // kontrol hata verirse iç sayılır (emit atlanır — güvenli yön).
+            void (async () => {
+              let replyFromInternal = true;
+              try {
+                replyFromInternal = await isInternalAddress(parsed.from.email, companyId);
+              } catch {
+                replyFromInternal = true;
+              }
+              if (!replyFromInternal) {
+                // Atanmamış (havuz) vakada emit YOK — assignee audience
+                // 'unresolved' kalıp boş Pending dispatch biriktirirdi.
+                const c = await prisma.case.findUnique({
+                  where: { id: existing.id },
+                  select: { assignedPersonId: true },
+                });
+                if (c?.assignedPersonId) {
+                  void emitNotificationEvent({ event: 'customer_replied', caseId: existing.id });
+                }
+              }
+            })();
           }
 
           return {
@@ -870,6 +896,28 @@ export async function intakeInboundEmail({
                   bodyHtml: sanitizedHtml,
                   emailId: inboundEmail.id,
                 });
+                // customer_replied bildirimi — token flow ile AYNI mantık +
+                // AYNI iç-adres döngü guard'ı (fail-closed). Bkz. yukarıdaki
+                // subject-token emit noktasındaki açıklama.
+                void (async () => {
+                  let replyFromInternal = true;
+                  try {
+                    replyFromInternal = await isInternalAddress(parsed.from.email, companyId);
+                  } catch {
+                    replyFromInternal = true;
+                  }
+                  if (!replyFromInternal) {
+                    // Atanmamış (havuz) vakada emit YOK — assignee audience
+                    // 'unresolved' kalıp boş Pending dispatch biriktirirdi.
+                    const c = await prisma.case.findUnique({
+                      where: { id: existing.id },
+                      select: { assignedPersonId: true },
+                    });
+                    if (c?.assignedPersonId) {
+                      void emitNotificationEvent({ event: 'customer_replied', caseId: existing.id });
+                    }
+                  }
+                })();
               }
 
               return {
