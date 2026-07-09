@@ -28,12 +28,15 @@ ok('2.1 İKİ existing-case yolunda emit (subject-token + header-threading)',
 ok('2.2 iç-adres döngü guard\'ı FAIL-CLOSED (OOO/auto-reply döngüsü kesilir)',
   (intake.match(/let replyFromInternal = true;/g) ?? []).length === 2
   && /replyFromInternal = await isInternalAddress\(parsed\.from\.email, companyId\)/.test(intake));
-ok('2.3 atanmamış (havuz) vakada emit YOK (boş Pending dispatch birikmez)',
-  (intake.match(/select: \{ assignedPersonId: true \}/g) ?? []).length === 2
-  && (intake.match(/if \(c\?\.assignedPersonId\)/g) ?? []).length === 2);
+ok('2.3 atanmamış VEYA e-postasız üstlenen → emit YOK (Codex #496 P2)',
+  (intake.match(/assignedPerson: \{ select: \{ email: true \} \}/g) ?? []).length === 2
+  && (intake.match(/if \(c\?\.assignedPerson\?\.email\)/g) ?? []).length === 2);
 ok('2.4 emit yalnız deduped DEĞİLKEN (mükerrer mailde bildirim yok)',
   // her iki emit bloğu !inboundEmail.deduped bloğunun içinde
   /if \(!inboundEmail\.deduped\) \{[\s\S]{0,3500}customer_replied[\s\S]{0,15000}if \(!inboundEmail\.deduped\) \{[\s\S]{0,3500}customer_replied/.test(intake));
+
+ok('2.5 iç bildirim outbound CaseEmail YAZILMAZ (pendingCustomerReply korunur — Codex #496 P1)',
+  /if \(isCustomerFacing\) try \{/.test(repo));
 
 console.log('── FE deep-link ──');
 ok('3.1 App.tsx ?case=<id> parametresini login sonrası açar + URL temizler',

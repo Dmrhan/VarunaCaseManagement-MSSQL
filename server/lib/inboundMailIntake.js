@@ -774,13 +774,16 @@ export async function intakeInboundEmail({
                 replyFromInternal = true;
               }
               if (!replyFromInternal) {
-                // Atanmamış (havuz) vakada emit YOK — assignee audience
-                // 'unresolved' kalıp boş Pending dispatch biriktirirdi.
+                // Atanmamış (havuz) vakada VEYA atanan kişinin E-POSTASI
+                // yoksa emit YOK. Codex #496 P2: assignee resolver e-posta
+                // yoksa person.id'ye düşüyor → isLikelyEmail false → dispatch
+                // sonsuza dek Pending + communicationState Pending (guard'ın
+                // önlemeye çalıştığı kuyruk gürültüsü). E-posta ön-şart.
                 const c = await prisma.case.findUnique({
                   where: { id: existing.id },
-                  select: { assignedPersonId: true },
+                  select: { assignedPerson: { select: { email: true } } },
                 });
-                if (c?.assignedPersonId) {
+                if (c?.assignedPerson?.email) {
                   void emitNotificationEvent({ event: 'customer_replied', caseId: existing.id });
                 }
               }
@@ -907,13 +910,13 @@ export async function intakeInboundEmail({
                     replyFromInternal = true;
                   }
                   if (!replyFromInternal) {
-                    // Atanmamış (havuz) vakada emit YOK — assignee audience
-                    // 'unresolved' kalıp boş Pending dispatch biriktirirdi.
+                    // Atanmamış VEYA e-postasız üstlenen → emit YOK (Codex
+                    // #496 P2; yukarıdaki subject-token yoluyla aynı gerekçe).
                     const c = await prisma.case.findUnique({
                       where: { id: existing.id },
-                      select: { assignedPersonId: true },
+                      select: { assignedPerson: { select: { email: true } } },
                     });
-                    if (c?.assignedPersonId) {
+                    if (c?.assignedPerson?.email) {
                       void emitNotificationEvent({ event: 'customer_replied', caseId: existing.id });
                     }
                   }

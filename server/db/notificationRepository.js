@@ -1261,7 +1261,15 @@ async function executeOutboundEmailDispatch(dispatch, caseRow) {
     // appendOutbound dedup yapar (companyId+messageId unique).
     // Hata kapsanır: dispatch zaten 'Sent' işaretlendi, mail teslim oldu;
     // CaseEmail kaydı fail olsa bile dispatch'i bozmayız.
-    try {
+    //
+    // Codex #496 P1 — YALNIZ CUSTOMER-FACING. İÇ bildirimler (ör.
+    // customer_replied → assignee) müşteriye giden mail DEĞİLDİR; bunları
+    // outbound CaseEmail yazmak (a) lastEmailOutboundAt'i ilerletip
+    // pendingCustomerReply'ı YANLIŞ temizler (ajan cevap vermeden "yanıt
+    // bekliyor" düşer — [[reference-pending-customer-reply-semantics]]),
+    // (b) müşteri thread'ini iç bildirimle kirletir. isCustomerFacing
+    // executor'ın başında audience'a göre belirlendi.
+    if (isCustomerFacing) try {
       const { caseEmailRepository } = await import('./caseEmailRepository.js');
       // From: tenant ExternalMailSetting.fromAddress (M5). mailProvider'ın
       // gönderdiği gerçek from'u burada bilmediğimiz için settings'ten
