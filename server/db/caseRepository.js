@@ -3945,16 +3945,17 @@ export const caseRepository = {
       );
     }
 
-    // Açılış etiketleri zorunluluğu (kapanış kapısı) — yalnız Univera + proje
-    // atanmış vakalarda: platform/businessProcess/operationType/affectedObject/
-    // impact taksonomi alanlarının kaydın kesinliği için dolu olması gerekiyor.
-    // Smart Ticket akışında bu alanlar açılışta zaten zorunlu ama YALNIZ o admin
-    // ilgili alan için taksonomi tanımlamışsa (canCreate ile aynı fail-safe);
-    // mail intake gibi diğer kanallar açılış anında etkilenmez. Karar: yalnız
-    // Cozuldu (IptalEdildi muaf); SystemAdmin istisna. Frontend'deki gibi, bir
-    // alan yalnız o şirkette en az bir aktif taksonomi tanımı VARSA zorunlu
-    // sayılır — admin tanımlamamışsa vaka tıkanmasın. Fail-safe: taksonomi
-    // sorgusu başarısız olursa zorunluluk UYGULANMAZ (kapatma bloklanmaz).
+    // Açılış etiketleri zorunluluğu (kapanış kapısı) — TÜM Univera vakalarında
+    // (müşteri/proje eşleşmiş olsun olmasın): platform/businessProcess/
+    // operationType/affectedObject/impact taksonomi alanlarının kaydın
+    // kesinliği için dolu olması gerekiyor. Smart Ticket akışında bu alanlar
+    // açılışta zaten zorunlu ama YALNIZ o admin ilgili alan için taksonomi
+    // tanımlamışsa (canCreate ile aynı fail-safe); mail intake gibi diğer
+    // kanallar açılış anında etkilenmez. Karar: yalnız Cozuldu (IptalEdildi
+    // muaf); SystemAdmin istisna. Frontend'deki gibi, bir alan yalnız o
+    // şirkette en az bir aktif taksonomi tanımı VARSA zorunlu sayılır — admin
+    // tanımlamamışsa vaka tıkanmasın. Fail-safe: taksonomi sorgusu başarısız
+    // olursa zorunluluk UYGULANMAZ (kapatma bloklanmaz).
     // KB tenant kapısı (kbEnabled) ile aynı koşula bağlıdır — düzeltme
     // arayüzü olan SmartClassificationCard, kbEnabled=false + veri yok
     // durumunda hiç render edilmiyor (bkz. bileşen içi TENANT KAPISI notu);
@@ -3963,7 +3964,6 @@ export const caseRepository = {
       dbNext === 'Cozuldu' &&
       prev.status !== 'Cozuldu' &&
       prev.companyId === 'COMP-UNIVERA' &&
-      !!prev.accountProjectId &&
       actorObject?.role !== 'SystemAdmin' &&
       (await prisma.externalKbSetting
         .findUnique({ where: { companyId: 'COMP-UNIVERA' }, select: { enabled: true } })

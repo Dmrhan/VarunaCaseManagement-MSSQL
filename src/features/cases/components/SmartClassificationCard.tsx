@@ -98,6 +98,15 @@ interface SmartClassificationCardProps {
   kbEnabled: boolean | null;
   canEdit: boolean;
   onUpdated: (updated: Case) => void;
+  /**
+   * caseRepository.js transitionStatus kapanış kapısıyla aynı üst-koşul
+   * (COMP-UNIVERA + KB tenant açık; müşteri/proje eşleşmesinden bağımsız)
+   * — true ise vaka Çözüldü'ye geçerken 5 alan boşken backend 400 döner.
+   * Kart burada yalnız görsel uyarı verir (hangi alanın gerçekten zorunlu
+   * olduğu — "o şirkette tanımlı taksonomi var mı" inceliği — backend'de
+   * kesinleşir).
+   */
+  requiredForClosure?: boolean;
 }
 
 export function SmartClassificationCard({
@@ -105,6 +114,7 @@ export function SmartClassificationCard({
   kbEnabled,
   canEdit,
   onUpdated,
+  requiredForClosure = false,
 }: SmartClassificationCardProps) {
   const { toast } = useToast();
   const [editing, setEditing] = useState(false);
@@ -314,6 +324,18 @@ export function SmartClassificationCard({
   const chips = FIELDS.map((f) => ({ ...f, value: readStoredLabel(item, f.key) })).filter(
     (f) => f.value,
   );
+  // Kapanış kapısı görsel ipucu — hangi alanın gerçekten zorunlu olduğu
+  // backend'de (o şirkette tanımlı taksonomi var mı) kesinleşir; burada
+  // basitleştirilmiş sinyal: 5 alandan biri bile boşsa "Zorunlu" göster.
+  const isIncomplete = chips.length < FIELDS.length;
+  const requiredBadge = requiredForClosure && isIncomplete && (
+    <span
+      className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+      title="Vaka Çözüldü'ye geçmeden önce bu alanların doldurulması gerekiyor."
+    >
+      Zorunlu
+    </span>
+  );
 
   const headerIcon = (
     <Sparkles size={13} className="shrink-0 text-violet-500" aria-hidden />
@@ -331,6 +353,7 @@ export function SmartClassificationCard({
           <span className="text-xs font-medium text-slate-600 dark:text-ndark-muted">
             Akıllı Tanımlar
           </span>
+          {requiredBadge}
           {chips.length > 0 ? (
             <>
               {chips.map((f) => {

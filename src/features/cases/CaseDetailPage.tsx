@@ -3610,6 +3610,13 @@ function DetailTab({
           kbEnabled={kbEnabled}
           canEdit={canWriteCase && canEditField('smartTicketMeta')}
           onUpdated={onCaseUpdated}
+          // caseRepository.js transitionStatus kapanış kapısıyla aynı koşul
+          // (COMP-UNIVERA + KB tenant açık; müşteri/proje eşleşmesinden
+          // bağımsız) — ajan Çözüldü'ye geçmeden ÖNCE bu alanların zorunlu
+          // olduğunu görsün. Backend'deki "yalnız o şirkette tanımlı
+          // taksonomi tipi için zorunlu" inceliği burada uygulanmaz (basit
+          // görsel ipucu); nihai kapı backend'de.
+          requiredForClosure={item.companyId === 'COMP-UNIVERA' && kbEnabled === true}
         />
       )}
 

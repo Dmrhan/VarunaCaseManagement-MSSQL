@@ -441,8 +441,26 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
       item.escalationLevel === 'Direktör' ||
       item.escalationLevel === 'ÜstYönetim');
 
+  // Açılış etiketleri kapanış kapısı — caseRepository.js transitionStatus
+  // guard'ının (opening_tags_required_for_closure) client-side aynası.
+  // Basit sürüm: backend'in "yalnız o şirkette tanımlı taksonomi tipi
+  // zorunlu" inceliği burada uygulanmaz — 5 alandan biri bile boşsa
+  // "Çöz" kartı SEÇİLEMEZ (kullanıcı çözüm notu yazıp reddedilmeden önce,
+  // hatta panele hiç girmeden uyarılsın). kbEnabled === null (yükleniyor)
+  // → güvenli taraf: aktif kalır.
+  const OPENING_TAG_FIELDS = ['platform', 'businessProcess', 'operationType', 'affectedObject', 'impact'] as const;
+  const smartTicketOpening = (
+    item.customFields as { smartTicket?: Record<string, unknown> } | undefined
+  )?.smartTicket;
+  const openingTagsMissing =
+    item.companyId === 'COMP-UNIVERA' &&
+    kbEnabled !== false &&
+    user?.role !== 'SystemAdmin' &&
+    OPENING_TAG_FIELDS.some((key) => !smartTicketOpening?.[key]);
+
   function isCardDisabled(target: CaseStatus): boolean {
     if (target === item.status) return true;
+    if (target === 'Çözüldü' && openingTagsMissing) return true;
     return !allowedTransitions.includes(target);
   }
 
@@ -495,6 +513,12 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     !closureAlreadyAnalyzed &&
     !(closureRcg || closureRcd || closureRt || closurePp);
 
+  // openingTagsMissing yukarıda (isCardDisabled yakınında) tanımlı — "Çöz"
+  // kartı zaten seçilemez durumda olur. Bu, panel açıkken (örn. Compact
+  // Stepper'dan initialPending ile önceden seçilmiş gelirse) Uygula'yı da
+  // kilitleyen ikinci savunma hattı.
+  const openingTagsGateActive = pending === 'Çözüldü' && openingTagsMissing;
+
   function applyDisabled(): boolean {
     if (!pending) return true;
     if (customerGateActive) return true; // müşterisiz Çözüldü engeli (SystemAdmin muaf)
@@ -502,6 +526,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     if (pending === 'Çözüldü' && !resolutionNote.trim()) return true;
     if (pending === 'Çözüldü' && requiredChecklistPending.length > 0) return true;
     if (pending === 'Çözüldü' && closureLabelsPending) return true;
+    if (openingTagsGateActive) return true;
     if (pending === 'İptalEdildi' && !cancelReason.trim()) return true;
     if (pending === '3rdPartyBekleniyor' && !thirdPartyId) return true;
     if (pending === 'Eskalasyon' && (!escalationLevel || !escalationReason.trim())) return true;
@@ -720,6 +745,22 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
 
           {pending === 'Çözüldü' && (
             <>
+              {/* Açılış etiketleri kapısı — Univera'da 5 sınıflandırma alanı
+                  (platform/iş süreci/işlem tipi/etkilenen nesne/etki) boşken
+                  Çözüldü uygulanamaz. Düzenleme burada değil, Detay
+                  sekmesindeki "Akıllı Tanımlar" kartında yapılır — kullanıcı
+                  önce oraya yönlendirilir. */}
+              {openingTagsGateActive && (
+                <div className="flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">
+                  <span>⚠️</span>
+                  <span>
+                    Açılış etiketleri (platform / iş süreci / işlem türü / etkilenen nesne / etki)
+                    tamamlanmadan vaka çözülemez. Lütfen önce{' '}
+                    <strong>Detay sekmesindeki Akıllı Tanımlar</strong> kartından sınıflandırmayı
+                    tamamlayın.
+                  </span>
+                </div>
+              )}
               {/* 2026-07-06 — Müşteri kapısı: müşterisiz vaka çözülemez.
                   Öneriler (deterministik) + manuel ara; bağlanınca "Çöz"
                   butonu açılır. SystemAdmin bu bloğu görmez (istisna). */}
