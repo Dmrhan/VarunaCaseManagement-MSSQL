@@ -784,7 +784,7 @@ export async function intakeInboundEmail({
                   select: { assignedPerson: { select: { email: true } } },
                 });
                 if (c?.assignedPerson?.email) {
-                  void emitNotificationEvent({ event: 'customer_replied', caseId: existing.id });
+                  void emitNotificationEvent({ event: 'customer_replied', caseId: existing.id, triggerInboundEmailId: inboundEmail.id });
                 }
               }
             })();
@@ -917,7 +917,7 @@ export async function intakeInboundEmail({
                       select: { assignedPerson: { select: { email: true } } },
                     });
                     if (c?.assignedPerson?.email) {
-                      void emitNotificationEvent({ event: 'customer_replied', caseId: existing.id });
+                      void emitNotificationEvent({ event: 'customer_replied', caseId: existing.id, triggerInboundEmailId: inboundEmail.id });
                     }
                   }
                 })();
