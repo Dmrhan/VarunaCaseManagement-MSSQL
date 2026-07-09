@@ -184,12 +184,25 @@ async function loadQuotedInlineAttachments(caseId, bodyCids, coveredCanon) {
     where: { email: { caseId } },
     select: { contentId: true, storageKey: true, fileName: true, mimeType: true },
   });
+  // Codex #484 P2 — BELİRSİZLİK: aynı kanonik contentId (ör. ortak imza/logo
+  // cid'i) vakada FARKLI dosyalara işaret ediyorsa, gövdedeki cid hangi
+  // mesaja aitti bilinemez → re-attach ETME (yanlış görsel göndermektense
+  // göndermemek daha güvenli; reader thread-cid path'iyle tutarlı). storageKey
+  // farkı = farklı dosya.
   const byCanon = new Map();
+  const ambiguous = new Set();
   for (const r of rows) {
     if (!r.contentId || !r.storageKey) continue;
     const k = canon(r.contentId);
-    if (k && !byCanon.has(k)) byCanon.set(k, r);
+    if (!k) continue;
+    const existing = byCanon.get(k);
+    if (existing) {
+      if (existing.storageKey !== r.storageKey) ambiguous.add(k);
+    } else {
+      byCanon.set(k, r);
+    }
   }
+  for (const k of ambiguous) byCanon.delete(k);
   const seen = new Set();
   const items = [];
   for (const cid of needed) {
