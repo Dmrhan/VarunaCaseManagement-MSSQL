@@ -25,7 +25,19 @@ export interface ContactPickerValue {
 interface Suggestion {
   email: string;
   name?: string | null;
+  /**
+   * Öneri kaynağı rozeti (alıcı-önerisi v1). OPSİYONEL — verilmezse
+   * dropdown bugünkü görünümüyle aynen çalışır (geri uyumlu).
+   */
+  source?: 'case_contact' | 'correspondence' | 'team';
 }
+
+/** Kaynak rozeti etiketi + rengi (öz-açıklayıcı ekran: ajan kimi eklediğini görür). */
+const SOURCE_BADGE: Record<NonNullable<Suggestion['source']>, { label: string; cls: string }> = {
+  case_contact: { label: 'vaka kişisi', cls: 'bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300' },
+  correspondence: { label: 'yazışma', cls: 'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300' },
+  team: { label: 'ekip', cls: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' },
+};
 
 interface Props {
   label: string;
@@ -171,10 +183,17 @@ export function ContactPicker({ label, values, onChange, suggestions = [], disab
                   onChange([...values, { address: s.email, name: s.name ?? null }]);
                   setText('');
                 }}
-                className="block w-full truncate px-2 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-ndark-bg"
+                className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-ndark-bg"
               >
-                <span className="font-medium text-slate-800 dark:text-ndark-text">{s.name ?? s.email}</span>
-                {s.name && <span className="ml-1 text-xs text-slate-500 dark:text-ndark-muted">&lt;{s.email}&gt;</span>}
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="font-medium text-slate-800 dark:text-ndark-text">{s.name ?? s.email}</span>
+                  {s.name && <span className="ml-1 text-xs text-slate-500 dark:text-ndark-muted">&lt;{s.email}&gt;</span>}
+                </span>
+                {s.source && (
+                  <span className={`shrink-0 rounded-full px-1.5 py-px text-[10px] font-medium ${SOURCE_BADGE[s.source].cls}`}>
+                    {SOURCE_BADGE[s.source].label}
+                  </span>
+                )}
               </button>
             </li>
           ))}

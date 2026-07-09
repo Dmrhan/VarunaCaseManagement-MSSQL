@@ -110,6 +110,28 @@ export async function getFromAliases(caseId: string): Promise<FromAliasOption[]>
   return Array.isArray(out?.items) ? out!.items : [];
 }
 
+export interface RecipientSuggestion {
+  address: string;
+  name: string | null;
+  source: 'correspondence' | 'team';
+}
+
+/**
+ * GET /api/cases/:caseId/email-recipients — alıcı önerisi v1 havuzu
+ * (yazışma geçmişi + iç ekip; kaynak etiketiyle). Composer açılışında
+ * TEK fetch ile önyüklenir; filtre client-side (ContactPicker).
+ * silent: hata halinde composer bugünkü davranışına düşer — bu çağrı
+ * mail akışı için hiçbir koşulda kritik değildir.
+ */
+export async function getRecipientSuggestions(caseId: string): Promise<RecipientSuggestion[]> {
+  const out = await apiFetch<{ items: RecipientSuggestion[] }>(
+    `/api/cases/${encodeURIComponent(caseId)}/email-recipients`,
+    undefined,
+    { silent: true },
+  );
+  return Array.isArray(out?.items) ? out!.items : [];
+}
+
 export interface ReplyContext {
   caseNumber: string | null;
   to: CaseEmailAddress[];
@@ -344,6 +366,7 @@ export const caseEmailService = {
   listEmails,
   getAttachmentDownload,
   getFromAliases,
+  getRecipientSuggestions,
   getReplyContext,
   getForwardContext,
   sendEmail,
