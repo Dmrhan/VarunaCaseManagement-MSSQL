@@ -921,6 +921,24 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
               ))}
               <ChevronRight size={11} className="text-slate-400" />
               <span className="font-mono text-slate-700">{item.caseNumber}</span>
+              {/* Paylaşılabilir vaka bağlantısı (2026-07-10) — mevcut ?case=<id>
+                  deep-link'ini (App.tsx, customer_replied maili ile aynı) kopyalar.
+                  Link login + vaka-görünürlük korumalı: yalnız yetkili kullanıcı açar. */}
+              <button
+                type="button"
+                onClick={() => {
+                  const url = `${window.location.origin}/?case=${item.id}`;
+                  navigator.clipboard
+                    .writeText(url)
+                    .then(() => toast({ type: 'success', message: 'Vaka bağlantısı kopyalandı — yapıştırıp paylaşabilirsiniz.', duration: 2500 }))
+                    .catch(() => toast({ type: 'error', message: 'Bağlantı kopyalanamadı.', duration: 2500 }));
+                }}
+                className="text-slate-400 transition hover:text-brand-700"
+                title="Vaka bağlantısını kopyala (yalnız giriş yapabilen yetkili kullanıcılar açabilir)"
+                aria-label="Vaka bağlantısını kopyala"
+              >
+                <LinkIcon size={12} />
+              </button>
               <span className="text-slate-400">—</span>
               <span className="truncate text-slate-600">{item.accountName}</span>
               {/* M6.3b Faz 1 — "Yanıt bekliyor" rozeti (detay header).
