@@ -59,6 +59,18 @@ export const UPLOAD_ALLOWED_MIME_TYPES = [
   // XML — Business review Madde 6 explicit kabul
   'application/xml',
   'text/xml',
+  // XSLT (.xslt/.xsl) — 2026-07-09 iş talebi (mail eki + case dosyası).
+  // Salt saklama/indirme; sunucu tarafında transform ÇALIŞTIRILMAZ
+  // (docblock'taki XML uyarısı aynen geçerli).
+  'application/xslt+xml',
+  // E-posta (.eml) — 2026-07-09 iş talebi. RFC 822 mesaj dosyası; render
+  // edilmez, ek olarak saklanır/indirilir.
+  'message/rfc822',
+  // SQL script (.sql) — 2026-07-09 iş talebi. Tarayıcılar çoğunlukla
+  // text/plain veya boş MIME yollar (uzantı fallback yakalar); bu ikisi
+  // yaygın explicit eşleme.
+  'application/sql',
+  'text/x-sql',
   // Arşiv
   'application/zip',
   'application/x-zip-compressed',
@@ -82,6 +94,12 @@ export const UPLOAD_ALLOWED_EXTENSIONS = [
   '.txt', '.csv', '.json',
   // XML — Business review Madde 6 explicit kabul
   '.xml',
+  // XSLT — 2026-07-09 iş talebi (.xsl eski/eşdeğer uzantı, aynı içerik)
+  '.xslt', '.xsl',
+  // E-posta — 2026-07-09 iş talebi
+  '.eml',
+  // SQL script — 2026-07-09 iş talebi
+  '.sql',
   // Arşiv
   '.zip',
   '.rar',
