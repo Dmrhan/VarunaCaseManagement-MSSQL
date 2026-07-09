@@ -84,6 +84,12 @@ const ALLOWED_EVENTS = [
   //                      (close/reopen kendi event'lerini tetiklemeye devam eder)
   'case_created',
   'status_changed',
+  // 2026-07-09 — müşteri, mevcut vakaya e-postayla yanıt verdi (intake
+  // existing-case append yolları emit eder; İÇ adres gönderici HARİÇ —
+  // OOO/auto-reply döngü guard'ı). Tipik kural: audience=assignee +
+  // channel=Email → vakayı üstlenen ajan CSM'i açmadan haberdar olur
+  // (n4b paritesi; seed: scripts/seed-customer-replied-notification.mjs).
+  'customer_replied',
 ];
 
 const ALLOWED_CHANNELS = ['InApp', 'Email', 'ManualTask']; // Webhook = Phase 4
@@ -133,6 +139,10 @@ const ALLOWED_VARIABLE_PATHS = [
   // M6.3b CaseEmailTemplate engine'iyle aynı pattern (parite).
   'requester.name',
   'requester.email',
+  // 2026-07-09 — vaka deep-link'i (customer_replied → assignee maili
+  // "vakayı aç" bağlantısı taşısın). APP_PUBLIC_BASE_URL env'i tanımlı
+  // değilse boş render edilir — şablonlar buna göre kurgulanmalı.
+  'case.url',
 ];
 
 // ─────────────────────────────────────────────────────────────────
@@ -330,6 +340,13 @@ export function buildTemplateVars({ caseRow, approval, event }) {
     // (Case.customerContact*; M6.3b CaseEmailTemplate ile aynı kaynaklar).
     'requester.name': caseRow?.customerContactName ?? '',
     'requester.email': caseRow?.customerContactEmail ?? '',
+    // 2026-07-09 — vaka deep-link'i. App.tsx `?case=<id>` parametresini
+    // login sonrası açar (SPA'da path-router yok). APP_PUBLIC_BASE_URL
+    // tanımsızsa boş string (renderTemplate missing'e yazar, satır boş
+    // kalır) — şablonda tek başına satırda kullanın.
+    'case.url': (process.env.APP_PUBLIC_BASE_URL && caseRow?.id)
+      ? `${process.env.APP_PUBLIC_BASE_URL.replace(/\/+$/, '')}/?case=${caseRow.id}`
+      : '',
   };
 }
 
@@ -1244,7 +1261,15 @@ async function executeOutboundEmailDispatch(dispatch, caseRow) {
     // appendOutbound dedup yapar (companyId+messageId unique).
     // Hata kapsanır: dispatch zaten 'Sent' işaretlendi, mail teslim oldu;
     // CaseEmail kaydı fail olsa bile dispatch'i bozmayız.
-    try {
+    //
+    // Codex #496 P1 — YALNIZ CUSTOMER-FACING. İÇ bildirimler (ör.
+    // customer_replied → assignee) müşteriye giden mail DEĞİLDİR; bunları
+    // outbound CaseEmail yazmak (a) lastEmailOutboundAt'i ilerletip
+    // pendingCustomerReply'ı YANLIŞ temizler (ajan cevap vermeden "yanıt
+    // bekliyor" düşer — [[reference-pending-customer-reply-semantics]]),
+    // (b) müşteri thread'ini iç bildirimle kirletir. isCustomerFacing
+    // executor'ın başında audience'a göre belirlendi.
+    if (isCustomerFacing) try {
       const { caseEmailRepository } = await import('./caseEmailRepository.js');
       // From: tenant ExternalMailSetting.fromAddress (M5). mailProvider'ın
       // gönderdiği gerçek from'u burada bilmediğimiz için settings'ten
