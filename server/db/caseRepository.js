@@ -1881,12 +1881,17 @@ export const caseRepository = {
         caseType: m.caseType,
         status: isSmartTicketSelfAssigned ? 'Incelemede' : 'Acik',
         // 2026-07-09 — atama/devir sonrası statü otomasyonuyla tutarlılık:
-        // oluşturma anında zaten bir sorumlu atanıyorsa assignedAt damgalanır.
+        // oluşturma anında zaten bir sorumlu (kişi VEYA takım) atanıyorsa
+        // assignedAt damgalanır. Yalnız assignedPersonId'ye bakmak, doğrudan
+        // bir takım havuzuna açılan (finalAssignedTeamId set, kişi YOK)
+        // vakaları "atanmamış" gibi gösteriyordu — oysa bu vakalar zaten bir
+        // sahip gruba sahip; "atandı ama kimse başlamadı" dashboard/rapor
+        // sinyali yeniden atanana kadar bu vakaları hiç yakalamıyordu.
         // Kendine-atanan Smart Ticket vakası doğrudan İncelemede'de
         // başladığı için (yukarıdaki status) pickedUpAt de aynı anda
         // damgalanır — atama ile işe başlama arasında sıfır gecikme,
         // gerçeği doğru yansıtır.
-        assignedAt: m.assignedPersonId ? new Date() : null,
+        assignedAt: (m.assignedPersonId || finalAssignedTeamId) ? new Date() : null,
         pickedUpAt: isSmartTicketSelfAssigned ? new Date() : null,
         priority: m.priority,
         origin: m.origin,
