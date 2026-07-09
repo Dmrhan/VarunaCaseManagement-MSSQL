@@ -93,10 +93,13 @@ export function isAcceptedUpload(mimeType: string | undefined, fileName: string 
   const dotIdx = name.lastIndexOf('.');
   const ext = dotIdx >= 0 ? name.slice(dotIdx) : '';
 
-  // .s3db (SQLite) özel istisnası — backend ile birebir aynı (bkz.
-  // server/lib/uploadWhitelist.js). application/octet-stream GENEL
-  // olarak listeye eklenmez, sadece .s3db ile birlikte geldiğinde kabul.
-  if (mime === 'application/octet-stream' && ext === '.s3db') {
+  // application/octet-stream DAR istisna seti — backend ile birebir aynı
+  // (bkz. server/lib/uploadWhitelist.js). Tarayıcı MIME eşlemesi olmayan
+  // tiplerde File.type boş gelir; caseService bunu octet-stream'e çevirir
+  // (Codex #506 P2) → uzantı fallback'i devreye giremezdi. octet-stream
+  // GENEL olarak listeye eklenmez, yalnız bu uzantılarla kabul.
+  const OCTET_STREAM_EXT_EXCEPTIONS = ['.s3db', '.sql', '.xslt', '.xsl', '.eml'];
+  if (mime === 'application/octet-stream' && OCTET_STREAM_EXT_EXCEPTIONS.includes(ext)) {
     return true;
   }
 

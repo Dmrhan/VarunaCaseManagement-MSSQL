@@ -126,13 +126,16 @@ export function isAcceptedUpload(mimeType, fileName) {
   const dotIdx = name.lastIndexOf('.');
   const ext = dotIdx >= 0 ? name.slice(dotIdx) : '';
 
-  // .s3db (SQLite) özel istisnası — tarayıcı/mail istemcisi bilinmeyen
-  // ikili dosyalar için çoğunlukla application/octet-stream döner.
-  // application/octet-stream'i UPLOAD_ALLOWED_MIME_TYPES'a GENEL olarak
-  // eklemek yerine, sadece uzantı KESİNLİKLE .s3db ise bu kombinasyonu
-  // kabul ediyoruz — böylece octet-stream hiçbir zaman genel bir
-  // "güvenli MIME" sayılmaz (forge guard'ı zayıflamaz).
-  if (mime === 'application/octet-stream' && ext === '.s3db') {
+  // application/octet-stream DAR istisna seti — tarayıcı/mail istemcisi
+  // OS'te MIME eşlemesi olmayan tipler için çoğunlukla octet-stream (veya
+  // boş type; FE caseService bunu octet-stream'e çevirir — Codex #506 P2)
+  // döner. octet-stream'i UPLOAD_ALLOWED_MIME_TYPES'a GENEL olarak eklemek
+  // yerine yalnız bu uzantılarla kabul ediyoruz — octet-stream hiçbir zaman
+  // genel "güvenli MIME" sayılmaz (forge guard'ı zayıflamaz). Güvenlik notu:
+  // boş-MIME + izinli-uzantı zaten kabul edildiğinden bu istisna eşdeğerdir.
+  //   .s3db → UNV-1001065 · .sql/.xslt/.xsl/.eml → 2026-07-09 iş talebi
+  const OCTET_STREAM_EXT_EXCEPTIONS = ['.s3db', '.sql', '.xslt', '.xsl', '.eml'];
+  if (mime === 'application/octet-stream' && OCTET_STREAM_EXT_EXCEPTIONS.includes(ext)) {
     return true;
   }
 
