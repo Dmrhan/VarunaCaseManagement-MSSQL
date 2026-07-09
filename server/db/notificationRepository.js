@@ -179,6 +179,11 @@ const ALLOWED_VARIABLE_PATHS = [
   // 2026-07-09 — HTML bildirim şablonu: logo URL'i + müşteri son mesaj önizlemesi.
   'app.logoUrl',
   'case.lastCustomerMessage',
+  // 2026-07-09 — MÜŞTERİ-yüzü HTML bildirim şablonlarının markası. app.logoUrl
+  // Varuna ürün logosudur (İÇ maillerde kullanılır); company.logoUrl ise
+  // müşteriye giden mailin gönderen-kurum (tenant) logosudur. Şu an tek-tenant
+  // deploy → univera-logo.png; ileride per-tenant Company.logoUrl alanına bağlanır.
+  'company.logoUrl',
 ];
 
 // ─────────────────────────────────────────────────────────────────
@@ -387,6 +392,13 @@ export function buildTemplateVars({ caseRow, approval, event, lastCustomerMessag
     // → şablonda <img> alt'ı görünür (zarif düşüş).
     'app.logoUrl': process.env.APP_PUBLIC_BASE_URL
       ? `${process.env.APP_PUBLIC_BASE_URL.replace(/\/+$/, '')}/varuna-logo.png`
+      : '',
+    // 2026-07-09 — MÜŞTERİ-yüzü mail markası (tenant logosu). app.logoUrl iç/
+    // ürün maili (Varuna) içindir; müşteriye giden ACK/durum/çözüm maillerinde
+    // gönderen-kurum logosu kullanılır. Tek-tenant deploy → univera-logo.png.
+    // Base URL yoksa boş (şablonda <img alt> zarif düşüşü).
+    'company.logoUrl': process.env.APP_PUBLIC_BASE_URL
+      ? `${process.env.APP_PUBLIC_BASE_URL.replace(/\/+$/, '')}/univera-logo.png`
       : '',
     // 2026-07-09 — müşterinin son mesaj önizlemesi (caller emit hesaplar;
     // customer_replied şablonundaki "ne yazdı" kutusu). HTML formatında
