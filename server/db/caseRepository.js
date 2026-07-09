@@ -1880,6 +1880,14 @@ export const caseRepository = {
         description: m.description,
         caseType: m.caseType,
         status: isSmartTicketSelfAssigned ? 'Incelemede' : 'Acik',
+        // 2026-07-09 — atama/devir sonrası statü otomasyonuyla tutarlılık:
+        // oluşturma anında zaten bir sorumlu atanıyorsa assignedAt damgalanır.
+        // Kendine-atanan Smart Ticket vakası doğrudan İncelemede'de
+        // başladığı için (yukarıdaki status) pickedUpAt de aynı anda
+        // damgalanır — atama ile işe başlama arasında sıfır gecikme,
+        // gerçeği doğru yansıtır.
+        assignedAt: m.assignedPersonId ? new Date() : null,
+        pickedUpAt: isSmartTicketSelfAssigned ? new Date() : null,
         priority: m.priority,
         origin: m.origin,
         originDescription: m.originDescription,
@@ -2121,6 +2129,27 @@ export const caseRepository = {
       });
     }
 
+    // 2026-07-09 — Atama/devir sonrası statü otomasyonu. assignedPersonId
+    // veya assignedTeamId gerçekten değişiyorsa (no-op hariç), vaka aktif
+    // çalışma statülerinden birindeyse (bkz. shouldResetStatusOnReassignment)
+    // otomatik "Açık"a alınır. Aynı PATCH içinde status da açıkça
+    // gönderilmişse (nadir, örn. eşzamanlı bir işlem) o EXPLICIT değer
+    // önceliklidir — otomatik reset onu ezmez.
+    const assignmentFieldsChanged =
+      ('assignedPersonId' in dbPatch && dbPatch.assignedPersonId !== before.assignedPersonId) ||
+      ('assignedTeamId' in dbPatch && dbPatch.assignedTeamId !== before.assignedTeamId);
+    const assignmentStatusReset =
+      assignmentFieldsChanged &&
+      !('status' in patch) &&
+      shouldResetStatusOnReassignment(before.status);
+    const assignmentAutomationPatch = assignmentFieldsChanged
+      ? {
+          assignedAt: new Date(),
+          pickedUpAt: null,
+          ...(assignmentStatusReset ? { status: 'Acik' } : {}),
+        }
+      : {};
+
     // Phase D — customerMatchPending lifecycle:
     //   patch içinde accountId alanı geliyorsa pending flag'i otomatik toggle et.
     //   accountId set ediliyor → pending=false; accountId clear ediliyor → pending=true.
@@ -2255,6 +2284,7 @@ export const caseRepository = {
       data: {
         ...dbPatch,
         ...lifecyclePatch,
+        ...assignmentAutomationPatch,
         history: historyEntries.length > 0 ? { create: historyEntries } : undefined,
       },
       include: CASE_INCLUDE,
@@ -2288,6 +2318,27 @@ export const caseRepository = {
         message: `${updated.caseNumber}'de atama değişti.`,
         eventType: 'watcher_update',
         kind: 'assignment',
+      });
+    }
+
+    // 2026-07-09 — atama/devir audit kaydı (CaseTransfer + CaseActivity).
+    // transferCase() dışındaki bu yolda da AYNI kayıt oluşsun diye ortak
+    // helper kullanılır (bkz. recordAssignmentChangeAudit).
+    if (assignmentFieldsChanged) {
+      await recordAssignmentChangeAudit(prisma, {
+        caseId: id,
+        companyId,
+        fromTeamId: before.assignedTeamId ?? null,
+        fromTeamName: before.assignedTeamName ?? null,
+        fromPersonId: before.assignedPersonId ?? null,
+        fromPersonName: before.assignedPersonName ?? null,
+        toTeamId: updated.assignedTeamId ?? null,
+        toTeamName: updated.assignedTeamName ?? null,
+        toPersonId: updated.assignedPersonId ?? null,
+        toPersonName: updated.assignedPersonName ?? null,
+        statusReset: assignmentStatusReset,
+        actorUserId: actorUserIdOf(actorObject),
+        actorName: actor,
       });
     }
 
@@ -3755,7 +3806,11 @@ export const caseRepository = {
     // Cross-tenant validation: tüm vakaları tek query'de çek, scope'a bak.
     const cases = await prisma.case.findMany({
       where: { id: { in: caseIds } },
-      select: { id: true, companyId: true, assignedPersonId: true, assignedTeamId: true },
+      select: {
+        id: true, companyId: true, status: true,
+        assignedPersonId: true, assignedPersonName: true,
+        assignedTeamId: true, assignedTeamName: true,
+      },
     });
     if (cases.length !== caseIds.length) {
       const foundIds = new Set(cases.map((c) => c.id));
@@ -3828,30 +3883,60 @@ export const caseRepository = {
             actorUserId: actorUserIdOf(actorObject), // PR-5 follow-up
           });
         }
-        await prisma.case.update({
-          where: { id: c.id },
-          data: { ...dataPatch, history: { create: historyEntries } },
-        });
-
+        // 2026-07-09 — atama/devir sonrası statü otomasyonu. Bulk update
+        // de diğer atama yollarıyla (transferCase, generic update) AYNI
+        // kuralı uygular — aksi halde toplu atama bu davranışı bypass
+        // ederdi (bkz. shouldResetStatusOnReassignment).
+        let assignmentChanged = false;
+        let statusReset = false;
+        let finalAssignedPersonId = c.assignedPersonId;
+        let finalAssignedTeamId = c.assignedTeamId;
         if (bulkTouchesAssignment) {
-          const finalAssignedPersonId =
+          finalAssignedPersonId =
             filtered.assignedPersonId !== undefined ? filtered.assignedPersonId : c.assignedPersonId;
-          const finalAssignedTeamId =
+          finalAssignedTeamId =
             filtered.assignedTeamId !== undefined ? filtered.assignedTeamId : c.assignedTeamId;
-          const assignmentChanged =
+          assignmentChanged =
             finalAssignedPersonId !== c.assignedPersonId || finalAssignedTeamId !== c.assignedTeamId;
           if (assignmentChanged) {
-            await notifyAssignmentTargets({
-              caseId: c.id,
-              companyId: c.companyId,
-              assignedPersonId: finalAssignedPersonId,
-              assignedTeamId: finalAssignedTeamId,
-              actorUserId: actorUserIdOf(actorObject),
-              message: 'Toplu işlemle atama değişti.',
-              eventType: 'watcher_update',
-              kind: 'assignment',
-            });
+            statusReset = !('status' in filtered) && shouldResetStatusOnReassignment(c.status);
           }
+        }
+        const assignmentAutomationPatch = assignmentChanged
+          ? { assignedAt: new Date(), pickedUpAt: null, ...(statusReset ? { status: 'Acik' } : {}) }
+          : {};
+
+        await prisma.case.update({
+          where: { id: c.id },
+          data: { ...dataPatch, ...assignmentAutomationPatch, history: { create: historyEntries } },
+        });
+
+        if (assignmentChanged) {
+          await notifyAssignmentTargets({
+            caseId: c.id,
+            companyId: c.companyId,
+            assignedPersonId: finalAssignedPersonId,
+            assignedTeamId: finalAssignedTeamId,
+            actorUserId: actorUserIdOf(actorObject),
+            message: 'Toplu işlemle atama değişti.',
+            eventType: 'watcher_update',
+            kind: 'assignment',
+          });
+          await recordAssignmentChangeAudit(prisma, {
+            caseId: c.id,
+            companyId: c.companyId,
+            fromTeamId: c.assignedTeamId ?? null,
+            fromTeamName: c.assignedTeamName ?? null,
+            fromPersonId: c.assignedPersonId ?? null,
+            fromPersonName: c.assignedPersonName ?? null,
+            toTeamId: finalAssignedTeamId ?? null,
+            toTeamName: assignedTeamName ?? c.assignedTeamName ?? null,
+            toPersonId: finalAssignedPersonId ?? null,
+            toPersonName: assignedPersonName ?? c.assignedPersonName ?? null,
+            statusReset,
+            actorUserId: actorUserIdOf(actorObject),
+            actorName: actor,
+          });
         }
 
         updated++;
@@ -4193,10 +4278,33 @@ export const caseRepository = {
           : {}),
         ...(mergedCustomFields !== prev.customFields ? { customFields: mergedCustomFields } : {}),
         ...autoAssignData,
+        // 2026-07-09 — atama/devir sonrası "işe başlama" damgası. Açık →
+        // İncelemede geçişi, mevcut sorumlunun vakayı fiilen ele aldığı
+        // an olarak kabul edilir (bkz. shouldResetStatusOnReassignment).
+        ...(prev.status === 'Acik' && dbNext === 'Incelemede' && !prev.pickedUpAt
+          ? { pickedUpAt: new Date() }
+          : {}),
         history: { create: historyEntries },
       },
       include: CASE_INCLUDE,
     });
+
+    // En son CaseTransfer satırının pickedUpAt'i de damgalanır — tarihsel/
+    // raporlama tarafı (atama→işe başlama süresi) bu alan üzerinden
+    // yapılır. Ana update'i bloklamaz; hata olursa sessiz warn (audit
+    // alanı, ana akışı durdurmamalı).
+    if (prev.status === 'Acik' && dbNext === 'Incelemede') {
+      await prisma.caseTransfer
+        .findFirst({ where: { caseId: id, pickedUpAt: null }, orderBy: { transferredAt: 'desc' } })
+        .then((latestTransfer) => {
+          if (!latestTransfer) return null;
+          return prisma.caseTransfer.update({
+            where: { id: latestTransfer.id },
+            data: { pickedUpAt: new Date() },
+          });
+        })
+        .catch((err) => console.warn('[transitionStatus] CaseTransfer.pickedUpAt damgalama hatası', err?.message ?? err));
+    }
 
     // FAZ 2 Collab — watcher bildirimleri (statü + opsiyonel eskalasyon)
     const kind = enteringEscalation ? 'escalation' : 'status';
@@ -4302,6 +4410,13 @@ export const caseRepository = {
     const fromTeamId = c.assignedTeamId ?? null;
     const fromPersonId = c.assignedPersonId ?? null;
     const fromTeamName = c.assignedTeamName ?? '—';
+    const fromPersonName = c.assignedPersonName ?? null;
+
+    // 2026-07-09 — Atama/devir sonrası statü otomasyonu. Vaka aktif
+    // çalışma statülerinden birindeyse (Açık/İncelemede/YenidenAçıldı)
+    // devir sonrası otomatik "Açık"a alınır; 3rdPartyBekleniyor/
+    // Eskalasyon gibi özel statüler etkilenmez (bkz. shouldResetStatusOnReassignment).
+    const statusReset = shouldResetStatusOnReassignment(c.status);
 
     // Activity action satırı: "↔ Vaka aktarıldı: <from> → <to>"
     // Note alanı: gerekçe etiketi + serbest metin.
@@ -4310,6 +4425,16 @@ export const caseRepository = {
     let noteText = reasonLabel
       ? `Gerekçe: ${reasonLabel} — ${trimmedReason}`
       : `Gerekçe: ${trimmedReason}`;
+    // 2026-07-09 — kişi bazlı önceki/yeni sorumlu audit'te anlaşılır olsun
+    // (action/fromValue/toValue yalnız takım adı taşıyor, CaseTransfer'de
+    // fromPersonId/toPersonId var ama okunabilir isim burada lazım).
+    const toPersonNameForNote = person?.name ?? null;
+    if (fromPersonName || toPersonNameForNote) {
+      noteText += `\n\nKişi: ${fromPersonName ?? '—'} → ${toPersonNameForNote ?? '—'}`;
+    }
+    if (statusReset) {
+      noteText += '\n\nYeni sorumlu henüz incelemeye almadı — statü Açık\'a alındı.';
+    }
 
     // WR-Smart-Ticket Phase T1 — Smart Ticket akışı devir bağlamı varsa
     // customFields.smartTicket.transferContext merge edilir (atomik, aynı txn);
@@ -4388,6 +4513,10 @@ export const caseRepository = {
           assignedPersonId: person?.id ?? null,
           assignedPersonName: person?.name ?? null,
           transferCount: { increment: 1 },
+          // 2026-07-09 — atama/devir sonrası statü otomasyonu.
+          assignedAt: new Date(),
+          pickedUpAt: null,
+          ...(statusReset ? { status: 'Acik' } : {}),
           ...(nextCustomFields ? { customFields: nextCustomFields } : {}),
           ...(priorityChange ? { priority: priorityChange.to } : {}),
         },
@@ -5270,6 +5399,81 @@ export const notificationRepo = {
     return { updated: result.count };
   },
 };
+
+/**
+ * Atama/devir sonrası statü otomasyonu (2026-07-09) — bir vakanın mevcut
+ * sorumlusu (kişi veya ekip) değiştiğinde, vaka aktif çalışma
+ * statülerinden (Açık/İncelemede/YenidenAçıldı) birindeyse otomatik
+ * olarak "Açık"a alınır. "3rdPartyBekleniyor"/"Eskalasyon" gibi özel/
+ * duraklatılmış statüler ve terminal statüler (Çözüldü/İptalEdildi)
+ * ETKİLENMEZ — o statülerde atama değişse bile statüye dokunulmaz.
+ *
+ * Amaç: "atandı" ile "fiilen incelemeye alındı" anını ayırmak. Yeni
+ * sorumlu vakayı mevcut Açık→İncelemede geçişiyle ele aldığında
+ * transitionStatus() Case.pickedUpAt + en son CaseTransfer.pickedUpAt'i
+ * damgalar (bkz. transitionStatus).
+ *
+ * TÜM atama değiştiren yollar (transferCase, generic update, bulkUpdate)
+ * bu kuralı AYNI fonksiyondan okumalı — yalnız decision (reset edilsin
+ * mi) burada; her yol kendi CaseTransfer/CaseActivity yazımını kendi
+ * bağlamına göre yapar (transferCase zaten zengin bir kayıt oluşturuyor,
+ * generic/bulk yollar aşağıdaki recordAssignmentChangeAudit'i kullanır).
+ */
+const ASSIGNMENT_RESET_ELIGIBLE_STATUSES = new Set(['Acik', 'Incelemede', 'YenidenAcildi']);
+function shouldResetStatusOnReassignment(prevStatus) {
+  return ASSIGNMENT_RESET_ELIGIBLE_STATUSES.has(prevStatus);
+}
+
+/**
+ * transferCase() DIŞINDAKİ atama-değiştiren yollar (generic update,
+ * bulkUpdate) için ortak audit kaydı — CaseTransfer + CaseActivity.
+ * transferCase() kendi zengin kaydını (AI önerisi snapshot, Smart Ticket
+ * merge, gerekçe metni) kendi oluşturur, bu helper'ı çağırmaz; ama AYNI
+ * shouldResetStatusOnReassignment() kuralını kullanır ki davranış
+ * yollar arasında sapmasın (bkz. review — aynı takım içi devir eskiden
+ * CaseTransfer hiç oluşturmuyordu, aynı hata sınıfı burada tekrarlanmasın
+ * diye tek noktadan yönetiliyor).
+ *
+ * toTeamId (CaseTransfer şemasında NOT NULL) çözülemezse (ne yeni ne eski
+ * takım biliniyorsa) kayıt ATLANIR — çağıran yine de Case üzerindeki
+ * assignedAt/pickedUpAt/status yan etkisini uygulamaya devam eder.
+ */
+async function recordAssignmentChangeAudit(tx, {
+  caseId, companyId,
+  fromTeamId, fromTeamName, fromPersonId, fromPersonName,
+  toTeamId, toTeamName, toPersonId, toPersonName,
+  statusReset, actorUserId, actorName,
+}) {
+  const resolvedToTeamId = toTeamId ?? fromTeamId ?? null;
+  if (!resolvedToTeamId) return;
+
+  await tx.caseTransfer.create({
+    data: {
+      caseId,
+      companyId,
+      fromTeamId: fromTeamId ?? null,
+      toTeamId: resolvedToTeamId,
+      fromPersonId: fromPersonId ?? null,
+      toPersonId: toPersonId ?? null,
+      reason: 'Atanan kişi/takım güncellendi.',
+      transferredBy: actorUserId ?? 'system',
+    },
+  });
+
+  await tx.caseActivity.create({
+    data: {
+      caseId,
+      companyId,
+      action: `↔ Atama değişti: ${fromPersonName ?? fromTeamName ?? '—'} → ${toPersonName ?? toTeamName ?? '—'}`,
+      actionType: 'Transfer',
+      fieldName: 'assignedPersonId',
+      fromValue: fromPersonName ?? fromTeamName ?? '—',
+      toValue: toPersonName ?? toTeamName ?? '—',
+      note: statusReset ? 'Yeni sorumlu henüz incelemeye almadı — statü Açık\'a alındı.' : null,
+      actor: actorName ?? actorUserId ?? 'system',
+    },
+  });
+}
 
 /**
  * notifyWatchers — bir vakaya watcher olarak eklenmiş tüm kullanıcılara
