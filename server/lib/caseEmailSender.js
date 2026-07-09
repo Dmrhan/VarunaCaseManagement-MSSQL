@@ -726,9 +726,13 @@ async function buildReplyContext(caseId, { emailId } = {}) {
     const attribution = ts
       ? `${new Date(ts).toLocaleString('tr-TR')} tarihinde ${who} şunu yazdı:`
       : `${who} şunu yazdı:`;
+    // Kullanıcı direktifi (2026-07-09) — Gmail tarzı FLU GRİ AYIRICI:
+    // eski mail nerede bitti / yenisi nereden başladı net görünsün. İnce
+    // açık-gri çizgi + soluk gri attribution satırı; gövdeye gömülü olduğu
+    // için hem alıcının istemcisinde hem Varuna reader'ında görünür.
     quotedBodyHtml = [
-      '<br><br>',
-      `<div>${escapeHtml(attribution)}</div>`,
+      '<div style="border-top:1px solid #e0e0e0;margin:20px 0 10px"></div>',
+      `<div style="color:#8a8a8a;font-size:12px;margin:0 0 6px">${escapeHtml(attribution)}</div>`,
       '<blockquote style="margin:0 0 0 8px;padding-left:12px;border-left:2px solid #ccc;color:#555">',
       refRow.bodyHtml ?? '',
       '</blockquote>',

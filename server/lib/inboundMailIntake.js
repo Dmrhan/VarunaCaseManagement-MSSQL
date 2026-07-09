@@ -1163,8 +1163,12 @@ export async function intakeInboundEmail({
   // CaseEmailAttachment(emailId) ile yazılsın. Aksi halde cid/inline
   // metadata kaybolur.
   let firstEmail = { id: null, deduped: false };
+  // Codex #489 P1 fix — sanitizedHtml try DIŞINA hoist edildi: aşağıdaki
+  // persistAttachmentsForCase(bodyHtml: sanitizedHtml) AYRI try bloğunda;
+  // const içeride kalsaydı ReferenceError → catch yutar → yeni vakanın TÜM
+  // ekleri + inline snapshot'ları sessizce düşerdi.
+  const sanitizedHtml = sanitizeIncomingEmailHtml(parsed.html || parsed.text || description);
   try {
-    const sanitizedHtml = sanitizeIncomingEmailHtml(parsed.html || parsed.text || description);
     firstEmail = await caseEmailRepository.appendInbound({
       caseId: created.id,
       companyId,
