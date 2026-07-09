@@ -759,6 +759,35 @@ export async function intakeInboundEmail({
               bodyHtml: sanitizedHtml,
               emailId: inboundEmail.id,
             });
+            // customer_replied bildirimi (2026-07-09, kullanıcı direktifi) —
+            // müşteri mevcut vakaya yanıt verdi; kural varsa üstlenen ajana
+            // e-posta gider (n4b paritesi). DÖNGÜ GUARD'I (2026-07-06 olayı
+            // dersi): İÇ adres göndericide EMIT YOK — ajanın OOO/auto-reply'ı
+            // paylaşımlı kutuya döner, [token]'lı subject vakaya append olur;
+            // emit edilseydi ajana yeni mail → sonsuz döngü. Fail-CLOSED:
+            // kontrol hata verirse iç sayılır (emit atlanır — güvenli yön).
+            void (async () => {
+              let replyFromInternal = true;
+              try {
+                replyFromInternal = await isInternalAddress(parsed.from.email, companyId);
+              } catch {
+                replyFromInternal = true;
+              }
+              if (!replyFromInternal) {
+                // Atanmamış (havuz) vakada VEYA atanan kişinin E-POSTASI
+                // yoksa emit YOK. Codex #496 P2: assignee resolver e-posta
+                // yoksa person.id'ye düşüyor → isLikelyEmail false → dispatch
+                // sonsuza dek Pending + communicationState Pending (guard'ın
+                // önlemeye çalıştığı kuyruk gürültüsü). E-posta ön-şart.
+                const c = await prisma.case.findUnique({
+                  where: { id: existing.id },
+                  select: { assignedPerson: { select: { email: true } } },
+                });
+                if (c?.assignedPerson?.email) {
+                  void emitNotificationEvent({ event: 'customer_replied', caseId: existing.id, triggerInboundEmailId: inboundEmail.id });
+                }
+              }
+            })();
           }
 
           return {
@@ -870,6 +899,28 @@ export async function intakeInboundEmail({
                   bodyHtml: sanitizedHtml,
                   emailId: inboundEmail.id,
                 });
+                // customer_replied bildirimi — token flow ile AYNI mantık +
+                // AYNI iç-adres döngü guard'ı (fail-closed). Bkz. yukarıdaki
+                // subject-token emit noktasındaki açıklama.
+                void (async () => {
+                  let replyFromInternal = true;
+                  try {
+                    replyFromInternal = await isInternalAddress(parsed.from.email, companyId);
+                  } catch {
+                    replyFromInternal = true;
+                  }
+                  if (!replyFromInternal) {
+                    // Atanmamış VEYA e-postasız üstlenen → emit YOK (Codex
+                    // #496 P2; yukarıdaki subject-token yoluyla aynı gerekçe).
+                    const c = await prisma.case.findUnique({
+                      where: { id: existing.id },
+                      select: { assignedPerson: { select: { email: true } } },
+                    });
+                    if (c?.assignedPerson?.email) {
+                      void emitNotificationEvent({ event: 'customer_replied', caseId: existing.id, triggerInboundEmailId: inboundEmail.id });
+                    }
+                  }
+                })();
               }
 
               return {
