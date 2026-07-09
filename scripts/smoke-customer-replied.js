@@ -24,7 +24,7 @@ ok('1.2 case.url değişkeni (katalog + buildTemplateVars, APP_PUBLIC_BASE_URL)'
 
 console.log('── Intake emit (2 yol) + guard\'lar ──');
 ok('2.1 İKİ existing-case yolunda emit (subject-token + header-threading)',
-  (intake.match(/event: 'customer_replied'/g) ?? []).length === 2);
+  (intake.match(/event: 'customer_replied', caseId: existing\.id, triggerInboundEmailId: inboundEmail\.id/g) ?? []).length === 2);
 ok('2.2 iç-adres döngü guard\'ı FAIL-CLOSED (OOO/auto-reply döngüsü kesilir)',
   (intake.match(/let replyFromInternal = true;/g) ?? []).length === 2
   && /replyFromInternal = await isInternalAddress\(parsed\.from\.email, companyId\)/.test(intake));
@@ -53,9 +53,10 @@ ok('h.2 executor HTML gövde + text fallback gönderir (format templateId\'den)'
 ok('h.3 app.logoUrl + case.lastCustomerMessage değişkenleri tanımlı',
   /'app\.logoUrl'/.test(repo) && /'case\.lastCustomerMessage'/.test(repo)
   && /varuna-logo\.png/.test(repo));
-ok('h.4 emit son müşteri mesajı önizlemesini çeker',
-  /buildMessagePreview\(lastInbound\.bodyText/.test(repo)
-  && /direction: 'inbound'/.test(repo));
+ok('h.4 emit önizlemeyi TETİKLEYEN mailden çeker (Codex #498 P2: id + createdAt fallback)',
+  /triggerInboundEmailId/.test(repo)
+  && /buildMessagePreview\(triggerInbound\.bodyText/.test(repo)
+  && /orderBy: \{ createdAt: 'desc' \}/.test(repo));
 ok('h.5 seed HTML format + logo + mesaj kutusu + upsert',
   /format: 'html'/.test(read('scripts/seed-customer-replied-notification.mjs'))
   && /\{\{app\.logoUrl\}\}/.test(read('scripts/seed-customer-replied-notification.mjs'))

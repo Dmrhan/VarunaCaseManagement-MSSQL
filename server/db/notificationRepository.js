@@ -1381,7 +1381,7 @@ async function executeOutboundEmailDispatch(dispatch, caseRow) {
   return { ok: false, error: result.error };
 }
 
-export async function emitEvent({ event, caseId, approvalContext = null }) {
+export async function emitEvent({ event, caseId, approvalContext = null, triggerInboundEmailId = null }) {
   try {
     if (!ALLOWED_EVENTS.includes(event)) return [];
     const caseRow = await prisma.case.findUnique({ where: { id: caseId } });
@@ -1398,16 +1398,28 @@ export async function emitEvent({ event, caseId, approvalContext = null }) {
     if (matched.length === 0) return [];
 
     // Müşterinin son mesaj önizlemesi (customer_replied HTML şablonu için).
-    // Bir kez çekilir, tüm kurallarda reuse edilir. Opsiyonel — hata/yoksa boş.
+    // Codex #498 P2 — TETİKLEYEN maili doğrudan kullan: caller (intake)
+    // az önce append ettiği inbound'un id'sini geçer → kesin doğru mesaj.
+    // Fallback (id yoksa) INSERTION sırası (createdAt) — receivedAt mailin
+    // Date header'ından gelir, gecikmeli/çarpık tarihte önceki mesajı
+    // seçebilirdi. Bir kez çekilir, tüm kurallarda reuse. Opsiyonel.
     let lastCustomerMessage = '';
     try {
-      const lastInbound = await prisma.caseEmail.findFirst({
-        where: { caseId, direction: 'inbound' },
-        orderBy: [{ receivedAt: 'desc' }, { createdAt: 'desc' }],
-        select: { bodyText: true, bodyHtml: true },
-      });
-      if (lastInbound) {
-        lastCustomerMessage = buildMessagePreview(lastInbound.bodyText, lastInbound.bodyHtml);
+      const triggerInbound = triggerInboundEmailId
+        ? await prisma.caseEmail.findUnique({
+            where: { id: triggerInboundEmailId },
+            select: { bodyText: true, bodyHtml: true, direction: true, caseId: true },
+          })
+        : await prisma.caseEmail.findFirst({
+            where: { caseId, direction: 'inbound' },
+            orderBy: { createdAt: 'desc' },
+            select: { bodyText: true, bodyHtml: true, direction: true, caseId: true },
+          });
+      // id ile geldi ama başka vaka/yön ise kullanma (defensive).
+      if (triggerInbound
+          && triggerInbound.direction === 'inbound'
+          && triggerInbound.caseId === caseId) {
+        lastCustomerMessage = buildMessagePreview(triggerInbound.bodyText, triggerInbound.bodyHtml);
       }
     } catch { /* önizleme opsiyonel */ }
 
