@@ -335,9 +335,14 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   // Çözüldü kararı seçildiğinde taxonomy listelerini çek. Kapanış-tüm-vakalar
   // genişletmesi: klasik (mail/telefon) vakalarda da kapanış etiketi yazılır;
   // dropdown'lar herkese görünür. Endpoint per-tenant; companyId Case'de var.
+  // COMP-UNIVERA için ayrıca ERKEN çekilir (pending seçilmeden) — açılış
+  // etiketleri kapısı (openingTagsMissing) "Çöz" kartının SEÇİLEBİLİRLİĞİNİ
+  // belirlerken hangi taksonomi tiplerinin bu şirkette tanımlı olduğunu
+  // bilmesi gerekiyor (P2 review — bkz. openingTagsMissing yorumu).
   useEffect(() => {
     let alive = true;
-    if (pending !== 'Çözüldü' || closureTax) return;
+    if (closureTax) return;
+    if (pending !== 'Çözüldü' && item.companyId !== 'COMP-UNIVERA') return;
     setClosureTaxLoading(true);
     void lookupService
       .smartTicketTaxonomies(item.companyId)
@@ -481,20 +486,31 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
 
   // Açılış etiketleri kapanış kapısı — caseRepository.js transitionStatus
   // guard'ının (opening_tags_required_for_closure) client-side aynası.
-  // Basit sürüm: backend'in "yalnız o şirkette tanımlı taksonomi tipi
-  // zorunlu" inceliği burada uygulanmaz — 5 alandan biri bile boşsa
-  // "Çöz" kartı SEÇİLEMEZ (kullanıcı çözüm notu yazıp reddedilmeden önce,
-  // hatta panele hiç girmeden uyarılsın). kbEnabled === null (yükleniyor)
-  // → güvenli taraf: aktif kalır.
+  // P2 review fix — backend YALNIZ o şirkette en az bir aktif TaxonomyDef
+  // tanımlı olan alanları zorunlu sayar (admin tanımlamadıysa vaka
+  // tıkanmasın); bu panel eskiden 5 alanı KOŞULSUZ zorunlu sayıyordu —
+  // backend kapatmaya izin verse bile UI "Çöz" yolunu tamamen kapatıyordu.
+  // Artık closureTax (yukarıda taxonomy fetch) ile aynı "tanımlı tip" seti
+  // kullanılır: closureTax[key].length > 0 ⇔ backend'in definedTypes.has(key).
+  // closureTaxLoading sırasında (kısa geçiş penceresi) eski konservatif
+  // davranış korunur — kbEnabled===null ile aynı "güvenli taraf" deseni.
+  // Fetch başarısız olup closureTax null'da kalırsa (loading bitmiş) HİÇBİR
+  // alan zorunlu sayılmaz — backend'in "sorgu başarısız → zorunluluk
+  // UYGULANMAZ" fail-safe'iyle hizalı.
   const OPENING_TAG_FIELDS = ['platform', 'businessProcess', 'operationType', 'affectedObject', 'impact'] as const;
   const smartTicketOpening = (
     item.customFields as { smartTicket?: Record<string, unknown> } | undefined
   )?.smartTicket;
+  const definedOpeningTagKeys = new Set(
+    OPENING_TAG_FIELDS.filter((key) => (closureTax?.[key]?.length ?? 0) > 0),
+  );
   const openingTagsMissing =
     item.companyId === 'COMP-UNIVERA' &&
     kbEnabled !== false &&
     user?.role !== 'SystemAdmin' &&
-    OPENING_TAG_FIELDS.some((key) => !smartTicketOpening?.[key]);
+    (closureTaxLoading
+      ? OPENING_TAG_FIELDS.some((key) => !smartTicketOpening?.[key])
+      : [...definedOpeningTagKeys].some((key) => !smartTicketOpening?.[key]));
 
   function isCardDisabled(target: CaseStatus): boolean {
     if (target === item.status) return true;
