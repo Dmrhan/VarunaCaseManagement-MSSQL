@@ -83,9 +83,19 @@ function normalizeRecipients(list) {
 function extractInlineCidsFromHtml(html) {
   const set = new Set();
   if (typeof html !== 'string' || !html) return set;
+  // R2 review fix — sanitize edilmiş HTML attribute'ları entity-escape'lidir
+  // (& → &amp;). Ham Content-ID ile eşleşme (CaseEmailAttachment.contentId
+  // lookup + giden MIME Content-ID header'ı) için decode ŞART; aksi halde
+  // '&' içeren cid'li alıntı görseli re-attach edilemez (not_found) ve
+  // composer inline'ında yanlış Content-ID header'ı üretilirdi.
+  // Sıra: spesifik entity'ler önce, &amp; EN SON (çift-decode önlenir).
+  const decodeEntities = (s) => s
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
   const re = /<img[^>]+src=["']cid:([^"']+)["']/gi;
   for (let m; (m = re.exec(html)); ) {
-    const cid = m[1]?.trim();
+    const cid = decodeEntities(m[1] ?? '').trim();
     if (cid) set.add(cid);
   }
   return set;
@@ -177,38 +187,115 @@ async function loadQuotedInlineAttachments(caseId, bodyCids, coveredCanon) {
   const canon = (s) => (s ?? '').trim().replace(/^<|>$/g, '').toLowerCase();
   const covered = coveredCanon instanceof Set ? coveredCanon : new Set();
   const needed = [...bodyCids].filter((c) => c && !covered.has(canon(c)));
-  if (!needed.length) return [];
+  // Snapshot compiler (Evidence Preservation, 2026-07-09) — dönüş şekli:
+  //   items:   nodemailer attachment[] (SMTP'ye inline eklenecekler)
+  //   rows:    outbound CaseEmailAttachment persist meta'sı (send başarılı
+  //            olunca yazılır → giden mail KENDİ görsel kaydını taşır;
+  //            Varuna'da açılınca thread-fallback'e muhtaç kalmaz)
+  //   skipped: çözülemeyen cid'ler + neden (sessiz kayıp YOK — log + caller
+  //            result meta'sı; UI görünürlüğü ayrı iş)
+  if (!needed.length) return { items: [], rows: [], skipped: [] };
   // Vakanın TÜM email eklerinden contentId → satır (case-scope guard: yalnız
   // bu vakanın maillerine ait ekler). Cross-case sızıntı yok.
   const rows = await prisma.caseEmailAttachment.findMany({
     where: { email: { caseId } },
-    select: { contentId: true, storageKey: true, fileName: true, mimeType: true },
+    select: { contentId: true, storageKey: true, fileName: true, mimeType: true, fileSize: true },
   });
+  // Codex #484 P2 — BELİRSİZLİK: aynı kanonik contentId (ör. ortak imza/logo
+  // cid'i) vakada FARKLI dosyalara işaret ediyorsa, gövdedeki cid hangi
+  // mesaja aitti bilinemez → re-attach ETME (yanlış görsel göndermektense
+  // göndermemek daha güvenli; reader thread-cid path'iyle tutarlı). storageKey
+  // farkı = farklı dosya.
   const byCanon = new Map();
+  const ambiguous = new Set();
   for (const r of rows) {
     if (!r.contentId || !r.storageKey) continue;
     const k = canon(r.contentId);
-    if (k && !byCanon.has(k)) byCanon.set(k, r);
+    if (!k) continue;
+    const existing = byCanon.get(k);
+    if (existing) {
+      if (existing.storageKey !== r.storageKey) ambiguous.add(k);
+    } else {
+      byCanon.set(k, r);
+    }
   }
+  for (const k of ambiguous) byCanon.delete(k);
   const seen = new Set();
   const items = [];
+  const persistRows = [];
+  const skipped = [];
   for (const cid of needed) {
     const k = canon(cid);
     if (seen.has(k)) continue; // dedup — aynı görsel bir kez
+    if (ambiguous.has(k)) {
+      seen.add(k);
+      skipped.push({ cid: k, reason: 'ambiguous_cid' });
+      continue;
+    }
     const row = byCanon.get(k);
-    if (!row) continue; // vakada eşleşen ek yok → gövdede placeholder kalır
+    if (!row) {
+      // vakada eşleşen ek yok → gövdede placeholder kalır (kaynakta bozuk
+      // cid sınıfı: Outlook local-path / göndericinin hiç eklemediği görsel)
+      seen.add(k);
+      skipped.push({ cid: k, reason: 'not_found_in_case' });
+      continue;
+    }
     const st = await statObject(row.storageKey);
-    if (!st) continue; // dosya diskte yok → atla (send yine gider)
+    if (!st) {
+      // dosya diskte yok → atla (send yine gider)
+      seen.add(k);
+      skipped.push({ cid: k, reason: 'file_missing_on_storage' });
+      continue;
+    }
     seen.add(k);
+    const bareCid = String(cid).replace(/^<|>$/g, '');
     items.push({
       filename: row.fileName,
       content: createObjectStream(row.storageKey),
       contentType: row.mimeType,
       // Content-ID gövdedeki referansla birebir eşleşsin (bracket-sız).
-      cid: String(cid).replace(/^<|>$/g, ''),
+      cid: bareCid,
+    });
+    // Persist meta — DOSYA KOPYALANMAZ; aynı storageKey'e ikinci
+    // CaseEmailAttachment referansı (disk maliyeti sıfır).
+    persistRows.push({
+      contentId: bareCid,
+      storageKey: row.storageKey,
+      fileName: row.fileName,
+      mimeType: row.mimeType,
+      fileSize: row.fileSize ?? st.size ?? 0,
     });
   }
-  return items;
+  if (skipped.length) {
+    console.warn('[sender] quoted inline cid resolve edilemedi', { caseId, skipped });
+  }
+  return { items, rows: persistRows, skipped };
+}
+
+/**
+ * Composer taslak hydration'ı (2026-07-09) — alıntılanan mailin gövdesindeki
+ * cid görsellerini, o mailin KENDİ CaseEmailAttachment kayıtlarıyla eşler.
+ * FE bu referanslarla görselleri indirim-URL'inden blob'a çekip taslakta
+ * gösterir (tarayıcı cid: çözemez), gönderirken blob→cid geri çevrilir.
+ * Yalnız kaynak mailin kendi ekleri (message-scoped) — thread taraması yok.
+ */
+async function listQuotedInlineRefs(sourceEmailId, bodyHtml) {
+  if (!sourceEmailId || !bodyHtml) return [];
+  const canon = (s) => (s ?? '').trim().replace(/^<|>$/g, '').toLowerCase();
+  const cids = extractInlineCidsFromHtml(bodyHtml);
+  if (!cids.size) return [];
+  const rows = await prisma.caseEmailAttachment.findMany({
+    where: { emailId: sourceEmailId, contentId: { not: null } },
+    select: { id: true, contentId: true },
+  });
+  const byCanon = new Map(rows.map((r) => [canon(r.contentId), r.id]));
+  const refs = [];
+  for (const cid of cids) {
+    const attachmentId = byCanon.get(canon(cid));
+    // cid değeri GÖVDEDEKİ biçim (FE string-replace birebir eşleşsin diye).
+    if (attachmentId) refs.push({ cid, emailId: sourceEmailId, attachmentId });
+  }
+  return refs;
 }
 
 /**
@@ -368,8 +455,8 @@ async function sendCaseEmail(params, opts = {}) {
       .map((i) => String(i.cid).trim().replace(/^<|>$/g, '').toLowerCase()),
   );
   const quotedInline = await loadQuotedInlineAttachments(caseId, inlineCids, coveredCanon);
-  const outboundAttachments = quotedInline.length
-    ? [...att.items, ...quotedInline]
+  const outboundAttachments = quotedInline.items.length
+    ? [...att.items, ...quotedInline.items]
     : att.items;
 
   // ─── 7. mailProvider.sendMail ───
@@ -450,7 +537,7 @@ async function sendCaseEmail(params, opts = {}) {
             mimeType: r.mimeType,
             fileSize: r.fileSize,
             // Inline (Ctrl+V paste) → contentId = attachmentId (FE cid ile
-            // simetrik). Outbound thread render'ı (MailMessageCard
+            // simetrik). Outbound thread render'ı (MailThreadReader
             // processBodyHtml) contentId → attachmentId lookup ile gövde
             // içindeki <img src="cid:xxx">'i signed URL'e çeviriyor.
             contentId: isInline ? r.id : null,
@@ -464,11 +551,43 @@ async function sendCaseEmail(params, opts = {}) {
     }
   }
 
+  // Snapshot compiler (Evidence Preservation, 2026-07-09) — alıntıdan
+  // re-attach edilen görseller outbound CaseEmail'in KENDİ ek kayıtları
+  // olarak da yazılır (aynı storageKey referansı; dosya kopyası YOK).
+  // Böylece giden mail Varuna'da açıldığında kendi kaydından çözülür,
+  // thread-fallback'e (legacy kurtarma katmanı) muhtaç kalmaz.
+  // Invariant: bodyHtml'de cid:X varsa AYNI mailin altında X kaydı vardır.
+  if (emailRecord?.id && quotedInline.rows.length) {
+    try {
+      await prisma.caseEmailAttachment.createMany({
+        data: quotedInline.rows.map((r) => ({
+          emailId: emailRecord.id,
+          storageKey: r.storageKey,
+          fileName: r.fileName,
+          mimeType: r.mimeType,
+          fileSize: r.fileSize,
+          contentId: r.contentId,
+          isInline: true,
+        })),
+      });
+    } catch (err) {
+      console.warn('[sender] quoted inline snapshot persistence failed',
+        err?.message ?? err);
+    }
+  }
+
   return {
     ok: true,
     emailId: emailRecord?.id ?? null,
     messageId: newMessageId,
     previewUrl: send.previewUrl ?? null,
+    // Snapshot meta — alıntı görsellerinin akıbeti (UI/log görünürlüğü).
+    // attached: SMTP'ye eklenen + persist edilen; skipped: çözülemeyenler
+    // (neden ile). Additive alan — mevcut tüketiciler etkilenmez.
+    quotedInline: {
+      attached: quotedInline.rows.length,
+      skipped: quotedInline.skipped,
+    },
     rawSource: RAW_SOURCE,
   };
 }
@@ -510,6 +629,8 @@ async function buildReplyContext(caseId, { emailId } = {}) {
   // KALDIRILDI — outbound satıra doğrudan yanıt kullanıcı niyeti.
   let refRow = null;
   const REPLY_FIELDS = {
+    // id: quotedInlineRefs (taslak hydration) kaynak-mail eşlemesi için.
+    id: true,
     fromAddress: true, fromName: true, toAddresses: true, ccAddresses: true,
     subject: true, messageId: true, direction: true,
     // Alıntı gövdesi için (2026-07-08 — Yanıtla'da geçmiş yazışma korunur;
@@ -582,6 +703,7 @@ async function buildReplyContext(caseId, { emailId } = {}) {
   let subject = '';
   let inReplyTo = null;
   let quotedBodyHtml = '';
+  let quotedInlineRefs = [];
   // Reply From önerisi (2026-07-08) — Multi-inbox: cevap, mailin İLGİLİ
   // OLDUĞU paylaşımlı kutudan çıkmalı (uzmandestek@'e gelen maile yanıt
   // From=uzmandestek@), bireysel ajanın/global default'un adresi DEĞİL.
@@ -633,13 +755,21 @@ async function buildReplyContext(caseId, { emailId } = {}) {
     const attribution = ts
       ? `${new Date(ts).toLocaleString('tr-TR')} tarihinde ${who} şunu yazdı:`
       : `${who} şunu yazdı:`;
+    // Kullanıcı direktifi (2026-07-09) — Gmail tarzı FLU GRİ AYIRICI:
+    // eski mail nerede bitti / yenisi nereden başladı net görünsün.
+    // R2 saha bulgusu: stilli <div> ayırıcı TipTap composer'ında DÜŞÜYOR
+    // (şema tanımıyor) → <hr> kullan: TipTap horizontalRule ✓, sanitizer
+    // allowlist ✓, mail istemcileri + reader prose ince çizgi render eder.
+    // Her iç içe alıntı seviyesi kendi <hr>'ını taşır → seviye sınırları net.
     quotedBodyHtml = [
-      '<br><br>',
-      `<div>${escapeHtml(attribution)}</div>`,
+      '<hr>',
+      `<div style="color:#8a8a8a;font-size:12px;margin:0 0 6px">${escapeHtml(attribution)}</div>`,
       '<blockquote style="margin:0 0 0 8px;padding-left:12px;border-left:2px solid #ccc;color:#555">',
       refRow.bodyHtml ?? '',
       '</blockquote>',
     ].join('');
+    // Composer taslak hydration'ı — alıntı görselleri taslakta görünsün.
+    quotedInlineRefs = await listQuotedInlineRefs(refRow.id, refRow.bodyHtml);
   }
 
   return {
@@ -650,6 +780,7 @@ async function buildReplyContext(caseId, { emailId } = {}) {
     subject,
     inReplyTo,
     quotedBodyHtml,
+    quotedInlineRefs,
     suggestedFromAddress,
   };
 }
@@ -720,14 +851,21 @@ async function buildForwardContext(caseId, emailId, { companyId } = {}) {
     `Kime: ${joinAddresses(parse(ref.toAddresses))}`,
     parse(ref.ccAddresses).length ? `Cc: ${joinAddresses(parse(ref.ccAddresses))}` : null,
   ].filter(Boolean);
+  // 2026-07-09 — <hr> ayırıcı: stilli div'in border-top'u TipTap'te düşer;
+  // hr editörde/mailde/reader'da görünür (reply quote ile aynı desen).
   const quotedBodyHtml = [
-    '<br><br>',
-    '<div style="border-top:1px solid #ccc;margin-top:12px;padding-top:8px">',
+    '<hr>',
+    '<div>',
     headerLines.map((l) => `<div>${escapeHtml(l)}</div>`).join(''),
     '<br>',
     ref.bodyHtml ?? '',
     '</div>',
   ].join('');
+
+  // Composer taslak hydration'ı (2026-07-09): alıntı gövdesindeki cid
+  // görsellerinin kaynak ek referansları — FE bunları blob URL'e çevirip
+  // taslakta GÖSTERİR, gönderirken cid'e geri çevirir.
+  const quotedInlineRefs = await listQuotedInlineRefs(emailId, ref.bodyHtml);
 
   return {
     caseNumber: caseRow.caseNumber,
@@ -736,6 +874,7 @@ async function buildForwardContext(caseId, emailId, { companyId } = {}) {
     bcc: [],
     subject,
     quotedBodyHtml,
+    quotedInlineRefs,
     inReplyTo: null,
   };
 }
@@ -761,4 +900,8 @@ export const _internal = {
   normalizeRecipients,
   findThreadParentMessageId,
   loadAttachmentsForCase,
+  // Snapshot compiler smoke'u (scripts/smoke-mail-snapshot.js) fonksiyon
+  // seviyesinde test eder — read-only (DB select + statObject).
+  loadQuotedInlineAttachments,
+  extractInlineCidsFromHtml,
 };

@@ -113,7 +113,7 @@ function escapeHtml(s: string): string {
 /** Thread-seviye cid indeksi — cid → sahibi mailin id'si + ek id'si. Reader
  *  kendi ekinde cid'i bulamazsa (yanıt/ilet alıntısı orijinalin cid'ini taşır
  *  ama görseli bu maile eklenmez) aynı vakadaki diğer mailin ekiyle çözer. */
-type ThreadCidIndex = Map<string, { emailId: string; attachmentId: string; fileName: string }>;
+type ThreadCidIndex = Map<string, { emailId: string; attachmentId: string; fileName: string; fileKey: string | null }>;
 
 async function processBodyHtml(
   email: CaseEmailItem,
@@ -182,7 +182,7 @@ async function processBodyHtml(
           } else {
             const ph = doc.createElement('span');
             ph.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500');
-            ph.textContent = `🖼 ${escapeHtml(m.fileName)}`;
+            ph.textContent = `🖼 ${escapeHtml(m.fileName)} — dosya sunucuda bulunamadı`;
             img.replaceWith(ph);
           }
         })());
@@ -204,7 +204,16 @@ async function processBodyHtml(
     const stripped = cid.replace(/^<|>$/g, '');
     const found = cidMap.get(cid) ?? cidMap.get(stripped) ?? cidMap.get(stripped.toLowerCase());
     if (!found) {
-      // Thread-seviye fallback: görsel kendi ekinde yok ama aynı vakadaki
+      // R2 review fix — ÇÖZÜM SIRASI kritik:
+      //   1) thread-fallback (otoriter: cid'in GERÇEK sahibi başka mailde)
+      //   2) legacy tek-aday (yalnız thread'de YOKSA + yol-benzeri DEĞİLSE)
+      //   3) sebepli placeholder
+      // Legacy fallback öne alınırsa taze kayıtlarda (Apple Mail'in cid'siz
+      // inline eki: isInline=true + contentId=null) alıntıdaki cid YANLIŞ
+      // eke bağlanır ve thread'deki doğru çözüm hiç denenmez. Yol-benzeri
+      // cid (c:/users/... — görsel bize HİÇ ulaşmadı) hiçbir eke bağlanamaz.
+      const looksLikePath = /[\\/]/.test(stripped) || /^[a-z]:/i.test(stripped);
+      // 1) Thread-seviye fallback: görsel kendi ekinde yok ama aynı vakadaki
       // BAŞKA mailin ekinde olabilir (yanıt/ilet alıntısı orijinalin cid'ini
       // taşır). Sahibi mailin id'siyle indir — download endpoint emailId↔
       // attachmentId sahipliğini doğrular, caseId guard aynı.
@@ -221,15 +230,55 @@ async function processBodyHtml(
           } else {
             const ph = doc.createElement('span');
             ph.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500');
-            ph.textContent = `🖼 ${escapeHtml(tm.fileName)}`;
+            ph.textContent = `🖼 ${escapeHtml(tm.fileName)} — dosya sunucuda bulunamadı`;
             img.replaceWith(ph);
           }
         })());
         continue;
       }
+      // 2) Legacy kurtarma (MailMessageCard'dan port — eski-kayıt paritesi):
+      // parser-fix ÖNCESİ kayıtlarda gövdede cid:X var ama ek contentId=null
+      // yazılmış (UNV-1000089 sınıfı) → cidMap VE thread indeksi boş. TEK
+      // inline aday + contentId==null ise güvenle o eke bağla (uniquely
+      // attributable); consumed filtresi duplicate render'ı önler. Yol-benzeri
+      // cid'de DEVRE DIŞI (o görsel hiç gelmedi — logoya bağlamak yanlış atıf).
+      const candidates = email.attachments.filter(
+        (x) => x.isInline && !consumed.has(x.id),
+      );
+      const canUseLegacyFallback = !looksLikePath
+        && candidates.length === 1 && candidates[0].contentId == null;
+      const fallback = canUseLegacyFallback ? candidates[0] : null;
+      if (fallback) {
+        consumed.add(fallback.id);
+        jobs.push((async () => {
+          const out = await caseEmailService.getAttachmentDownload(caseId, email.id, fallback.id);
+          if (out?.url) {
+            img.setAttribute('src', out.url);
+            if (!img.getAttribute('alt')) img.setAttribute('alt', fallback.fileName);
+          } else {
+            const ph = doc.createElement('span');
+            ph.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500');
+            ph.textContent = `🖼 ${escapeHtml(fallback.fileName)} — dosya sunucuda bulunamadı`;
+            img.replaceWith(ph);
+          }
+        })());
+        continue;
+      }
+      // 3) Evidence Preservation PR-3 — sebepli placeholder. Bu noktaya gelen
+      // cid ne mailin kendi ekinde ne thread'de var. İki sınıf:
+      //   a) Yol-benzeri cid (`c:/users/...` Outlook local-path imzası) →
+      //      görsel bize HİÇ ulaşmadı, gönderici tarafında kaldı — kesin.
+      //   b) Diğerleri → ekte gelmemiş OLABİLİR ya da intake reddetmiş
+      //      olabilir (25MB/tür/limit — skip aktivitede kayıtlı). Sebep
+      //      bilinemediğinden SUÇLAMA YOK; agent'ı vaka aktivitesindeki
+      //      kayda yönlendir (adversarial review fix: yanlış "göndericide
+      //      kaldı" beyanı müşteriye hatalı geri dönüşe yol açıyordu).
       const ph = doc.createElement('span');
       ph.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700');
-      ph.textContent = `🖼 ${img.getAttribute('alt') || 'görsel'} (cid eşleşmedi)`;
+      ph.setAttribute('title', `cid:${stripped}`);
+      ph.textContent = looksLikePath
+        ? `🖼 ${img.getAttribute('alt') || 'görsel'} — ekte gelmedi (gönderici tarafında kaldı)`
+        : `🖼 ${img.getAttribute('alt') || 'görsel'} — görsel alınamadı (neden için vaka aktivitesine bakın · Dosya filtresi)`;
       img.replaceWith(ph);
       continue;
     }
@@ -243,7 +292,7 @@ async function processBodyHtml(
       } else {
         const ph = doc.createElement('span');
         ph.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500');
-        ph.textContent = `🖼 ${escapeHtml(m.fileName)}`;
+        ph.textContent = `🖼 ${escapeHtml(m.fileName)} — dosya sunucuda bulunamadı`;
         img.replaceWith(ph);
       }
     })());
@@ -480,7 +529,11 @@ export function MailThreadReader({
       {/* Body — 2026-07-04 PR-2 R6 cilası: max-w-[760px] mx-auto padding.
           R15 M2 — mode='inline' iken doğal yükseklik (overflow-visible, sayfa
           akışı). Fullscreen'de flex-1 overflow-auto (kendi iç scroll'u). */}
-      <div className={mode === 'fullscreen' ? 'flex-1 overflow-auto p-6' : 'p-4'}>
+      {/* 2026-07-09 — inline modda da min-h-0/flex-1/overflow: parent
+          (CommunicationTab) composer açıkken reader'ı kompakt yüksekliğe
+          kısıtlar → gövde İÇERİDE kayar, composer yukarıda başlar (alan
+          israfı biter). Kısıtsız (composer kapalı) durumda etkisiz. */}
+      <div className={mode === 'fullscreen' ? 'flex-1 overflow-auto p-6' : 'min-h-0 flex-1 overflow-y-auto p-4'}>
         <div className="mx-auto max-w-[760px]">
           {rewriting && (
             <div className="text-xs text-slate-400">Görseller çözülüyor…</div>
@@ -495,37 +548,69 @@ export function MailThreadReader({
             <p className="text-sm text-slate-500 italic">(içerik yok)</p>
           )}
 
-          {/* Ek chip'leri — HoverPreview + Lightbox */}
-          {email.attachments.length > 0 && (
-            <div className="mt-4 flex flex-wrap gap-1.5 border-t border-slate-100 pt-3 dark:border-ndark-border">
-              {email.attachments.map((a) => {
-                const isImage = (a.mimeType ?? '').toLowerCase().startsWith('image/');
-                return (
-                  <HoverPreview<LightboxItem & { uploadedBy?: string | null; uploadedAt?: string | null }>
-                    key={a.id}
-                    item={{
-                      id: a.id,
-                      fileName: a.fileName,
-                      fileSize: a.fileSize,
-                      mimeType: a.mimeType,
-                    }}
-                    getPreviewUrl={getAttachmentPreviewUrlHover}
+          {/* Ek chip'leri — HoverPreview + Lightbox.
+              Evidence Preservation PR-3: GERÇEK EK ≠ GÖVDE-İÇİ GÖRSEL ayrımı.
+              Gerçek ekler (dosya olarak gönderilenler) önde/belirgin; gövde
+              içine gömülü görseller (imza logosu, yapıştırılan screenshot)
+              ayrı soluk grupta — agent hangisinin "dosya eki" olduğunu
+              karıştırmaz. İkisi de önizlenebilir (kanıt erişimi aynı). */}
+          {email.attachments.length > 0 && (() => {
+            // Adversarial review fix — "gövde-içi" = isInline && contentId.
+            // Apple Mail gibi istemciler GERÇEK ekleri (PDF dahil) disposition:
+            // inline gönderir → isInline=true ama cid'siz; bunlar gerçek ektir,
+            // soluk gruba düşmemeli. cid'li olanlar gövdede gömülü görsellerdir.
+            const isBodyInline = (a: (typeof email.attachments)[number]) =>
+              a.isInline && !!a.contentId;
+            const realAtts = email.attachments.filter((a) => !isBodyInline(a));
+            const inlineAtts = email.attachments.filter(isBodyInline);
+            const renderChip = (a: (typeof email.attachments)[number], faded: boolean) => {
+              const isImage = (a.mimeType ?? '').toLowerCase().startsWith('image/');
+              return (
+                <HoverPreview<LightboxItem & { uploadedBy?: string | null; uploadedAt?: string | null }>
+                  key={a.id}
+                  item={{
+                    id: a.id,
+                    fileName: a.fileName,
+                    fileSize: a.fileSize,
+                    mimeType: a.mimeType,
+                  }}
+                  getPreviewUrl={getAttachmentPreviewUrlHover}
+                >
+                  <button
+                    type="button"
+                    onClick={() => openAttachment(a.id, isImage)}
+                    className={`inline-flex min-h-[36px] items-center gap-1 rounded-full px-2 py-1 text-xs ${
+                      faded
+                        ? 'bg-slate-50 text-slate-500 hover:bg-slate-100 dark:bg-ndark-card dark:text-ndark-muted'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-ndark-bg dark:text-ndark-text'
+                    }`}
+                    title={isImage ? 'Önizle' : 'İndir'}
                   >
-                    <button
-                      type="button"
-                      onClick={() => openAttachment(a.id, isImage)}
-                      className="inline-flex min-h-[36px] items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700 hover:bg-slate-200 dark:bg-ndark-bg dark:text-ndark-text"
-                      title={isImage ? 'Önizle' : 'İndir'}
-                    >
-                      <Paperclip size={11} />
-                      <span className="max-w-[220px] truncate">{a.fileName}</span>
-                      <span className={`${MAIL_TYPE.t1} opacity-60`}>{formatBytes(a.fileSize)}</span>
-                    </button>
-                  </HoverPreview>
-                );
-              })}
-            </div>
-          )}
+                    <Paperclip size={11} />
+                    <span className="max-w-[220px] truncate">{a.fileName}</span>
+                    <span className={`${MAIL_TYPE.t1} opacity-60`}>{formatBytes(a.fileSize)}</span>
+                  </button>
+                </HoverPreview>
+              );
+            };
+            return (
+              <div className="mt-4 border-t border-slate-100 pt-3 dark:border-ndark-border">
+                {realAtts.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {realAtts.map((a) => renderChip(a, false))}
+                  </div>
+                )}
+                {inlineAtts.length > 0 && (
+                  <div className={`flex flex-wrap items-center gap-1.5 ${realAtts.length > 0 ? 'mt-2' : ''}`}>
+                    <span className={`${MAIL_TYPE.t1} text-slate-400 dark:text-ndark-muted`}>
+                      gövde içi görseller:
+                    </span>
+                    {inlineAtts.map((a) => renderChip(a, true))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
 

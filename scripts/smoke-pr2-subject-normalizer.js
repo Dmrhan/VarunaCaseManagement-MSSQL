@@ -11,7 +11,7 @@
  *  - 4 render yerinde kullanılır (title/CasesList/MailMessageCard/İletişim listesi)
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 let pass = 0;
 let fail = 0;
@@ -208,8 +208,10 @@ expectTrue('5.2 CaseTitleEditable — showTooltip yalnız normalize edilmişse',
   /isSubjectNormalized\(item\.title\)/.test(read('src/features/cases/components/CaseTitleEditable.tsx')));
 expectTrue('5.3 CasesListPage — normalize + tooltip',
   /normalizeSubject\(c\.title\)/.test(read('src/features/cases/CasesListPage.tsx')));
-expectTrue('5.4 MailMessageCard — normalize subject',
-  /normalizeSubject\(email\.subject\)/.test(read('src/features/cases/components/MailMessageCard.tsx')));
+// Evidence Preservation (2026-07-09): MailMessageCard silindi (ölü zincir);
+// subject render yerleri artık 3: title/ListPane/Reader (5.5 + 5.6 kapsıyor).
+expectTrue('5.4 MailMessageCard silindi — subject render MailThreadReader/ListPane üzerinde',
+  !existsSync('src/features/cases/components/MailMessageCard.tsx'));
 expectTrue('5.5 MailThreadListPane — normalize subject stripCaseToken=true (R9 vaka-içi mod)',
   /normalizeSubject\(e\.subject,\s*\{\s*stripCaseToken:\s*true\s*\}\)/.test(read('src/features/cases/components/MailThreadListPane.tsx')));
 // Reader'da da mail konusu normalize
