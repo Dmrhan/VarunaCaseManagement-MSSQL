@@ -47,6 +47,39 @@ function escapeHtml(s) {
     .replace(/'/g, '&#39;');
 }
 
+/**
+ * HTML gövdeyi kabaca düz-metne çevirir (2026-07-09). HTML şablonlu
+ * bildirimlerde `text` fallback'i için (mail istemcisi HTML render edemezse)
+ * ve önizleme üretiminde kullanılır. Tam HTML parse değil — pratik strip.
+ */
+function stripHtmlToText(html) {
+  return String(html ?? '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|tr|h[1-6]|table|li)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * Müşterinin son mesajından kısa önizleme (customer_replied şablonundaki
+ * "müşteri ne yazdı" kutusu için). bodyText varsa onu, yoksa HTML-strip'i
+ * kullanır; whitespace sadeleştirir + maxLen'de keser. Alıntı geçmişi
+ * genelde altta olduğundan ilk maxLen karakter = yeni mesaj (yaklaşık).
+ */
+function buildMessagePreview(bodyText, bodyHtml, maxLen = 220) {
+  let s = (typeof bodyText === 'string' && bodyText.trim())
+    ? bodyText
+    : stripHtmlToText(bodyHtml);
+  s = String(s ?? '').replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+  return s.length > maxLen ? `${s.slice(0, maxLen).trim()}…` : s;
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Errors
 // ─────────────────────────────────────────────────────────────────
@@ -143,6 +176,9 @@ const ALLOWED_VARIABLE_PATHS = [
   // "vakayı aç" bağlantısı taşısın). APP_PUBLIC_BASE_URL env'i tanımlı
   // değilse boş render edilir — şablonlar buna göre kurgulanmalı.
   'case.url',
+  // 2026-07-09 — HTML bildirim şablonu: logo URL'i + müşteri son mesaj önizlemesi.
+  'app.logoUrl',
+  'case.lastCustomerMessage',
 ];
 
 // ─────────────────────────────────────────────────────────────────
@@ -288,7 +324,7 @@ export function renderTemplate(text, vars, opts = {}) {
  * optional — null for events that don't carry one (e.g. case_closed
  * without a policy).
  */
-export function buildTemplateVars({ caseRow, approval, event }) {
+export function buildTemplateVars({ caseRow, approval, event, lastCustomerMessage = '' }) {
   // M4.1 follow-up — Türkçe enum etiketleri.
   // Case.status / Case.priority DB'de ASCII identifier saklanır
   // (Acik, ThirdPartyWaiting, Medium, High vb.). Müşteri-yüzlü mailde
@@ -347,6 +383,15 @@ export function buildTemplateVars({ caseRow, approval, event }) {
     'case.url': (process.env.APP_PUBLIC_BASE_URL && caseRow?.id)
       ? `${process.env.APP_PUBLIC_BASE_URL.replace(/\/+$/, '')}/?case=${caseRow.id}`
       : '',
+    // 2026-07-09 — HTML şablon logosu (varuna-logo.png). Base URL yoksa boş
+    // → şablonda <img> alt'ı görünür (zarif düşüş).
+    'app.logoUrl': process.env.APP_PUBLIC_BASE_URL
+      ? `${process.env.APP_PUBLIC_BASE_URL.replace(/\/+$/, '')}/varuna-logo.png`
+      : '',
+    // 2026-07-09 — müşterinin son mesaj önizlemesi (caller emit hesaplar;
+    // customer_replied şablonundaki "ne yazdı" kutusu). HTML formatında
+    // renderTemplate bunu escape eder → müşteri metni HTML enjekte edemez.
+    'case.lastCustomerMessage': lastCustomerMessage ?? '',
   };
 }
 
@@ -1234,11 +1279,28 @@ async function executeOutboundEmailDispatch(dispatch, caseRow) {
     }
   }
 
+  // HTML şablon desteği (2026-07-09) — template.format='html' ise gövde
+  // HTML gönderilir + text fallback (strip). Format dispatch'te tutulmadığı
+  // için templateId üzerinden okunur (tüm çağrı yolları — emit + retry —
+  // için sağlam). Yoksa/plain ise mevcut text-only davranış.
+  let isHtmlBody = false;
+  if (dispatch.templateId) {
+    try {
+      const tpl = await prisma.notificationTemplate.findUnique({
+        where: { id: dispatch.templateId },
+        select: { format: true },
+      });
+      isHtmlBody = tpl?.format === 'html';
+    } catch { /* format okunamazsa text-only */ }
+  }
+
   const result = await mailProviderSendMail(
     {
       to: dispatch.audienceIdentifier,
       subject: finalSubject,
-      text: dispatch.snapshotBody,
+      ...(isHtmlBody
+        ? { html: dispatch.snapshotBody, text: stripHtmlToText(dispatch.snapshotBody) }
+        : { text: dispatch.snapshotBody }),
       headers,
     },
     { companyId: dispatch.companyId },
@@ -1289,9 +1351,11 @@ async function executeOutboundEmailDispatch(dispatch, caseRow) {
         from: { address: fromAddress ?? 'unknown@local', name: null },
         to: [{ address: dispatch.audienceIdentifier, name: null }],
         subject: finalSubject,
-        // Notification dispatch şu an text-only; bodyHtml plain'i wrap eder.
-        bodyHtml: `<pre style="white-space:pre-wrap;font-family:inherit">${escapeHtml(dispatch.snapshotBody ?? '')}</pre>`,
-        bodyText: dispatch.snapshotBody ?? '',
+        // HTML şablon → gövde doğrudan; plain → <pre> wrap (2026-07-09).
+        bodyHtml: isHtmlBody
+          ? (dispatch.snapshotBody ?? '')
+          : `<pre style="white-space:pre-wrap;font-family:inherit">${escapeHtml(dispatch.snapshotBody ?? '')}</pre>`,
+        bodyText: isHtmlBody ? stripHtmlToText(dispatch.snapshotBody) : (dispatch.snapshotBody ?? ''),
         messageId: result.messageId ?? null,
         inReplyTo: headers?.['In-Reply-To'] ?? null,
         refs: headers?.References ?? null,
@@ -1332,6 +1396,20 @@ export async function emitEvent({ event, caseId, approvalContext = null }) {
 
     const matched = rules.filter((r) => r.isMatchAll || ruleMatchesCase(r, caseRow));
     if (matched.length === 0) return [];
+
+    // Müşterinin son mesaj önizlemesi (customer_replied HTML şablonu için).
+    // Bir kez çekilir, tüm kurallarda reuse edilir. Opsiyonel — hata/yoksa boş.
+    let lastCustomerMessage = '';
+    try {
+      const lastInbound = await prisma.caseEmail.findFirst({
+        where: { caseId, direction: 'inbound' },
+        orderBy: [{ receivedAt: 'desc' }, { createdAt: 'desc' }],
+        select: { bodyText: true, bodyHtml: true },
+      });
+      if (lastInbound) {
+        lastCustomerMessage = buildMessagePreview(lastInbound.bodyText, lastInbound.bodyHtml);
+      }
+    } catch { /* önizleme opsiyonel */ }
 
     const created = [];
     for (const rule of matched) {
@@ -1378,9 +1456,12 @@ export async function emitEvent({ event, caseId, approvalContext = null }) {
         // case_closed dışı approval-less event'lerde devre dışı bıraksın
         // (eski resolutionNote case_reopened/created/status_changed
         // template'lerine sızmasın).
-        const vars = buildTemplateVars({ caseRow, approval: approvalContext, event });
+        const vars = buildTemplateVars({ caseRow, approval: approvalContext, event, lastCustomerMessage });
+        // HTML formatında gövde değişkenleri escape edilir (müşteri metni /
+        // isim / e-posta HTML enjekte edemez); konu her zaman düz.
+        const isHtmlTemplate = rule.template.format === 'html';
         const { rendered: snapshotSubject } = renderTemplate(rule.template.subjectTemplate, vars);
-        const { rendered: snapshotBody } = renderTemplate(rule.template.bodyTemplate, vars);
+        const { rendered: snapshotBody } = renderTemplate(rule.template.bodyTemplate, vars, { htmlEscape: isHtmlTemplate });
 
         // Idempotency key (windowBucket = floor(now/min)).
         let idempotencyKey = null;

@@ -44,6 +44,24 @@ ok('3.1 App.tsx ?case=<id> parametresini login sonrası açar + URL temizler',
   && /openCase\(caseId\)/.test(app)
   && /replaceState/.test(app));
 
+console.log('── HTML mail desteği (motor) ──');
+ok('h.1 emit HTML formatında gövde değişkenlerini escape eder',
+  /rule\.template\.format === 'html'/.test(repo)
+  && /htmlEscape: isHtmlTemplate/.test(repo));
+ok('h.2 executor HTML gövde + text fallback gönderir (format templateId\'den)',
+  /isHtmlBody/.test(repo) && /html: dispatch\.snapshotBody, text: stripHtmlToText/.test(repo));
+ok('h.3 app.logoUrl + case.lastCustomerMessage değişkenleri tanımlı',
+  /'app\.logoUrl'/.test(repo) && /'case\.lastCustomerMessage'/.test(repo)
+  && /varuna-logo\.png/.test(repo));
+ok('h.4 emit son müşteri mesajı önizlemesini çeker',
+  /buildMessagePreview\(lastInbound\.bodyText/.test(repo)
+  && /direction: 'inbound'/.test(repo));
+ok('h.5 seed HTML format + logo + mesaj kutusu + upsert',
+  /format: 'html'/.test(read('scripts/seed-customer-replied-notification.mjs'))
+  && /\{\{app\.logoUrl\}\}/.test(read('scripts/seed-customer-replied-notification.mjs'))
+  && /\{\{case\.lastCustomerMessage\}\}/.test(read('scripts/seed-customer-replied-notification.mjs'))
+  && /notificationTemplate\.update/.test(read('scripts/seed-customer-replied-notification.mjs')));
+
 console.log('── Seed ──');
 ok('4.1 seed script mevcut (Active/Email/assignee + burst guard)',
   existsSync('scripts/seed-customer-replied-notification.mjs')
@@ -60,10 +78,13 @@ if (process.env.SMOKE_DB === '1') {
     const companyId = process.env.SMOKE_COMPANY ?? 'COMP-UNIVERA';
     const tpl = await prisma.notificationTemplate.findFirst({
       where: { companyId, key: 'customer_replied_assignee', isActive: true },
-      select: { id: true, subjectTemplate: true },
+      select: { id: true, subjectTemplate: true, format: true, bodyTemplate: true },
     });
-    ok('5.1 şablon seed edilmiş + subject [{{case.number}}] taşır (threading)',
-      !!tpl && /\[\{\{case\.number\}\}\]/.test(tpl.subjectTemplate));
+    ok('5.1 şablon seed edilmiş + HTML format + subject [{{case.number}}] + logo/mesaj',
+      !!tpl && tpl.format === 'html'
+      && /\[\{\{case\.number\}\}\]/.test(tpl.subjectTemplate)
+      && /\{\{app\.logoUrl\}\}/.test(tpl.bodyTemplate)
+      && /\{\{case\.lastCustomerMessage\}\}/.test(tpl.bodyTemplate));
     const rule = await prisma.notificationRule.findFirst({
       where: { companyId, event: 'customer_replied', isActive: true },
       select: { channel: true, mode: true, audience: true },
