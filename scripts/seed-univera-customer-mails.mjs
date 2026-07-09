@@ -172,20 +172,28 @@ for (const t of TEMPLATES) {
     console.log(`✓ Şablon oluşturuldu (HTML): ${t.key} (${tpl.id})`);
   }
 
-  // ── Kural — VARSA templateId'yi doğrula/eşle; YOKSA oluştur (KAPALI) ──
-  let rule = await prisma.notificationRule.findFirst({ where: { companyId, event: t.event } });
+  // ── Kural eşleştirme — KİMLİK: templateId === tpl.id (event DEĞİL) ──
+  // Codex P1: yalnız `event` ile findFirst, aynı event için birden çok kuralı
+  // olan tenant'ta ALAKASIZ bir kuralı seçip (ör. iç/manuel case_closed) yanlış
+  // repoint edebilirdi (--activate-rules olmadan bile) → müşteriye yanlış kopya.
+  // Kuralı şablonumuza bağlı (templateId===tpl.id) kimliğiyle buluyoruz →
+  // yalnız R1/R2/R3 müşteri kuralına dokunulur. Eşleşen kural zaten doğru
+  // şablona bağlı olduğundan REPOINT YOK; başka şablona bağlı event kuralı
+  // ASLA hijack edilmez.
+  let rule = await prisma.notificationRule.findFirst({
+    where: { companyId, event: t.event, templateId: tpl.id },
+  });
   if (rule) {
-    const patch = {};
-    if (rule.templateId !== tpl.id) patch.templateId = tpl.id; // repoint sadece gerekirse
-    if (activateRules && !rule.isActive) patch.isActive = true;
-    if (Object.keys(patch).length) {
-      rule = await prisma.notificationRule.update({ where: { id: rule.id }, data: patch });
+    if (activateRules && !rule.isActive) {
+      rule = await prisma.notificationRule.update({ where: { id: rule.id }, data: { isActive: true } });
+      console.log(`  └ kural "${rule.name}" — ETKİNLEŞTİRİLDİ (isActive=true)`);
+    } else {
+      console.log(`  └ kural "${rule.name}" — isActive=${rule.isActive} (dokunulmadı)`);
     }
-    const acts = [];
-    if ('templateId' in patch) acts.push('şablon eşlendi');
-    if ('isActive' in patch) acts.push('ETKİNLEŞTİRİLDİ');
-    console.log(`  └ kural "${rule.name}" — isActive=${rule.isActive}${acts.length ? ' (' + acts.join(', ') + ')' : ' (dokunulmadı)'}`);
   } else {
+    // Şablonumuza bağlı kural yok → yeni oluştur (KAPALI varsayılan). Var olan
+    // ama BAŞKA şablona bağlı bir event kuralına DOKUNULMAZ (yanlış repoint
+    // önlenir); gerekirse admin doğru şablonu UI'dan bağlar.
     rule = await prisma.notificationRule.create({
       data: {
         companyId, name: t.ruleName,

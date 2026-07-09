@@ -47,9 +47,11 @@ ok('4.1 kurallar default ETKİNLEŞTİRİLMEZ (--activate-rules opt-in)',
   /const activateRules = args\.includes\('--activate-rules'\)/.test(seed)
   && /isActive: activateRules/.test(seed));
 ok('4.2 mevcut kuralın isActive\'ine flag olmadan dokunulmaz',
-  /if \(activateRules && !rule\.isActive\) patch\.isActive = true/.test(seed));
-ok('4.3 repoint sadece gerekliyse (templateId farklıysa)',
-  /if \(rule\.templateId !== tpl\.id\) patch\.templateId = tpl\.id/.test(seed));
+  /if \(activateRules && !rule\.isActive\)/.test(seed)
+  && /data: \{ isActive: true \}/.test(seed));
+ok('4.3 (Codex P1) kural KİMLİĞİ şablona bağlı — event+templateId ile eşleşir (yanlış repoint yok)',
+  /findFirst\(\{\s*where: \{ companyId, event: t\.event, templateId: tpl\.id \}/.test(seed)
+  && !/patch\.templateId = tpl\.id/.test(seed));
 
 console.log('── Motor: HTML executor dikişi (müşteri-yüzü) hâlâ yerinde ──');
 ok('5.1 emit format=html → değişkenleri escape eder',
