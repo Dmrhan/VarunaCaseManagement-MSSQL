@@ -642,10 +642,14 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
       {composerOpen && (
         <div
           className={
+            // UX fix (2026-07-09) — overlay/dock'ta overflow-auto KALDIRILDI:
+            // kaydırma composer İÇİNE taşındı (alanlar+editör kayar), aksiyon
+            // barı (Büyüt/Vazgeç/Önizleme/Gönder) hep görünür (footer freeze).
+            // Overlay'de composer inset-0'ı doldurur → bar gerçek sayfa dibinde.
             composerLayout === 'overlay'
-              ? 'fixed inset-0 z-50 flex flex-col overflow-auto bg-white dark:bg-ndark-bg'
+              ? 'fixed inset-0 z-50 flex flex-col overflow-hidden bg-white dark:bg-ndark-bg'
               : readerMode === 'fullscreen'
-                ? 'fixed bottom-0 right-0 z-50 max-h-[55%] overflow-auto border-t border-l border-slate-200 bg-white shadow-2xl dark:border-ndark-border dark:bg-ndark-bg'
+                ? 'fixed bottom-0 right-0 z-50 flex max-h-[55%] flex-col overflow-hidden border-t border-l border-slate-200 bg-white shadow-2xl dark:border-ndark-border dark:bg-ndark-bg'
                 : 'mt-3 rounded-lg ring-1 ring-slate-200 dark:ring-ndark-border'
           }
           style={
