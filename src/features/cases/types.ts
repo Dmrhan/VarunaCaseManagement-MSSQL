@@ -247,6 +247,7 @@ export type CaseHistoryActionType =
   | 'NoteAdded'        // Not eklendi
   | 'CallLogAdded'     // Çağrı kaydı eklendi
   | 'FileUploaded'     // Dosya yüklendi
+  | 'FileUploadSkipped' // E-posta eki alınamadı (boyut/tür/limit — Evidence Preservation)
   | 'FileRemoved'      // Dosya silindi
   | 'CaseCreated'      // Vaka oluşturuldu
   | 'SLAApplied';      // SLA kuralı/fallback uygulandı

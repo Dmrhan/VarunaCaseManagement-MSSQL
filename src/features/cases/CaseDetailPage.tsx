@@ -4938,7 +4938,9 @@ const ACTIVITY_FILTERS: FilterDef[] = [
     match: (h) =>
       h.actionType === 'Transfer' ||
       (h.actionType === 'FieldUpdate' && ASSIGNMENT_FIELDS.has(h.fieldName ?? '')) },
-  { key: 'files',     label: 'Dosya',   types: ['FileUploaded', 'FileRemoved'],
+  // Evidence Preservation (2026-07-09) — FileUploadSkipped: e-posta ekinin
+  // NEDEN alınamadığı kaydı; "ek nerede?" arayan agent Dosya filtresinde görür.
+  { key: 'files',     label: 'Dosya',   types: ['FileUploaded', 'FileUploadSkipped', 'FileRemoved'],
     active:   'bg-blue-600 text-white shadow-sm',
     inactive: 'bg-blue-50 text-blue-700 hover:bg-blue-100',
     dot:      'bg-blue-500' },

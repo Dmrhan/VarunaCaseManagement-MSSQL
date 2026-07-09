@@ -98,12 +98,27 @@ if (process.env.SMOKE_DB === '1') {
       if (!attCache.has(e.caseId)) {
         attCache.set(e.caseId, await prisma.caseEmailAttachment.findMany({
           where: { email: { caseId: e.caseId } },
-          select: { contentId: true, emailId: true },
+          select: { contentId: true, emailId: true, storageKey: true },
         }));
       }
       const caseAtts = attCache.get(e.caseId);
       const own = new Set(caseAtts.filter((a) => a.emailId === e.id).map((a) => canon(a.contentId)));
       const thread = new Set(caseAtts.map((a) => canon(a.contentId)));
+      // Sender'ın BİLEREK atladığı belirsiz cid'ler (aynı kanonik cid →
+      // FARKLI dosya) invariant kapısından MUAF — #484/#488 guard'ı re-attach
+      // etmemeyi seçer; bu ihlal değil, güvenlik kararıdır. (Kalan bilinen
+      // sınır: file_missing_on_storage skip'i — dosya diskte yoksa sender
+      // atlar; smoke fs'e bakmadığından nadir yanlış-pozitif olabilir,
+      // raporda 'thread' olarak görünür.)
+      const fileByCid = new Map();
+      const caseAmbiguous = new Set();
+      for (const a of caseAtts) {
+        const k = canon(a.contentId);
+        if (!k || !a.storageKey) continue;
+        const prev = fileByCid.get(k);
+        if (prev && prev !== a.storageKey) caseAmbiguous.add(k);
+        else if (!prev) fileByCid.set(k, a.storageKey);
+      }
       const bucket = e.createdAt >= since ? stats.fresh : stats.legacy;
       bucket.mails++;
       for (const r of refs) {
@@ -112,7 +127,10 @@ if (process.env.SMOKE_DB === '1') {
         else if (thread.has(r)) {
           bucket.thread++;
           // Yeni OUTBOUND mail kendi kaydını taşımalıydı → ihlal
-          if (e.createdAt >= since && e.direction === 'outbound') freshOutboundViolations++;
+          // (belirsiz cid hariç — sender bilinçli atlar).
+          if (e.createdAt >= since && e.direction === 'outbound' && !caseAmbiguous.has(r)) {
+            freshOutboundViolations++;
+          }
         } else bucket.gone++;
       }
     }

@@ -128,7 +128,7 @@ async function writeCaseFile({ caseId, companyId, filename, contentType, content
  *
  * @returns {Promise<{ stored: number, skipped: Array<{filename: string|null, reason: string}> }>}
  */
-async function persistAttachmentsForCase({ caseId, companyId, attachments, prisma, emailId = null }) {
+async function persistAttachmentsForCase({ caseId, companyId, attachments, prisma, emailId = null, bodyHtml = null }) {
   const stored = [];
   // PR-4 — gövde-içi görseller (CaseEmailAttachment-only; Dosyalar'a girmez,
   // cap tüketmez, "dosya eklendi" aktivitesine sayılmaz).
@@ -136,6 +136,22 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
   const skipped = [];
   if (!Array.isArray(attachments) || attachments.length === 0) {
     return { stored: 0, storedInline: 0, skipped: [] };
+  }
+  // Adversarial review fix (2026-07-09) — "inline görsel" sınıflandırması
+  // parser'ın inline bayrağına GÜVENEMEZ: parser cid'i olan HER eki inline
+  // sayar (inboundMailParser.js:246), Outlook/Exchange ise normal (gerçek)
+  // görsel eklere de Content-ID koyar. Gövdede REFERANS EDİLMEYEN cid'li
+  // görsel = GERÇEK EK → Dosyalar sekmesine yazılmalı (kanıt kaybolmasın).
+  // Kural: yalnız sanitize edilmiş gövdede <img src="cid:X"> ile gerçekten
+  // referanslanan görseller "gövde-içi" sayılır. bodyHtml gelmezse set boş
+  // → tümü gerçek-ek yolundan (güvenli/legacy davranış).
+  const bodyCidSet = new Set();
+  if (typeof bodyHtml === 'string' && bodyHtml) {
+    const re = /<img[^>]+src=["']cid:([^"']+)["']/gi;
+    for (let m; (m = re.exec(bodyHtml)); ) {
+      const c = m[1].trim().replace(/^<|>$/g, '').toLowerCase();
+      if (c) bodyCidSet.add(c);
+    }
   }
   // Codex P2 fix — Cap enforcement. Mevcut attachment count alınır;
   // remaining slots hesaplanır. Cap aşımı → skipped:
@@ -169,10 +185,14 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
     //      uzun thread'de GERÇEK kanıt eki 'attachment_cap_reached' ile
     //      reddedilebiliyordu. Inline görseller cap'ten MUAF.
     //   2. Dosyalar sekmesi imza logolarıyla kirlenmez.
-    // Kural: inline + cid + image/* + emailId mevcut (CaseEmailAttachment
-    // yazılabiliyor). emailId yoksa eski yol (dosya kaybolmasın).
-    const isInlineImage = !!a?.inline && !!cid
-      && String(contentType ?? '').toLowerCase().startsWith('image/');
+    // Kural: inline + cid + image/* + GÖVDEDE REFERANSLI + emailId mevcut
+    // (CaseEmailAttachment yazılabiliyor). Gövdede referanssız cid'li görsel
+    // = gerçek ek (Outlook Content-ID alışkanlığı) → eski yol. emailId yoksa
+    // eski yol (dosya kaybolmasın).
+    const cidCanon = cid ? String(cid).trim().replace(/^<|>$/g, '').toLowerCase() : null;
+    const isInlineImage = !!a?.inline && !!cidCanon
+      && String(contentType ?? '').toLowerCase().startsWith('image/')
+      && bodyCidSet.has(cidCanon);
     if (isInlineImage && emailId) {
       try {
         const attachmentId = randomUUID();
@@ -721,6 +741,7 @@ export async function intakeInboundEmail({
               companyId,
               attachments: parsed.attachments ?? [],
               prisma,
+              bodyHtml: sanitizedHtml,
               emailId: inboundEmail.id,
             });
           }
@@ -831,6 +852,7 @@ export async function intakeInboundEmail({
                   companyId,
                   attachments: parsed.attachments ?? [],
                   prisma,
+                  bodyHtml: sanitizedHtml,
                   emailId: inboundEmail.id,
                 });
               }
@@ -1229,6 +1251,7 @@ export async function intakeInboundEmail({
         companyId,
         attachments: parsed.attachments ?? [],
         prisma,
+        bodyHtml: sanitizedHtml,
         emailId: firstEmail.id,
       });
     }

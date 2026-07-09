@@ -113,7 +113,7 @@ function escapeHtml(s: string): string {
 /** Thread-seviye cid indeksi — cid → sahibi mailin id'si + ek id'si. Reader
  *  kendi ekinde cid'i bulamazsa (yanıt/ilet alıntısı orijinalin cid'ini taşır
  *  ama görseli bu maile eklenmez) aynı vakadaki diğer mailin ekiyle çözer. */
-type ThreadCidIndex = Map<string, { emailId: string; attachmentId: string; fileName: string }>;
+type ThreadCidIndex = Map<string, { emailId: string; attachmentId: string; fileName: string; fileKey: string | null }>;
 
 async function processBodyHtml(
   email: CaseEmailItem,
@@ -204,6 +204,32 @@ async function processBodyHtml(
     const stripped = cid.replace(/^<|>$/g, '');
     const found = cidMap.get(cid) ?? cidMap.get(stripped) ?? cidMap.get(stripped.toLowerCase());
     if (!found) {
+      // Legacy kurtarma (MailMessageCard'dan port, 2026-07-09 — eski-kayıt
+      // paritesi): parser-fix ÖNCESİ kayıtlarda gövdede cid:X var ama ek
+      // contentId=null yazılmış (UNV-1000089 sınıfı) → cidMap boş. TEK inline
+      // aday + contentId==null ise güvenle o eke bağla (uniquely
+      // attributable); consumed filtresi duplicate render'ı önler.
+      const candidates = email.attachments.filter(
+        (x) => x.isInline && !consumed.has(x.id),
+      );
+      const canUseLegacyFallback = candidates.length === 1 && candidates[0].contentId == null;
+      const fallback = canUseLegacyFallback ? candidates[0] : null;
+      if (fallback) {
+        consumed.add(fallback.id);
+        jobs.push((async () => {
+          const out = await caseEmailService.getAttachmentDownload(caseId, email.id, fallback.id);
+          if (out?.url) {
+            img.setAttribute('src', out.url);
+            if (!img.getAttribute('alt')) img.setAttribute('alt', fallback.fileName);
+          } else {
+            const ph = doc.createElement('span');
+            ph.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500');
+            ph.textContent = `🖼 ${escapeHtml(fallback.fileName)} — dosya sunucuda bulunamadı`;
+            img.replaceWith(ph);
+          }
+        })());
+        continue;
+      }
       // Thread-seviye fallback: görsel kendi ekinde yok ama aynı vakadaki
       // BAŞKA mailin ekinde olabilir (yanıt/ilet alıntısı orijinalin cid'ini
       // taşır). Sahibi mailin id'siyle indir — download endpoint emailId↔
@@ -228,14 +254,21 @@ async function processBodyHtml(
         continue;
       }
       // Evidence Preservation PR-3 — sebepli placeholder. Bu noktaya gelen
-      // cid ne mailin kendi ekinde ne thread'de var → görsel bize hiç
-      // ULAŞMADI (tipik: Outlook'un local-path imzası `c:/users/...` ya da
-      // göndericinin MIME'a eklemediği görsel). Sessiz kırık ikon yerine
-      // insancıl açıklama.
+      // cid ne mailin kendi ekinde ne thread'de var. İki sınıf:
+      //   a) Yol-benzeri cid (`c:/users/...` Outlook local-path imzası) →
+      //      görsel bize HİÇ ulaşmadı, gönderici tarafında kaldı — kesin.
+      //   b) Diğerleri → ekte gelmemiş OLABİLİR ya da intake reddetmiş
+      //      olabilir (25MB/tür/limit — skip aktivitede kayıtlı). Sebep
+      //      bilinemediğinden SUÇLAMA YOK; agent'ı vaka aktivitesindeki
+      //      kayda yönlendir (adversarial review fix: yanlış "göndericide
+      //      kaldı" beyanı müşteriye hatalı geri dönüşe yol açıyordu).
+      const looksLikePath = /[\\/]/.test(stripped) || /^[a-z]:/i.test(stripped);
       const ph = doc.createElement('span');
       ph.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700');
       ph.setAttribute('title', `cid:${stripped}`);
-      ph.textContent = `🖼 ${img.getAttribute('alt') || 'görsel'} — ekte gelmedi (gönderici tarafında kaldı)`;
+      ph.textContent = looksLikePath
+        ? `🖼 ${img.getAttribute('alt') || 'görsel'} — ekte gelmedi (gönderici tarafında kaldı)`
+        : `🖼 ${img.getAttribute('alt') || 'görsel'} — görsel alınamadı (neden için vaka aktivitesine bakın · Dosya filtresi)`;
       img.replaceWith(ph);
       continue;
     }
@@ -508,8 +541,14 @@ export function MailThreadReader({
               ayrı soluk grupta — agent hangisinin "dosya eki" olduğunu
               karıştırmaz. İkisi de önizlenebilir (kanıt erişimi aynı). */}
           {email.attachments.length > 0 && (() => {
-            const realAtts = email.attachments.filter((a) => !a.isInline);
-            const inlineAtts = email.attachments.filter((a) => a.isInline);
+            // Adversarial review fix — "gövde-içi" = isInline && contentId.
+            // Apple Mail gibi istemciler GERÇEK ekleri (PDF dahil) disposition:
+            // inline gönderir → isInline=true ama cid'siz; bunlar gerçek ektir,
+            // soluk gruba düşmemeli. cid'li olanlar gövdede gömülü görsellerdir.
+            const isBodyInline = (a: (typeof email.attachments)[number]) =>
+              a.isInline && !!a.contentId;
+            const realAtts = email.attachments.filter((a) => !isBodyInline(a));
+            const inlineAtts = email.attachments.filter(isBodyInline);
             const renderChip = (a: (typeof email.attachments)[number], faded: boolean) => {
               const isImage = (a.mimeType ?? '').toLowerCase().startsWith('image/');
               return (

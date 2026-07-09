@@ -22,6 +22,9 @@ export interface CaseEmailAttachmentInfo {
   fileSize: number;
   contentId: string | null;
   isInline: boolean;
+  /** Dosya kimliği (storageKey hash'i) — snapshot kopyaları aynı dosyayı
+   *  paylaşır; thread-fallback belirsizliği ek id yerine bununla ölçülür. */
+  fileKey: string | null;
 }
 
 export type CaseEmailDirection = 'inbound' | 'outbound';

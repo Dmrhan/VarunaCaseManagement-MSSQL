@@ -42,7 +42,9 @@ function strip(s) {
 
 const parser = read('server/lib/inboundMailParser.js');
 const parserCode = strip(parser);
-const card = read('src/features/cases/components/MailMessageCard.tsx');
+// Evidence Preservation (2026-07-09): MailMessageCard SİLİNDİ; FIX 2
+// heuristic'i MailThreadReader'da yaşıyor — assert'ler oraya uyarlandı.
+const card = read('src/features/cases/components/MailThreadReader.tsx');
 
 // PNG (1x1 transparent)
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -80,11 +82,11 @@ expectTrue('3.1 isEmptySrc branch — src boş ise özel yol',
 expectTrue('3.2 isCidSrc || isEmptySrc — ikisi de process edilir',
   /if \(!isCidSrc && !isEmptySrc\) continue/.test(card));
 expectTrue('3.3 Alt attribute ile inline fileName eşleştirme',
-  /inlineCandidates\.find\(\(x\)\s*=>\s*x\.fileName === alt\)/.test(card));
+  /candidates\.find\(\(x\)\s*=>\s*x\.fileName === alt\)/.test(card));
 expectTrue('3.4 Legacy fallback (tek inline + contentId==null)',
-  /inlineCandidates\.length === 1 && inlineCandidates\[0\]\.contentId == null/.test(card));
+  /candidates\.length === 1 && candidates\[0\]\.contentId == null/.test(card));
 expectTrue('3.5 Heuristic match → getAttachmentDownload rewrite',
-  /heuristicMatch[\s\S]{0,400}getAttachmentDownload\(caseId,\s*email\.id,\s*m\.id\)/.test(card));
+  /match[\s\S]{0,400}getAttachmentDownload\(caseId,\s*email\.id,\s*m\.id\)/.test(card));
 expectTrue('3.6 Placeholder metni "Gömülü görsel — ekte: {names}"',
   /Gömülü görsel — ekte: \$\{inlineNames\}/.test(card));
 expectTrue('3.7 Regresyon — Eski mail placeholder korundu',
@@ -211,29 +213,29 @@ function buildRelated(html, imgs) {
 
 console.log('\n── 5) UI FIX 2 pattern — Codex P2 R2/R3 iyileştirmeleri ─');
 expectTrue('5.1 consumedAttachmentIds Set tanımlı',
-  /const\s+consumedAttachmentIds\s*=\s*new\s+Set<string>\(\)/.test(card));
+  /const\s+consumed\s*=\s*new\s+Set<string>\(\)/.test(card));
 // Codex R3: cid ref pre-scan
 expectTrue('5.2 cidReferencedKeys Set — pre-scan tanımlı',
   /const\s+cidReferencedKeys\s*=\s*new\s+Set<string>\(\)/.test(card));
 expectTrue('5.3 Pre-scan loop: gövdedeki tüm cid: src\'leri toplar',
   /for \(const img of imgs\)[\s\S]{0,400}s\.toLowerCase\(\)\.startsWith\('cid:'\)[\s\S]{0,300}cidReferencedKeys\.add\(cidRaw\)/.test(card));
 expectTrue('5.4 isAttachmentCidReferenced helper',
-  /const isAttachmentCidReferenced\s*=[\s\S]{0,600}cidReferencedKeys\.has\(raw\)[\s\S]{0,200}\|\|\s*cidReferencedKeys\.has\(stripped\)/.test(card));
+  /const isAttCidReferenced\s*=[\s\S]{0,600}cidReferencedKeys\.has\(raw\)[\s\S]{0,200}\|\|\s*cidReferencedKeys\.has\(stripped\)/.test(card));
 expectTrue('5.5 src\'siz filter — 3 katman (isInline + !consumed + !cidReferenced)',
-  /isEmptySrc[\s\S]{0,600}email\.attachments\.filter\([\s\S]{0,400}x\.isInline[\s\S]{0,200}!consumedAttachmentIds\.has\(x\.id\)[\s\S]{0,200}!isAttachmentCidReferenced\(x\)/.test(card));
+  /isEmptySrc[\s\S]{0,600}email\.attachments\.filter\([\s\S]{0,400}x\.isInline[\s\S]{0,200}!consumed\.has\(x\.id\)[\s\S]{0,200}!isAttCidReferenced\(x\)/.test(card));
 // Codex P2 R4: tek-aday fallback SADECE legacy (contentId==null)
 expectTrue('5.6 src\'siz tek-aday fallback — contentId==null şartı GERİ (R4)',
-  /!heuristicMatch\s*&&\s*inlineCandidates\.length === 1\s*&&\s*inlineCandidates\[0\]\.contentId == null/.test(card));
+  /!match && candidates\.length === 1 && candidates\[0\]\.contentId == null/.test(card));
 expectTrue('5.7 REGRESYON: R2\'nin şartsız tek-aday fallback\'i KALKMIŞ',
   !/!heuristicMatch\s*&&\s*inlineCandidates\.length === 1\s*\)\s*\{[\s\S]{0,150}inlineCandidates\[0\]\.id/.test(card));
-expectTrue('5.8 src\'siz heuristicMatch bulundukta consumedAttachmentIds.add',
-  /if \(heuristicMatch\)[\s\S]{0,200}consumedAttachmentIds\.add\(m\.id\)/.test(card));
-expectTrue('5.9 cid: match bulundukta consumedAttachmentIds.add',
-  /consumedAttachmentIds\.add\(match\.id\)[\s\S]{0,400}cidJobs\.push/.test(card));
+expectTrue('5.8 src\'siz match bulundukta consumed.add',
+  /if \(match\) \{[\s\S]{0,120}consumed\.add\(match\.id\)/.test(card));
+expectTrue('5.9 cid: match bulundukta consumed.add',
+  /consumed\.add\(found\.id\)[\s\S]{0,400}jobs\.push/.test(card));
 expectTrue('5.10 cid: legacy fallback\'te de consumed filter uygulanır',
-  /if \(!match\)[\s\S]{0,1200}email\.attachments\.filter\([\s\S]{0,300}!consumedAttachmentIds\.has\(x\.id\)/.test(card));
+  /if \(!found\)[\s\S]{0,1600}email\.attachments\.filter\([\s\S]{0,300}!consumed\.has\(x\.id\)/.test(card));
 expectTrue('5.11 Legacy fallback bulundukta consumed.add',
-  /const fallback\s*=\s*canUseLegacyFallback[\s\S]{0,200}consumedAttachmentIds\.add\(fallback\.id\)/.test(card));
+  /const fallback = canUseLegacyFallback[\s\S]{0,200}consumed\.add\(fallback\.id\)/.test(card));
 
 console.log('\n── 6) Davranış sim — Codex P2 R2 senaryoları ─');
 
