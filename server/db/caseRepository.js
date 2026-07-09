@@ -3922,6 +3922,26 @@ export const caseRepository = {
       );
     }
 
+    // Ürün Grubu zorunluluğu (kapanış kapısı) — kayıtlarda bu bilginin
+    // kesin olması gerekiyor. Açılış kanalı fark etmeksizin (Smart Ticket,
+    // klasik form, mail intake) uygulanır: mail'den otomatik açılan
+    // vakalar oluşturma anında etkilenmez, sadece Cozuldu'ya geçerken
+    // agent'ın alanı doldurmuş olması gerekir. Karar: yalnız Cozuldu
+    // (IptalEdildi muaf — müşteri kapısıyla aynı gerekçe); SystemAdmin
+    // istisna. Frontend aynı koşulda inline seçim/kaydet gösterir; bu
+    // guard authoritative (her arayüzü kapsar).
+    if (
+      dbNext === 'Cozuldu' &&
+      prev.status !== 'Cozuldu' &&
+      !prev.productGroup &&
+      actorObject?.role !== 'SystemAdmin'
+    ) {
+      throw new CaseValidationError(
+        'Vaka ürün grubu belirtilmeden çözülemez. Lütfen önce ürün grubunu seçin.',
+        { status: 400, code: 'product_group_required_for_closure' },
+      );
+    }
+
     // Kapanış analizi zorunluluğu — vaka (açılış kanalı fark etmeksizin:
     // Smart Ticket, mail, telefon…) Cozuldu'ya geçerken "KB ile Analiz Et"
     // en az bir kez çalıştırılmış (closureSuggestion telemetrisi payload'da)
