@@ -233,7 +233,7 @@ expectTrue('5.8 src\'siz match bulundukta consumed.add',
 expectTrue('5.9 cid: match bulundukta consumed.add',
   /consumed\.add\(found\.id\)[\s\S]{0,400}jobs\.push/.test(card));
 expectTrue('5.10 cid: legacy fallback\'te de consumed filter uygulanır',
-  /if \(!found\)[\s\S]{0,1600}email\.attachments\.filter\([\s\S]{0,300}!consumed\.has\(x\.id\)/.test(card));
+  /if \(!found\)[\s\S]{0,3500}email\.attachments\.filter\([\s\S]{0,300}!consumed\.has\(x\.id\)/.test(card));
 expectTrue('5.11 Legacy fallback bulundukta consumed.add',
   /const fallback = canUseLegacyFallback[\s\S]{0,200}consumed\.add\(fallback\.id\)/.test(card));
 

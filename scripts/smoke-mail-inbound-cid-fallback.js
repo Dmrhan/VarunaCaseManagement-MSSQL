@@ -95,8 +95,11 @@ expect('2.10 sadece iç bracket (< ortada) — orta karakter etkilenmez',
 console.log('\n── 3) Intake — 3 yol contentId payload pariteni ─');
 // Tüm çağrılar parsed.attachments ?? [] geçiyor → parser fix hepsini kapsar.
 // persistAttachmentsForCase içinde contentId: a?.cid ?? null (parser çıktısı)
-expect('3.1 persistAttachmentsForCase içinde contentId: a?.cid',
-  /contentId:\s*a\?\.cid\s*\?\?\s*null,\s*isInline:\s*!!a\?\.inline/.test(intake), true);
+// R2 review fix (2026-07-09): isInline artık parser bayrağı DEĞİL,
+// gövde-referans gerçeği (bodyCidSet) — Outlook'un referanssız Content-ID'li
+// gerçek ekleri isInline=false persist edilir (fix B ↔ fix C hizası).
+expect('3.1 persistAttachmentsForCase içinde contentId: a?.cid + gövde-referanslı isInline',
+  /contentId:\s*a\?\.cid\s*\?\?\s*null,[\s\S]{0,700}isInline:\s*!!cidCanon && bodyCidSet\.has\(cidCanon\)/.test(intake), true);
 expect('3.2 Yeni vaka yolunda emailId geçer',
   /persistAttachmentsForCase\(\{[\s\S]{0,400}caseId:\s*created\.id,[\s\S]{0,300}emailId:\s*firstEmail\.id/.test(intakeCode), true);
 expect('3.3 Token flow append yolunda emailId geçer',
@@ -111,7 +114,7 @@ expect('4.1 Eşleşmeyen cid için inline aday heuristic',
   /x\.isInline && !consumed\.has\(x\.id\)/.test(card), true);
 // Codex R1 fix: heuristic sadece contentId==null (legacy) durumda devrede
 expect('4.2 Heuristic guard — canUseLegacyFallback (contentId==null gerekli)',
-  /canUseLegacyFallback = candidates\.length === 1 && candidates\[0\]\.contentId == null/.test(card), true);
+  /canUseLegacyFallback = !looksLikePath[\s\S]{0,60}candidates\.length === 1 && candidates\[0\]\.contentId == null/.test(card), true);
 expect('4.3 REGRESYON: eski koşulsuz `length === 1 ? [0] : null` KALDIRILDI',
   !/const\s+fallback\s*=\s*inlineCandidates\.length === 1 \? inlineCandidates\[0\] : null/.test(card), true);
 expect('4.4 Fallback flag canUseLegacyFallback\'e bağlanır',

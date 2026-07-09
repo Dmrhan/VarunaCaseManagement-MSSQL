@@ -145,11 +145,20 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
   // Kural: yalnız sanitize edilmiş gövdede <img src="cid:X"> ile gerçekten
   // referanslanan görseller "gövde-içi" sayılır. bodyHtml gelmezse set boş
   // → tümü gerçek-ek yolundan (güvenli/legacy davranış).
+  // R2 review fix — sanitize-html attribute değerlerini entity-escape eder
+  // (& → &amp;). Gövdeden yakalanan cid'i HAM contentId ile kıyaslamadan
+  // önce decode et; aksi halde '&' içeren meşru cid'ler (RFC 5322 atext)
+  // "referanssız" sayılıp gerçek-ek yoluna düşer (cap tüketimi geri gelir).
+  // Sıra önemli: spesifik entity'ler önce, &amp; EN SON (çift-decode önlenir).
+  const decodeEntities = (s) => s
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
   const bodyCidSet = new Set();
   if (typeof bodyHtml === 'string' && bodyHtml) {
     const re = /<img[^>]+src=["']cid:([^"']+)["']/gi;
     for (let m; (m = re.exec(bodyHtml)); ) {
-      const c = m[1].trim().replace(/^<|>$/g, '').toLowerCase();
+      const c = decodeEntities(m[1]).trim().replace(/^<|>$/g, '').toLowerCase();
       if (c) bodyCidSet.add(c);
     }
   }
@@ -253,7 +262,13 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
                 mimeType: contentType ?? 'application/octet-stream',
                 fileSize: content.length,
                 contentId: a?.cid ?? null,
-                isInline: !!a?.inline,
+                // R2 review fix — parser bayrağı DEĞİL, gövde-referans gerçeği:
+                // bu (gerçek-ek) yola düşen kayıtta "gövde-içi" ancak cid
+                // gövdede gerçekten referanslıysa doğrudur (nadir non-image
+                // embed). Outlook'un referanssız Content-ID'li gerçek ekleri
+                // isInline=false → FE çip ayrımı Dosyalar sınıflandırmasıyla
+                // TUTARLI (fix B ↔ fix C hizası).
+                isInline: !!cidCanon && bodyCidSet.has(cidCanon),
               },
             });
           } catch (e) {

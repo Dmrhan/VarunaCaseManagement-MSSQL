@@ -83,9 +83,19 @@ function normalizeRecipients(list) {
 function extractInlineCidsFromHtml(html) {
   const set = new Set();
   if (typeof html !== 'string' || !html) return set;
+  // R2 review fix — sanitize edilmiş HTML attribute'ları entity-escape'lidir
+  // (& → &amp;). Ham Content-ID ile eşleşme (CaseEmailAttachment.contentId
+  // lookup + giden MIME Content-ID header'ı) için decode ŞART; aksi halde
+  // '&' içeren cid'li alıntı görseli re-attach edilemez (not_found) ve
+  // composer inline'ında yanlış Content-ID header'ı üretilirdi.
+  // Sıra: spesifik entity'ler önce, &amp; EN SON (çift-decode önlenir).
+  const decodeEntities = (s) => s
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
   const re = /<img[^>]+src=["']cid:([^"']+)["']/gi;
   for (let m; (m = re.exec(html)); ) {
-    const cid = m[1]?.trim();
+    const cid = decodeEntities(m[1] ?? '').trim();
     if (cid) set.add(cid);
   }
   return set;
