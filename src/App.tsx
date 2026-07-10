@@ -26,6 +26,7 @@ import {
   Star,
   Gauge,
   Sun,
+  Activity,
 } from 'lucide-react';
 import { CasesListPage } from './features/cases/CasesListPage';
 import { CaseDetailPage } from './features/cases/CaseDetailPage';
@@ -79,6 +80,9 @@ import { AdminExternalMailPage } from './features/admin/AdminExternalMailPage';
 const AdminEmailTemplatesPage = lazy(() =>
   import('./features/admin/AdminEmailTemplatesPage').then((m) => ({ default: m.AdminEmailTemplatesPage })),
 );
+const SystemHealthPage = lazy(() =>
+  import('./features/admin/SystemHealthPage').then((m) => ({ default: m.SystemHealthPage })),
+);
 import { AdminDataImportPage } from './features/admin/AdminDataImportPage';
 import { KnowledgeBasePage } from './features/kb/KnowledgeBasePage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
@@ -98,7 +102,7 @@ import { accountService } from './services/accountService';
 import { SOFTPHONE_ANSWERED_EVENT, SOFTPHONE_INCOMING_EVENT, useSoftphone } from './contexts/SoftphoneContext';
 import { CaseTaggingReviewPage } from './features/analytics/CaseTaggingReviewPage';
 
-type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'analytics-people-performance' | 'case-report-studio' | 'monthly-bulletin' | 'root-cause-report' | 'tagging-review' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | AdminView;
+type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'analytics-people-performance' | 'case-report-studio' | 'monthly-bulletin' | 'root-cause-report' | 'tagging-review' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | 'system-health' | AdminView;
 
 interface NavItem {
   key: View;
@@ -413,6 +417,8 @@ export default function App() {
   const showQaScores = !!user && canShowView('analytics-qa-scores', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showPeoplePerformance = !!user && canShowView('analytics-people-performance', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showPatterns = !!user && canShowView('analytics-patterns', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
+  // Sistem Sağlığı — YALNIZ SystemAdmin (makine/altyapı teşhisi; iş metrikleri değil)
+  const showSystemHealth = !!user && canShowView('system-health', user.role === 'SystemAdmin');
   const showCaseReportStudio = !!user && canShowView('case-report-studio', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   // Aylık Bülten — CS ekibi müşteriye gönderir; supervisor/admin/CSM görür
   const showMonthlyBulletin = !!user && canShowView('monthly-bulletin', ['CSM', 'Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
@@ -956,6 +962,25 @@ export default function App() {
               </button>
             )}
 
+            {/* Sistem Sağlığı — YALNIZ SystemAdmin (altyapı teşhis panosu) */}
+            {showSystemHealth && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('system-health')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'system-health'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="Sistem Sağlığı"
+              >
+                <Activity size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">Sistem Sağlığı</span>}
+              </button>
+            )}
+
             {/* Vaka Rapor Stüdyosu — Supervisor / Admin / SystemAdmin */}
             {showCaseReportStudio && (
               <button
@@ -1099,6 +1124,7 @@ export default function App() {
             />
           )}
           {view === 'analytics-qa-scores' && <QAScoresPage />}
+          {view === 'system-health' && showSystemHealth && <SystemHealthPage />}
           {(view === 'analytics-people-performance' || (isDetail && caseDetailOrigin === 'analytics-people-performance')) && (
             <div className={isDetail ? 'hidden' : 'contents'}>
               <PeoplePerformancePage onSelectCase={openCase} />
