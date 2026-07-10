@@ -19,6 +19,7 @@ import kbV1Router from './routes/kbV1.js';
 import reportsRouter from './routes/reports.js';
 import reportViewsRouter from './routes/reportViews.js';
 import alotechRouter from './routes/alotech.js';
+import systemRouter from './routes/system.js';
 import { prisma } from './db/client.js';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -102,6 +103,9 @@ app.use('/api/smart-ticket', smartTicketRouter);
 app.use('/api/approvals', approvalsRouter);
 app.use('/api/action-center', actionCenterRouter);
 app.use('/api/authorization', authorizationRouter);
+// Sistem Sağlığı (2026-07-10) — kendi çift-kimlik guard'ı var (HEALTH_TOKEN
+// header'ı [Zabbix] VEYA SystemAdmin JWT); global auth zincirine girmez.
+app.use('/api/system', systemRouter);
 // Faz KB — ticket-analiz'in KB/RAG çekirdeği in-process (Bearer API key auth;
 // ExternalKbSetting.baseUrl bu sürecin kendisine işaret eder).
 app.use('/api/v1', kbV1Router);

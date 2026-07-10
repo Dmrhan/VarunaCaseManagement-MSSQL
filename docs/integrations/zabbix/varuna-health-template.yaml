@@ -1,0 +1,194 @@
+# Varuna Sistem Sağlığı — Zabbix Template (6.4+)
+#
+# Kurulum: Zabbix UI → Data collection → Templates → Import → bu dosya.
+# Sonra Varuna uygulama host'una template'i bağlayın ve host MAKROLARINI
+# tanımlayın (aşağıda). Ayrıntı: README.md (aynı klasör).
+#
+# Mimari: tek HTTP-agent MASTER item /api/system/health'i 1 dk'da bir çeker;
+# tüm metrikler DEPENDENT item olarak JSONPath ile ayrıştırılır → Varuna'ya
+# dakikada TEK istek gider (endpoint tarafında ayrıca 20 sn cache var).
+#
+# Payload sözleşmesi: server/lib/systemHealth.js (schemaVersion: 1).
+# Alan adı değişirse bu template de güncellenmelidir.
+
+zabbix_export:
+  version: '6.4'
+  template_groups:
+    - uuid: 3a1f2b6c0d5e4f708192a3b4c5d6e7f8
+      name: Applications
+  templates:
+    - uuid: 9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e
+      template: Varuna Sistem Sağlığı
+      name: 'Varuna Sistem Sağlığı (health endpoint)'
+      description: |
+        Varuna Case Management /api/system/health tüketicisi.
+        Uygulama-semantik metrikler: dispatch kuyruğu, mail intake/döngü,
+        depolama, DB, cron, env. Makine metrikleri (CPU/RAM) bu template'in
+        işi DEĞİL — onlar host'un normal Zabbix agent item'larıdır.
+      groups:
+        - name: Applications
+      macros:
+        - macro: '{$VARUNA.HEALTH.URL}'
+          value: 'https://csm.varunasolution.com/api/system/health'
+          description: 'Health endpoint tam URL'
+        - macro: '{$VARUNA.HEALTH.TOKEN}'
+          value: ''
+          description: 'HEALTH_TOKEN env değeri (secret olarak girin)'
+        - macro: '{$VARUNA.PENDING.MAX}'
+          value: '50'
+          description: 'Pending dispatch alarm eşiği'
+        - macro: '{$VARUNA.LOOP.MAX5M}'
+          value: '15'
+          description: 'Son 5 dk vaka açılışı alarm eşiği (~3/dk; 6 Tem döngü olayı önlemi)'
+        - macro: '{$VARUNA.DISKFREE.WARN}'
+          value: '20'
+          description: 'Disk boş %% uyarı eşiği'
+        - macro: '{$VARUNA.DISKFREE.CRIT}'
+          value: '10'
+          description: 'Disk boş %% kritik eşiği'
+        - macro: '{$VARUNA.INBOUND.STALE.MIN}'
+          value: '720'
+          description: 'Son gelen mail yaşı uyarısı (dk). Mesai dışı doğal büyür — cömert tutun.'
+      items:
+        # ── MASTER: tek HTTP çekimi ──
+        - uuid: 1a2b3c4d5e6f708192a3b4c5d6e7f809
+          name: 'Varuna: health raw'
+          type: HTTP_AGENT
+          key: varuna.health.raw
+          delay: 1m
+          history: 1d
+          trends: '0'
+          value_type: TEXT
+          url: '{$VARUNA.HEALTH.URL}'
+          headers:
+            - name: X-Health-Token
+              value: '{$VARUNA.HEALTH.TOKEN}'
+          retrieve_mode: BODY
+          description: 'Tüm sağlık payload’ı; diğer item’lar bundan türer.'
+        # ── DEPENDENT metrikler ──
+        - uuid: 2b3c4d5e6f708192a3b4c5d6e7f8091a
+          name: 'Varuna: pending dispatch'
+          type: DEPENDENT
+          key: varuna.dispatch.pending
+          master_item: { key: varuna.health.raw }
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters: ['$.dispatch.pendingCount']
+        - uuid: 3c4d5e6f708192a3b4c5d6e7f8091a2b
+          name: 'Varuna: en eski pending yaşı (dk)'
+          type: DEPENDENT
+          key: varuna.dispatch.oldest_min
+          master_item: { key: varuna.health.raw }
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters: ['$.dispatch.oldestPendingAgeMin']
+        - uuid: 4d5e6f708192a3b4c5d6e7f8091a2b3c
+          name: 'Varuna: failed dispatch (24s)'
+          type: DEPENDENT
+          key: varuna.dispatch.failed24h
+          master_item: { key: varuna.health.raw }
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters: ['$.dispatch.failed24h']
+        - uuid: 5e6f708192a3b4c5d6e7f8091a2b3c4d
+          name: 'Varuna: son 5 dk vaka açılışı (döngü dedektörü)'
+          type: DEPENDENT
+          key: varuna.mail.cases5m
+          master_item: { key: varuna.health.raw }
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters: ['$.mail.casesCreatedLast5m']
+        - uuid: 6f708192a3b4c5d6e7f8091a2b3c4d5e
+          name: 'Varuna: son gelen mail yaşı (dk)'
+          type: DEPENDENT
+          key: varuna.mail.last_inbound_min
+          master_item: { key: varuna.health.raw }
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters: ['$.mail.lastInboundAgeMin']
+        - uuid: 708192a3b4c5d6e7f8091a2b3c4d5e6f
+          name: 'Varuna: STORAGE_ROOT boş %'
+          type: DEPENDENT
+          key: varuna.storage.free_pct
+          master_item: { key: varuna.health.raw }
+          value_type: FLOAT
+          units: '%'
+          preprocessing:
+            - type: JSONPATH
+              parameters: ['$.storage.diskFreePct']
+        - uuid: 8192a3b4c5d6e7f8091a2b3c4d5e6f70
+          name: 'Varuna: DB data (MB)'
+          type: DEPENDENT
+          key: varuna.db.data_mb
+          master_item: { key: varuna.health.raw }
+          value_type: FLOAT
+          units: MB
+          preprocessing:
+            - type: JSONPATH
+              parameters: ['$.db.dataFileMb']
+        - uuid: 92a3b4c5d6e7f8091a2b3c4d5e6f7081
+          name: 'Varuna: process uptime (sn)'
+          type: DEPENDENT
+          key: varuna.process.uptime
+          master_item: { key: varuna.health.raw }
+          value_type: UNSIGNED
+          units: s
+          preprocessing:
+            - type: JSONPATH
+              parameters: ['$.process.uptimeSec']
+        - uuid: a3b4c5d6e7f8091a2b3c4d5e6f708192
+          name: 'Varuna: env sağlık (hepsi OK=1)'
+          type: DEPENDENT
+          key: varuna.env.ok
+          master_item: { key: varuna.health.raw }
+          value_type: UNSIGNED
+          description: 'appPublicBaseUrlSet && imapPollingEnabled && storageRootWritable'
+          preprocessing:
+            - type: JSONPATH
+              parameters: ['$.env']
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var e = JSON.parse(value);
+                  return (e.appPublicBaseUrlSet && e.imapPollingEnabled && e.storageRootWritable) ? 1 : 0;
+      triggers:
+        - uuid: b4c5d6e7f8091a2b3c4d5e6f708192a3
+          expression: 'last(/Varuna Sistem Sağlığı/varuna.dispatch.pending)>{$VARUNA.PENDING.MAX}'
+          name: 'Varuna: bildirim kuyruğu birikiyor ({ITEM.LASTVALUE} pending)'
+          priority: WARNING
+          description: 'Pending dispatch eşiği aşıldı — resolver tıkalı olabilir.'
+        - uuid: c5d6e7f8091a2b3c4d5e6f708192a3b4
+          expression: 'min(/Varuna Sistem Sağlığı/varuna.mail.cases5m,#3)>{$VARUNA.LOOP.MAX5M}'
+          name: 'Varuna: OLASI MAIL DÖNGÜSÜ — 5 dk’da {ITEM.LASTVALUE} vaka'
+          priority: DISASTER
+          description: '6 Temmuz olayı deseni (auto-ack × kural). ACİL: intake polling’i durdurup vaka kaynağını inceleyin. 3 ardışık örnekte eşik üstü → alarm.'
+        - uuid: d6e7f8091a2b3c4d5e6f708192a3b4c5
+          expression: 'last(/Varuna Sistem Sağlığı/varuna.storage.free_pct)<{$VARUNA.DISKFREE.CRIT}'
+          name: 'Varuna: ek diski KRİTİK ({ITEM.LASTVALUE}% boş)'
+          priority: HIGH
+        - uuid: e7f8091a2b3c4d5e6f708192a3b4c5d6
+          expression: 'last(/Varuna Sistem Sağlığı/varuna.storage.free_pct)<{$VARUNA.DISKFREE.WARN}'
+          name: 'Varuna: ek diski azalıyor ({ITEM.LASTVALUE}% boş)'
+          priority: WARNING
+          dependencies:
+            - name: 'Varuna: ek diski KRİTİK ({ITEM.LASTVALUE}% boş)'
+              expression: 'last(/Varuna Sistem Sağlığı/varuna.storage.free_pct)<{$VARUNA.DISKFREE.CRIT}'
+        - uuid: f8091a2b3c4d5e6f708192a3b4c5d6e7
+          expression: 'last(/Varuna Sistem Sağlığı/varuna.mail.last_inbound_min)>{$VARUNA.INBOUND.STALE.MIN}'
+          name: 'Varuna: uzun süredir gelen mail yok ({ITEM.LASTVALUE} dk)'
+          priority: WARNING
+          description: 'Mesai dışında doğal olabilir; sürekli ise IMAP yetki/şifre veya poller sorunu (1 Tem olayı).'
+        - uuid: 091a2b3c4d5e6f708192a3b4c5d6e7f8
+          expression: 'last(/Varuna Sistem Sağlığı/varuna.env.ok)=0'
+          name: 'Varuna: env yapılandırma eksik (APP_PUBLIC_BASE_URL / IMAP / STORAGE_ROOT)'
+          priority: HIGH
+        - uuid: 1a2b3c4d5e6f708192a3b4c5d6e7f80a
+          expression: 'nodata(/Varuna Sistem Sağlığı/varuna.health.raw,5m)=1'
+          name: 'Varuna: health endpoint YANIT VERMİYOR'
+          priority: HIGH
+          description: 'Uygulama düşmüş, ağ kopmuş ya da HEALTH_TOKEN yanlış olabilir. "Pano kendi ölümünü raporlayamaz" — bu trigger o boşluğu kapatır.'
