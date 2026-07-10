@@ -1306,10 +1306,14 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
           <KpiSummaryStrip item={item} caseId={item.id} />
 
           <nav className="sticky top-0 z-10 flex shrink-0 gap-1 border-b border-slate-200 bg-white px-4 dark:border-ndark-border dark:bg-ndark-card">
+            {/* Renk-kimlikli sekmeler (2026-07-10) — her sekme kendi rengini
+                taşır; aktifken çizgi+metin o renk olur (kullanıcı feedback'i:
+                sekmeler gözden kaçıyordu). Palet kullanıcı onaylı (V4). */}
             <TabButton
               active={tab === 'detail'}
               icon={<FileText size={14} />}
               label="Detay"
+              color="#0ea5e9"
               onClick={() => setTab('detail')}
             />
             <TabButton
@@ -1317,6 +1321,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
               icon={<HistoryIcon size={14} />}
               label="Aktivite"
               count={item.history.length}
+              color="#f59e0b"
               onClick={() => setTab('activity')}
             />
             <TabButton
@@ -1324,6 +1329,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
               icon={<MessageSquare size={14} />}
               label="Notlar"
               count={item.notes.length}
+              color="#8b5cf6"
               onClick={() => setTab('notes')}
             />
             <TabButton
@@ -1331,18 +1337,21 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
               icon={<Paperclip size={14} />}
               label="Dosyalar"
               count={item.files.length}
+              color="#10b981"
               onClick={() => setTab('files')}
             />
             <TabButton
               active={tab === 'links'}
               icon={<LinkIcon size={14} />}
               label="Bağlantılar"
+              color="#ec4899"
               onClick={() => setTab('links')}
             />
             <TabButton
               active={tab === 'communication'}
               icon={<AtSign size={14} />}
               label="İletişim"
+              color="#2563eb"
               onClick={() => setTab('communication')}
             />
             {(item.caseType === 'ProactiveTracking' || item.caseType === 'Churn') && (
@@ -1351,6 +1360,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
                 icon={<Mic size={14} />}
                 label="Çağrı Logları"
                 count={item.callLogs.length}
+                color="#6366f1"
                 onClick={() => setTab('callLogs')}
               />
             )}
@@ -1360,6 +1370,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
               active={tab === 'solution-steps'}
               icon={<ListChecks size={14} />}
               label="Çözüm Adımları"
+              color="#14b8a6"
               onClick={() => setTab('solution-steps')}
             />
           </nav>
@@ -1582,28 +1593,42 @@ function TabButton({
   icon,
   label,
   count,
+  color,
   onClick,
 }: {
   active: boolean;
   icon: React.ReactNode;
   label: string;
   count?: number;
+  /** Renk-kimlikli sekme (2026-07-10): aktif çizgi+metin bu rengi alır,
+   *  ikon her zaman bu renkte (idle dahil). Sekmelerin fark edilmesi için. */
+  color: string;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      style={{
+        borderBottomColor: active ? color : 'transparent',
+        color: active ? color : undefined,
+      }}
       className={`flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm transition-colors ${
         active
-          ? 'border-brand-600 text-brand-700'
-          : 'border-transparent text-slate-600 hover:text-slate-800'
+          ? 'font-semibold'
+          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-800 dark:text-ndark-muted dark:hover:bg-ndark-bg/40 dark:hover:text-ndark-text'
       }`}
     >
-      {icon}
+      {/* İkon her zaman kendi renginde (idle dahil) — "renklendirelim" (A). */}
+      <span className="inline-flex" style={{ color }}>{icon}</span>
       {label}
       {count != null && count > 0 && (
-        <span className="rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-600">{count}</span>
+        <span
+          className={active ? 'rounded-full px-1.5 text-[10px]' : 'rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-600 dark:bg-ndark-bg dark:text-ndark-muted'}
+          style={active ? { backgroundColor: `color-mix(in srgb, ${color} 16%, transparent)`, color } : undefined}
+        >
+          {count}
+        </span>
       )}
     </button>
   );
