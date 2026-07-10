@@ -1313,7 +1313,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
               active={tab === 'detail'}
               icon={<FileText size={14} />}
               label="Detay"
-              color="#0ea5e9"
+              color="#0284c7"
               onClick={() => setTab('detail')}
             />
             <TabButton
@@ -1321,7 +1321,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
               icon={<HistoryIcon size={14} />}
               label="Aktivite"
               count={item.history.length}
-              color="#f59e0b"
+              color="#d97706"
               onClick={() => setTab('activity')}
             />
             <TabButton
@@ -1329,7 +1329,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
               icon={<MessageSquare size={14} />}
               label="Notlar"
               count={item.notes.length}
-              color="#8b5cf6"
+              color="#7c3aed"
               onClick={() => setTab('notes')}
             />
             <TabButton
@@ -1337,14 +1337,14 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
               icon={<Paperclip size={14} />}
               label="Dosyalar"
               count={item.files.length}
-              color="#10b981"
+              color="#059669"
               onClick={() => setTab('files')}
             />
             <TabButton
               active={tab === 'links'}
               icon={<LinkIcon size={14} />}
               label="Bağlantılar"
-              color="#ec4899"
+              color="#db2777"
               onClick={() => setTab('links')}
             />
             <TabButton
@@ -1360,7 +1360,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
                 icon={<Mic size={14} />}
                 label="Çağrı Logları"
                 count={item.callLogs.length}
-                color="#6366f1"
+                color="#4f46e5"
                 onClick={() => setTab('callLogs')}
               />
             )}
@@ -1370,7 +1370,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
               active={tab === 'solution-steps'}
               icon={<ListChecks size={14} />}
               label="Çözüm Adımları"
-              color="#14b8a6"
+              color="#0d9488"
               onClick={() => setTab('solution-steps')}
             />
           </nav>

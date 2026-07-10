@@ -20,14 +20,16 @@ ok('3 ikon her zaman kendi renginde (idle dahil — A)',
   /<span className="inline-flex" style=\{\{ color \}\}>\{icon\}<\/span>/.test(tab));
 ok('4 aktif sayaç rozeti sekme rengiyle tonlanır',
   /color-mix\(in srgb, \$\{color\} 16%, transparent\)/.test(tab));
-ok('5 7 sekmenin onaylı paleti bağlı (Detay mavi … Çözüm turkuaz)',
-  /label="Detay"[\s\S]{0,80}color="#0ea5e9"/.test(page)
-  && /label="Aktivite"[\s\S]{0,120}color="#f59e0b"/.test(page)
-  && /label="Notlar"[\s\S]{0,120}color="#8b5cf6"/.test(page)
-  && /label="Dosyalar"[\s\S]{0,120}color="#10b981"/.test(page)
-  && /label="Bağlantılar"[\s\S]{0,80}color="#ec4899"/.test(page)
+ok('5 7 sekmenin paleti bağlı — 600-ton (Codex #524 P2: WCAG kontrast; 500 DEĞİL)',
+  /label="Detay"[\s\S]{0,80}color="#0284c7"/.test(page)
+  && /label="Aktivite"[\s\S]{0,120}color="#d97706"/.test(page)
+  && /label="Notlar"[\s\S]{0,120}color="#7c3aed"/.test(page)
+  && /label="Dosyalar"[\s\S]{0,120}color="#059669"/.test(page)
+  && /label="Bağlantılar"[\s\S]{0,80}color="#db2777"/.test(page)
   && /label="İletişim"[\s\S]{0,80}color="#2563eb"/.test(page)
-  && /label="Çözüm Adımları"[\s\S]{0,80}color="#14b8a6"/.test(page));
+  && /label="Çözüm Adımları"[\s\S]{0,80}color="#0d9488"/.test(page)
+  // 500-ton düşük-kontrast değerler kalmadı
+  && !/#0ea5e9|#f59e0b|#8b5cf6|#10b981|#ec4899|#14b8a6/.test(page));
 ok('6 sekme SIRASI + sekme sayısı değişmedi (regresyon)',
   page.indexOf('label="Detay"') < page.indexOf('label="Aktivite"')
   && page.indexOf('label="İletişim"') < page.indexOf('label="Çözüm Adımları"'));
