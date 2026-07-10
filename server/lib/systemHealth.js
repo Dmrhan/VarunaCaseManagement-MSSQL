@@ -18,6 +18,7 @@
  *    (Zabbix trigger'ları + pano). Tek istisna env bölümündeki boolean'lar.
  */
 import fsp from 'node:fs/promises';
+import path from 'node:path';
 import { prisma } from '../db/client.js';
 import { STORAGE_ROOT_DIR } from '../db/storage.js';
 import { getCronRuns } from '../cronScheduler.js';
@@ -59,10 +60,10 @@ async function collectDispatch(now) {
 async function collectMail(now) {
   const day = new Date(now - 24 * 60 * MIN);
   const [inbound24h, outbound24h, lastInbound, cases5m, activeInboxes] = await Promise.all([
-    prisma.caseEmail.count({ where: { direction: 'Inbound', createdAt: { gte: day } } }),
-    prisma.caseEmail.count({ where: { direction: 'Outbound', createdAt: { gte: day } } }),
+    prisma.caseEmail.count({ where: { direction: 'inbound', createdAt: { gte: day } } }),
+    prisma.caseEmail.count({ where: { direction: 'outbound', createdAt: { gte: day } } }),
     prisma.caseEmail.findFirst({
-      where: { direction: 'Inbound' },
+      where: { direction: 'inbound' },
       orderBy: { createdAt: 'desc' },
       select: { createdAt: true },
     }),
@@ -72,6 +73,16 @@ async function collectMail(now) {
     prisma.case.count({ where: { createdAt: { gte: new Date(now - 5 * MIN) } } }),
     prisma.externalMailInbox.count({ where: { isActive: true } }),
   ]);
+  // Codex #514 P2 — alan HER ZAMAN sayısal (Zabbix UNSIGNED item null'da
+  // 'unsupported' olur, stale-mail trigger'ı hiç ateşlenemezdi):
+  //   - inbound varsa gerçek yaş,
+  //   - aktif kutu var ama HİÇ inbound yoksa NO_INBOUND_EVER_SENTINEL_MIN
+  //     (kuruluşundan beri bozuk kutu → eşik kesin aşılır, alarm çalar),
+  //   - aktif kutu yoksa 0 (izlenecek şey yok, alarm yok).
+  const NO_INBOUND_EVER_SENTINEL_MIN = 525600; // 1 yıl (dk) — "hiç mail gelmedi"
+  const lastInboundAgeMin = lastInbound
+    ? Math.round((now - lastInbound.createdAt.getTime()) / MIN)
+    : (activeInboxes > 0 ? NO_INBOUND_EVER_SENTINEL_MIN : 0);
   return {
     inbound24h,
     outbound24h,
@@ -79,7 +90,7 @@ async function collectMail(now) {
     // eşiği bunu bilerek cömert tutulur (template'te belgelendi). Kutu-bazı
     // gerçek poll-tick izi ve dedupe sayacı Faz 2 (poller enstrümantasyonu
     // ayrı PR; CaseEmail'de deduped kolonu YOK — intake in-memory bilir).
-    lastInboundAgeMin: lastInbound ? Math.round((now - lastInbound.createdAt.getTime()) / MIN) : null,
+    lastInboundAgeMin,
     casesCreatedLast5m: cases5m,
     activeInboxCount: activeInboxes,
     imapPollIntervalSec: Number.parseInt(process.env.MAIL_IMAP_POLL_INTERVAL_SEC ?? '0', 10) || 0,
@@ -139,10 +150,26 @@ async function collectDb() {
 }
 
 async function collectEnv() {
+  // Codex #514 P2 — taze kurulumda STORAGE_ROOT henüz YOKTUR; upload yolu
+  // yazmadan önce mkdir({recursive:true}) yapar (storage.js:131), yani
+  // gerçek yetenek "en yakın VAR OLAN üst dizine yazabilmek"tir. Dizin
+  // yok diye false dönmek temiz kurulumda yanlış env.ok alarmı üretirdi.
+  // Kontrol upload davranışını aynen yansıtır: var olan ilk ataya W_OK.
   let storageWritable = false;
   try {
-    await fsp.access(STORAGE_ROOT_DIR, fsp.constants?.W_OK ?? 2);
-    storageWritable = true;
+    let dir = STORAGE_ROOT_DIR;
+    for (let depth = 0; depth < 30; depth++) {
+      try {
+        await fsp.access(dir, fsp.constants?.W_OK ?? 2);
+        storageWritable = true;
+        break;
+      } catch (err) {
+        if (err?.code !== 'ENOENT') break; // var ama yazılamaz → false
+        const parent = path.dirname(dir);
+        if (parent === dir) break; // köke ulaşıldı
+        dir = parent;
+      }
+    }
   } catch { /* yazılamaz */ }
   return {
     appPublicBaseUrlSet: Boolean(process.env.APP_PUBLIC_BASE_URL),
