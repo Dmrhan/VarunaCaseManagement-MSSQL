@@ -2699,7 +2699,7 @@ export const caseRepository = {
     // arşivli vaka da alabildiğinden bu filtre gerekli.
     const NOT_CANCELABLE = new Set(['IptalEdildi', 'Cozuldu']);
     const targets = cases.filter((c) => !NOT_CANCELABLE.has(c.status) && !c.isArchived);
-    const skipped = cases.length - targets.length;
+    let skipped = cases.length - targets.length;
     if (targets.length === 0) {
       return { cancelled: 0, skipped, requested: ids.length };
     }
@@ -2713,6 +2713,22 @@ export const caseRepository = {
     // validasyon + abort-on-error en dürüst yol.
     let cancelled = 0;
     for (const c of targets) {
+      // Codex #521 P2 (TOCTOU) — upfront filtre ile transition arasında başka
+      // kullanıcı vakayı Çözüldü'ye çekmiş/arşivlemiş olabilir. İptal
+      // guard-muaf olduğundan transitionStatus terminal Cozuldu'yu KOŞULSUZ
+      // İptal'e çevirirdi. Transition ÖNCESİ taze status oku; terminal/arşivli
+      // olduysa ATLA (iptale çekme). Pencereyi mikro-saniyeye indirir;
+      // transitionStatus kendi tek-tx olmadığından teorik kalıntı race kalır
+      // ama Cozuldu'yu ezme pratik riski kapanır (hard-lock ayrı transition
+      // refactoru ister — bu haftanın korunan alanı).
+      const fresh = await prisma.case.findUnique({
+        where: { id: c.id },
+        select: { status: true, isArchived: true },
+      });
+      if (!fresh || NOT_CANCELABLE.has(fresh.status) || fresh.isArchived) {
+        skipped += 1;
+        continue;
+      }
       let r;
       try {
         r = await caseRepository.transitionStatus(

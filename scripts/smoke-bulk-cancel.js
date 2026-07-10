@@ -49,6 +49,9 @@ ok('2.5 (Codex #520 P2) iptal edilemezler hedef DIŞI: Cozuldu + IptalEdildi + a
 ok('2.6 (Codex #520 P2) hata YUTULMAZ — döngü durur + kısmi durum raporlanır (failed.push YOK)',
   /İptal yarıda kesildi/.test(repo)
   && !/failed\.push/.test(repo.split('async bulkCancel')[1]?.split('async ')[0] ?? ''));
+ok('2.7 (Codex #521 P2) TOCTOU — transition ÖNCESİ taze status re-check; terminal/arşiv olduysa atla',
+  /const fresh = await prisma\.case\.findUnique\(/.test(repo)
+  && /if \(!fresh \|\| NOT_CANCELABLE\.has\(fresh\.status\) \|\| fresh\.isArchived\) \{\s*skipped \+= 1;/.test(repo));
 
 console.log('── Regresyon: mevcut invariant\'lar KORUNDU ──');
 ok('3.1 bulk-update terminal yasağı DOKUNULMADI (Cozuldu/IptalEdildi hâlâ blok)',
