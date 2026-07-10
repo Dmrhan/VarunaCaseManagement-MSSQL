@@ -72,9 +72,13 @@ async function collectMail(now) {
     // erken uyarı sinyali: son 5 dk'da MAİL kaynaklı açılan vaka sayısı.
     // Codex #518 P2 — origin filtresi: manuel/telefon/web toplu girişleri
     // (ör. büyük account onboarding'i) mail-döngüsü DISASTER alarmını
-    // YANLIŞ tetiklemesin. Intake origin='E-posta' yazar (tireli —
-    // inboundMailIntake.js:1000 + CaseOrigin tipi; 'Eposta' DEĞİL).
-    prisma.case.count({ where: { createdAt: { gte: new Date(now - 5 * MIN) }, origin: 'E-posta' } }),
+    // YANLIŞ tetiklemesin.
+    // Codex #519 P1 — SAKLANAN değer 'Eposta' (tiresiz): intake 'E-posta'
+    // gönderir ama create() enumMap toDb ile ASCII'ye çevirir
+    // (enumMap.js:24 'E-posta'→'Eposta'; CK_Case_origin constraint'i de
+    // yalnız 'Eposta' kabul eder). Görünen etiketle filtrelemek 0 satır
+    // eşler ve alarmı fiilen KAPATIRDI.
+    prisma.case.count({ where: { createdAt: { gte: new Date(now - 5 * MIN) }, origin: 'Eposta' } }),
     // Codex #515 P2 — sentinel kapısı "GERÇEKTEN POLL EDİLEN" kutuya
     // bakmalı. isActive tek başına yetmez: poller (listEnabled) tenant
     // kill-switch + inbox.enabled + isActive + imapHost şartlarını arar.

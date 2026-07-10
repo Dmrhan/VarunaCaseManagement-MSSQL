@@ -55,9 +55,9 @@ ok('2.9 (Codex #518 P2) statfs de en yakın var olan ataya düşer (taze kurulum
   /statfsNearestExisting\(STORAGE_ROOT_DIR\)/.test(health)
   && /return await fsp\.statfs\(dir\)/.test(health)
   && !/fsp\.statfs\(STORAGE_ROOT_DIR\)\.catch/.test(health));
-ok('2.10 (Codex #518 P2) döngü dedektörü YALNIZ mail-kaynaklı vakaları sayar (origin=E-posta, tireli!)',
-  /origin: 'E-posta' \}/.test(health)
-  && !/origin: 'Eposta'/.test(health));
+ok('2.10 (Codex #518 P2 + #519 P1) döngü dedektörü SAKLANAN origin ile filtreler (Eposta — enumMap toDb; görünen "E-posta" DEĞİL)',
+  /origin: 'Eposta' \}/.test(health)
+  && !/origin: 'E-posta' \}/.test(health));
 
 console.log('── route + mount ──');
 ok('3.1 çift kimlik: HEALTH_TOKEN timing-safe VEYA SystemAdmin JWT',
