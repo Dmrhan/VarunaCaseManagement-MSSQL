@@ -27,15 +27,36 @@ import { startImapPollingInterval } from './lib/imapPoller.js';
 
 const TZ = 'Europe/Istanbul';
 
+// Sistem Sağlığı (2026-07-10) — in-memory son-çalışma kaydı. schedule()
+// sarmalayıcısı her koşuda günceller; /api/system/health bunu okuyup
+// "cron X gündür koşmadı" tespitini mümkün kılar. Süreç restart'ında
+// sıfırlanır (bilinçli: kayıt sadece canlı sürecin gözlemi, kalıcı audit
+// değil). Job mantığına SIFIR dokunuş — yalnızca gözlem.
+const cronRuns = new Map(); // name -> { expr, lastStartAt, lastEndAt, ok, note }
+
+export function getCronRuns() {
+  return Array.from(cronRuns.entries()).map(([name, r]) => ({ name, ...r }));
+}
+
 function schedule(name, expr, fn) {
+  cronRuns.set(name, { expr, lastStartAt: null, lastEndAt: null, ok: null, note: 'henüz koşmadı (süreç yeni)' });
   cron.schedule(
     expr,
     async () => {
+      const rec = cronRuns.get(name) ?? { expr };
+      rec.lastStartAt = new Date().toISOString();
       try {
         const result = await fn();
+        rec.ok = true;
+        rec.note = JSON.stringify(result ?? {}).slice(0, 120);
         console.log(`[cron:${name}]`, JSON.stringify(result ?? {}).slice(0, 300));
       } catch (err) {
+        rec.ok = false;
+        rec.note = String(err?.message ?? err).slice(0, 120);
         console.error(`[cron:${name}] hata:`, err?.message ?? err);
+      } finally {
+        rec.lastEndAt = new Date().toISOString();
+        cronRuns.set(name, rec);
       }
     },
     { timezone: TZ },
