@@ -76,17 +76,36 @@ function SourceChip({ kind }: { kind: 'varuna' | 'zabbix' }) {
   );
 }
 
-function Card({ label, level, children, source }: {
+function Card({ label, level, children, source, onDrill, drillHint }: {
   label: string; level?: Level; source?: 'varuna' | 'zabbix'; children: React.ReactNode;
+  /** Tıklanınca drill-down (öz-açıklayıcı: alt köşede "kayıtları gör →" ipucu çıkar). */
+  onDrill?: () => void; drillHint?: string;
 }) {
-  return (
-    <div className="relative rounded-xl border border-slate-200 bg-white p-3.5 dark:border-ndark-border dark:bg-ndark-card">
+  const base = 'relative rounded-xl border border-slate-200 bg-white p-3.5 dark:border-ndark-border dark:bg-ndark-card';
+  const inner = (
+    <>
       <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-slate-400 dark:text-ndark-muted">
         {label} {source && <SourceChip kind={source} />}
       </div>
       {level && <span className="absolute right-3 top-3"><StatusDot level={level} /></span>}
       {children}
-    </div>
+      {onDrill && (
+        <div className="mt-2 text-[10.5px] font-medium text-brand-600 opacity-80 group-hover:opacity-100 dark:text-ndark-link">
+          {drillHint ?? 'kayıtları gör'} →
+        </div>
+      )}
+    </>
+  );
+  if (!onDrill) return <div className={base}>{inner}</div>;
+  return (
+    <button
+      type="button"
+      onClick={onDrill}
+      className={`${base} group block w-full cursor-pointer text-left transition hover:border-brand-300 hover:shadow-sm`}
+      title={drillHint ?? 'Kayıtları gör'}
+    >
+      {inner}
+    </button>
   );
 }
 
@@ -166,7 +185,13 @@ function buildAlerts(h: SystemHealth): Alert[] {
   return out.sort((a, b) => (a.level === b.level ? 0 : a.level === 'crit' ? -1 : 1));
 }
 
-export function SystemHealthPage() {
+export function SystemHealthPage({ onOpenDispatches }: {
+  /**
+   * Dispatch kuyruğu drill-down'ı — kart tıklanınca mevcut "Bildirim
+   * Kayıtları" admin sayfası ilgili state filtresiyle açılır (App bağlar).
+   */
+  onOpenDispatches?: (state: 'Pending' | 'Failed' | '') => void;
+} = {}) {
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
@@ -318,15 +343,33 @@ export function SystemHealthPage() {
       <SectionTitle n={3} title="Bildirim / Dispatch Kuyruğu" icon={<Inbox size={13} />} />
       {health.dispatch?.error ? <SectionError error={health.dispatch.error} /> : (
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-          <Card label="Pending Birikimi" level={health.dispatch.pendingCount > TH.pendingWarn ? 'warn' : 'ok'} source="varuna">
+          <Card
+            label="Pending Birikimi"
+            level={health.dispatch.pendingCount > TH.pendingWarn ? 'warn' : 'ok'}
+            source="varuna"
+            onDrill={onOpenDispatches ? () => onOpenDispatches('Pending') : undefined}
+            drillHint="Pending kayıtları gör"
+          >
             <Val sub="sağlıklı sistemde ≈ 0 olmalı">{health.dispatch.pendingCount}</Val>
             <Threshold text={`🟡 >${TH.pendingWarn}`} />
           </Card>
-          <Card label="En Eski Pending" level={health.dispatch.oldestPendingAgeMin > TH.oldestPendingWarnMin ? 'warn' : 'ok'} source="varuna">
+          <Card
+            label="En Eski Pending"
+            level={health.dispatch.oldestPendingAgeMin > TH.oldestPendingWarnMin ? 'warn' : 'ok'}
+            source="varuna"
+            onDrill={onOpenDispatches ? () => onOpenDispatches('Pending') : undefined}
+            drillHint="Pending kayıtları gör"
+          >
             <Val sub="kuyruk ilerliyor mu?">{fmtMin(health.dispatch.oldestPendingAgeMin)}</Val>
             <Threshold text={`🟡 >${fmtMin(TH.oldestPendingWarnMin)}`} />
           </Card>
-          <Card label="Failed (24s)" level={health.dispatch.failed24h > 0 ? 'warn' : 'ok'} source="varuna">
+          <Card
+            label="Failed (24s)"
+            level={health.dispatch.failed24h > 0 ? 'warn' : 'ok'}
+            source="varuna"
+            onDrill={onOpenDispatches ? () => onOpenDispatches('Failed') : undefined}
+            drillHint="Failed kayıtları gör"
+          >
             <Val sub="gönderilemeyen bildirim">{health.dispatch.failed24h}</Val>
             <Threshold text="🟡 >0" />
           </Card>

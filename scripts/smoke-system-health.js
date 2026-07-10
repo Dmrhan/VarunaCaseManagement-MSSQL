@@ -107,6 +107,14 @@ if (existsSync('src/features/admin/SystemHealthPage.tsx')) {
     /loopCritPer5m: 15/.test(page) && /Döngü Dedektörü/.test(page));
   ok('7.10 iş metrikleri YOK — Operasyon Panosu\'na yönlendirme',
     /Operasyon Panosu/.test(page) && !/SLA skoru|atanmamış vaka listesi/.test(page));
+  const dispPage = read('src/features/admin/NotificationDispatchesPage.tsx');
+  ok('7.11 dispatch drill-down: kartlar mevcut Bildirim Kayıtları sayfasını filtreli açar (REUSE, yeni endpoint YOK)',
+    /onOpenDispatches/.test(page)
+    && /onOpenDispatches\('Pending'\)/.test(page) && /onOpenDispatches\('Failed'\)/.test(page)
+    && /initialState\?: DispatchState \| ''/.test(dispPage)
+    && /useState<DispatchState \| ''>\(initialState\)/.test(dispPage)
+    && /setView\('admin-notification-dispatches'\)/.test(app)
+    && /key=\{dispatchesInitialState \|\| 'all'\}/.test(app));
 }
 
 console.log('── Regresyon guard: mail düzenine dokunulmadı ──');

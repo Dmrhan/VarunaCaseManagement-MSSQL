@@ -122,6 +122,9 @@ export default function App() {
   // useEffect aşağıda bir kez yönlendirme yapar (sadece initialRedirectDoneRef
   // false iken — manuel nav'ı override etmesin).
   const [view, setView] = useState<View>('cases');
+  // Sistem Sağlığı → Bildirim Kayıtları drill-down'ı: kart tıklanınca
+  // dispatches sayfası bu state filtresiyle açılır (key remount tazeler).
+  const [dispatchesInitialState, setDispatchesInitialState] = useState<'Pending' | 'Failed' | ''>('');
   const [initialRedirectDone, setInitialRedirectDone] = useState(false);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   // Vaka detayına hangi view'dan girildiği — geri dönüşte oraya yönlendirmek için.
@@ -507,7 +510,12 @@ export default function App() {
         {view === 'admin-resolution-approval' && <ResolutionApprovalPoliciesPage />}
         {view === 'admin-notification-templates' && <NotificationTemplatesPage />}
         {view === 'admin-notification-rules' && <NotificationRulesPage />}
-        {view === 'admin-notification-dispatches' && <NotificationDispatchesPage />}
+        {view === 'admin-notification-dispatches' && (
+          <NotificationDispatchesPage
+            key={dispatchesInitialState || 'all'}
+            initialState={dispatchesInitialState}
+          />
+        )}
         {view === 'admin-authorization-policies' && <AdminAuthorizationPoliciesPage />}
       </AdminLayout>
     );
@@ -1129,7 +1137,12 @@ export default function App() {
             // kez yüklenirken sarmalayıcı yoksa React suspend hatası fırlatır
             // (satır ~500'deki AdminEmailTemplatesPage deseniyle aynı).
             <Suspense fallback={<p className="p-4 text-sm text-slate-400">Sistem Sağlığı yükleniyor…</p>}>
-              <SystemHealthPage />
+              <SystemHealthPage
+                onOpenDispatches={(state) => {
+                  setDispatchesInitialState(state);
+                  setView('admin-notification-dispatches');
+                }}
+              />
             </Suspense>
           )}
           {(view === 'analytics-people-performance' || (isDetail && caseDetailOrigin === 'analytics-people-performance')) && (

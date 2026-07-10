@@ -36,12 +36,15 @@ const EVENT_OPTIONS: NotificationEvent[] = [
 
 const STATE_OPTIONS: DispatchState[] = ['Pending', 'Sent', 'Failed', 'Suppressed'];
 
-export function NotificationDispatchesPage() {
+export function NotificationDispatchesPage({ initialState = '' }: {
+  /** Sistem Sağlığı drill-down'ı — sayfa bu state filtresiyle açılır (opsiyonel, geri uyumlu). */
+  initialState?: DispatchState | '';
+} = {}) {
   const [items, setItems] = useState<NotificationDispatch[]>([]);
   const [total, setTotal] = useState(0);
   const [filterCompanyId, setFilterCompanyId] = useState<string | null>(null);
   const [filterEvent, setFilterEvent] = useState<NotificationEvent | ''>('');
-  const [filterState, setFilterState] = useState<DispatchState | ''>('');
+  const [filterState, setFilterState] = useState<DispatchState | ''>(initialState);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewer, setViewer] = useState<NotificationDispatch | null>(null);
