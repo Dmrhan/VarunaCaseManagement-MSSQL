@@ -21,6 +21,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { prisma } from '../db/client.js';
 import { STORAGE_ROOT_DIR } from '../db/storage.js';
+import { externalMailInboxRepo } from '../db/externalMailInboxRepository.js';
 import { getCronRuns } from '../cronScheduler.js';
 import { isConfigured as zabbixConfigured } from './zabbixClient.js';
 
@@ -59,7 +60,7 @@ async function collectDispatch(now) {
 
 async function collectMail(now) {
   const day = new Date(now - 24 * 60 * MIN);
-  const [inbound24h, outbound24h, lastInbound, cases5m, activeInboxes] = await Promise.all([
+  const [inbound24h, outbound24h, lastInbound, cases5m, pollableInboxes] = await Promise.all([
     prisma.caseEmail.count({ where: { direction: 'inbound', createdAt: { gte: day } } }),
     prisma.caseEmail.count({ where: { direction: 'outbound', createdAt: { gte: day } } }),
     prisma.caseEmail.findFirst({
@@ -71,18 +72,23 @@ async function collectMail(now) {
     // erken uyarı sinyali: son 5 dk'da açılan vaka sayısı. Zabbix trigger'ı
     // sürekli >15 (≈3/dk) görürse alarm çalar.
     prisma.case.count({ where: { createdAt: { gte: new Date(now - 5 * MIN) } } }),
-    prisma.externalMailInbox.count({ where: { isActive: true } }),
+    // Codex #515 P2 — sentinel kapısı "GERÇEKTEN POLL EDİLEN" kutuya
+    // bakmalı. isActive tek başına yetmez: poller (listEnabled) tenant
+    // kill-switch + inbox.enabled + isActive + imapHost şartlarını arar.
+    // Aynı predicate REUSE edilir (kopya where değil) — poller şartı
+    // değişirse burası otomatik hizada kalır.
+    externalMailInboxRepo.listEnabled().then((rows) => rows.length),
   ]);
   // Codex #514 P2 — alan HER ZAMAN sayısal (Zabbix UNSIGNED item null'da
   // 'unsupported' olur, stale-mail trigger'ı hiç ateşlenemezdi):
   //   - inbound varsa gerçek yaş,
-  //   - aktif kutu var ama HİÇ inbound yoksa NO_INBOUND_EVER_SENTINEL_MIN
+  //   - POLL EDİLEN kutu var ama HİÇ inbound yoksa sentinel
   //     (kuruluşundan beri bozuk kutu → eşik kesin aşılır, alarm çalar),
-  //   - aktif kutu yoksa 0 (izlenecek şey yok, alarm yok).
+  //   - poll edilen kutu yoksa 0 (izlenen şey yok → stale alarmı da yok).
   const NO_INBOUND_EVER_SENTINEL_MIN = 525600; // 1 yıl (dk) — "hiç mail gelmedi"
   const lastInboundAgeMin = lastInbound
     ? Math.round((now - lastInbound.createdAt.getTime()) / MIN)
-    : (activeInboxes > 0 ? NO_INBOUND_EVER_SENTINEL_MIN : 0);
+    : (pollableInboxes > 0 ? NO_INBOUND_EVER_SENTINEL_MIN : 0);
   return {
     inbound24h,
     outbound24h,
@@ -92,7 +98,10 @@ async function collectMail(now) {
     // ayrı PR; CaseEmail'de deduped kolonu YOK — intake in-memory bilir).
     lastInboundAgeMin,
     casesCreatedLast5m: cases5m,
-    activeInboxCount: activeInboxes,
+    // Poll edilebilir kutu sayısı (poller listEnabled paritesi) — eski adı
+    // activeInboxCount idi; anlamı netleşti (schemaVersion 1 içinde alan
+    // eklendi/yeniden adlandı: template bu alanı kullanmıyor, kırılma yok).
+    pollableInboxCount: pollableInboxes,
     imapPollIntervalSec: Number.parseInt(process.env.MAIL_IMAP_POLL_INTERVAL_SEC ?? '0', 10) || 0,
   };
 }
