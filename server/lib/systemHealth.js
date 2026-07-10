@@ -69,9 +69,12 @@ async function collectMail(now) {
       select: { createdAt: true },
     }),
     // Döngü dedektörü — 6 Temmuz olayının (auto-ack × kural → 447 vaka)
-    // erken uyarı sinyali: son 5 dk'da açılan vaka sayısı. Zabbix trigger'ı
-    // sürekli >15 (≈3/dk) görürse alarm çalar.
-    prisma.case.count({ where: { createdAt: { gte: new Date(now - 5 * MIN) } } }),
+    // erken uyarı sinyali: son 5 dk'da MAİL kaynaklı açılan vaka sayısı.
+    // Codex #518 P2 — origin filtresi: manuel/telefon/web toplu girişleri
+    // (ör. büyük account onboarding'i) mail-döngüsü DISASTER alarmını
+    // YANLIŞ tetiklemesin. Intake origin='E-posta' yazar (tireli —
+    // inboundMailIntake.js:1000 + CaseOrigin tipi; 'Eposta' DEĞİL).
+    prisma.case.count({ where: { createdAt: { gte: new Date(now - 5 * MIN) }, origin: 'E-posta' } }),
     // Codex #515 P2 — sentinel kapısı "GERÇEKTEN POLL EDİLEN" kutuya
     // bakmalı. isActive tek başına yetmez: poller (listEnabled) tenant
     // kill-switch + inbox.enabled + isActive + imapHost şartlarını arar.
@@ -106,6 +109,28 @@ async function collectMail(now) {
   };
 }
 
+/**
+ * Codex #518 P2 — taze kurulumda STORAGE_ROOT ilk upload'a kadar YOKTUR
+ * (saveObject mkdir-recursive yapar). Dizin yoksa statfs'i var olan en
+ * yakın ataya uygula: aynı dosya sisteminin doluluğu döner, Zabbix
+ * free_pct item'ı 'unsupported'a düşmez. (W_OK kontrolündeki yürüme
+ * mantığının statfs muadili.)
+ */
+async function statfsNearestExisting(startDir) {
+  let dir = startDir;
+  for (let depth = 0; depth < 30; depth++) {
+    try {
+      return await fsp.statfs(dir);
+    } catch (err) {
+      if (err?.code !== 'ENOENT') return null; // var ama okunamıyor → ölçüm yok
+      const parent = path.dirname(dir);
+      if (parent === dir) return null; // köke ulaşıldı
+      dir = parent;
+    }
+  }
+  return null;
+}
+
 async function collectStorage() {
   const [emailAtt, caseAtt, stat] = await Promise.all([
     prisma.$queryRawUnsafe(
@@ -114,7 +139,7 @@ async function collectStorage() {
     prisma.$queryRawUnsafe(
       `SELECT COUNT(*) n, ISNULL(SUM(CAST(fileSize AS BIGINT)),0) b FROM CaseAttachment`,
     ),
-    fsp.statfs(STORAGE_ROOT_DIR).catch(() => null),
+    statfsNearestExisting(STORAGE_ROOT_DIR),
   ]);
   const num = (v) => (typeof v === 'bigint' ? Number(v) : Number(v ?? 0));
   const out = {
