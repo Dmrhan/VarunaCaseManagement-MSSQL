@@ -43,8 +43,11 @@ ok('2.5 schemaVersion sözleşmesi',
   /schemaVersion: 1/.test(health));
 ok('2.6 (Codex #514 P2) lastInboundAgeMin HER ZAMAN sayısal (null yok; sentinel + 0)',
   /NO_INBOUND_EVER_SENTINEL_MIN = 525600/.test(health)
-  && /activeInboxes > 0 \? NO_INBOUND_EVER_SENTINEL_MIN : 0/.test(health)
+  && /pollableInboxes > 0 \? NO_INBOUND_EVER_SENTINEL_MIN : 0/.test(health)
   && !/lastInboundAgeMin: lastInbound \? [^:]+ : null/.test(health));
+ok('2.8 (Codex #515 P2) sentinel kapısı POLL EDİLEN kutuya bakar (listEnabled REUSE, isActive-only DEĞİL)',
+  /externalMailInboxRepo\.listEnabled\(\)/.test(health)
+  && !/externalMailInbox\.count\(\{ where: \{ isActive: true \} \}\)/.test(health));
 ok('2.7 (Codex #514 P2) storage yazılabilirlik = var olan en yakın ataya W_OK (mkdir-recursive paritesi)',
   /err\?\.code !== 'ENOENT'/.test(health)
   && /path\.dirname\(dir\)/.test(health));
@@ -100,9 +103,9 @@ if (process.env.SMOKE_DB === '1') {
     ok('6.2 dispatch sayıları makul (pending>=0, yaş>=0)',
       Number.isInteger(h.dispatch?.pendingCount) && h.dispatch.pendingCount >= 0
       && Number.isInteger(h.dispatch?.oldestPendingAgeMin));
-    ok('6.3 mail bölümü dolu (24s sayılar + aktif kutu + döngü sayacı)',
+    ok('6.3 mail bölümü dolu (24s sayılar + poll edilebilir kutu + döngü sayacı)',
       Number.isInteger(h.mail?.inbound24h) && Number.isInteger(h.mail?.casesCreatedLast5m)
-      && h.mail?.activeInboxCount > 0);
+      && h.mail?.pollableInboxCount > 0);
     ok('6.3b direction filtresi GERÇEKTEN eşleşiyor (canlıda inbound var → yaş < sentinel; 0 sayaç bug\'ı yakalar)',
       Number.isFinite(h.mail?.lastInboundAgeMin) && h.mail.lastInboundAgeMin < 525600);
     ok('6.4 depolama: ek byte toplamları > 0 (canlı Univera verisi)',
