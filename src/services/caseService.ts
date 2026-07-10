@@ -2174,6 +2174,28 @@ export const caseService = {
     return result;
   },
 
+  /**
+   * Toplu iptal (2026-07-10) — bulk bar "İptal Et" aksiyonu; Agent HARİÇ
+   * roller (BE requireRole otoritedir). Her vaka "İptal Edildi"ye geçer,
+   * neden geçmişe yazılır.
+   */
+  async bulkCancel(
+    caseIds: string[],
+    cancellationReason: string,
+  ): Promise<{ cancelled: number; skipped: number; requested: number } | undefined> {
+    const result = await apiFetch<{ cancelled: number; skipped: number; requested: number }>(
+      `${API_BASE}/bulk-cancel`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caseIds, cancellationReason }),
+      },
+      'Toplu iptal başarısız',
+    );
+    if (result) caseIds.forEach((id) => invalidateCaseDetail(id));
+    return result;
+  },
+
   async findByAccount(
     accountId: string,
     options?: { excludeId?: string; statusIn?: CaseStatus[]; statusNotIn?: CaseStatus[] },

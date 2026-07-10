@@ -2645,6 +2645,102 @@ export const caseRepository = {
   },
 
   /**
+   * Toplu iptal (2026-07-10) — Agent HARİÇ rollere açık (route requireRole
+   * ile korunur; otorite orada). bulkArchive'ın rol/statü-değişmiş ikizi
+   * AMA arşiv değil terminal STATÜ GEÇİŞİ: her vaka için transitionStatus
+   * ('İptalEdildi') çağrılır → SLA durdurma + per-case StatusChange history
+   * + cancellationReason kaydı + İptal-muaf kapanış guard yolu REUSE edilir
+   * (kopyalanmaz). Çözüldü'nün aksine İptal müşteri/ürün grubu/kapanış
+   * etiket kapılarından muaftır (bkz. transitionStatus, ~satır 4002).
+   *
+   * Partial-success YOK: bulunamayan/cross-tenant id → hiçbir şey yazmadan
+   * { error } / CaseAccessError. Zaten IptalEdildi olan atlanır (idempotent).
+   * bulkUpdate'in terminal yasağına (3804) DOKUNULMAZ — bu ayrı, yetkili yol.
+   */
+  async bulkCancel({ caseIds, cancellationReason }, { actorDisplay, allowedCompanyIds, actorObject }) {
+    // actorObject = ActorContext (userId + role). transitionStatus geçmiş/
+    // bildirim stamp'ı actorUserIdOf(actorObject).userId okur — Codex #520 P2:
+    // req.user.id DEĞİL (req.user'da alan adı 'id', ActorContext'te 'userId').
+    // actorDisplay = geçmiş 'actor' string'i (tekil transition paritesi).
+    assertActor(actorObject, 'caseRepository.bulkCancel');
+    if (!Array.isArray(caseIds) || caseIds.length === 0) {
+      return { error: 'caseIds dizisi gerekli (boş olamaz).' };
+    }
+    if (caseIds.length > 100) {
+      return { error: 'En fazla 100 vaka tek seferde iptal edilebilir.' };
+    }
+    const trimmedReason = typeof cancellationReason === 'string' ? cancellationReason.trim() : '';
+    if (trimmedReason.length < 3) {
+      return { error: 'İptal nedeni gerekli (en az 3 karakter).' };
+    }
+
+    const ids = [...new Set(caseIds)];
+    const cases = await prisma.case.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, companyId: true, status: true, isArchived: true },
+    });
+    if (cases.length !== ids.length) {
+      const foundIds = new Set(cases.map((c) => c.id));
+      const missing = ids.filter((id) => !foundIds.has(id));
+      return { error: `Bazı vakalar bulunamadı: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ` (+${missing.length - 3})` : ''}` };
+    }
+    // Cross-tenant fail-fast (bulkArchive paritesi) — döngüye girmeden reddet.
+    if (allowedCompanyIds) {
+      const outsider = cases.find((c) => !allowedCompanyIds.includes(c.companyId));
+      if (outsider) {
+        throw new CaseAccessError('Toplu iptal: erişiminiz olmayan vaka(lar) listede.');
+      }
+    }
+
+    // Codex #520 P2 — iptal edilemez olanları hedef DIŞI bırak (hata değil,
+    // atlanır): terminal statüler (Cozuldu = çözülmüş vaka İPTALE çekilmez;
+    // IptalEdildi = zaten iptal) + arşivli vakalar (aktif akış dışı;
+    // transitionStatus scope'u zaten reddederdi). Liste toplu seçime terminal/
+    // arşivli vaka da alabildiğinden bu filtre gerekli.
+    const NOT_CANCELABLE = new Set(['IptalEdildi', 'Cozuldu']);
+    const targets = cases.filter((c) => !NOT_CANCELABLE.has(c.status) && !c.isArchived);
+    const skipped = cases.length - targets.length;
+    if (targets.length === 0) {
+      return { cancelled: 0, skipped, requested: ids.length };
+    }
+
+    // Terminal statü GEÇİŞİ (reuse). Bilinen tüm hata modları yukarıda
+    // elendi (bulunamadı/cross-tenant/terminal/arşiv); İptal guard-muaf →
+    // transitionStatus başarılı olmalı. Codex #520 P2 — hata YUTULMAZ:
+    // beklenmedik hata/null (race) olursa DÖNGÜYÜ DURDUR ve kısmi durumu
+    // dürüstçe raporla (sessizce devam edip başarısızı gizleme). Tam
+    // atomiklik transitionStatus tek-tx olmadığından mümkün değil; upfront
+    // validasyon + abort-on-error en dürüst yol.
+    let cancelled = 0;
+    for (const c of targets) {
+      let r;
+      try {
+        r = await caseRepository.transitionStatus(
+          c.id,
+          'İptalEdildi',
+          { cancellationReason: trimmedReason },
+          actorDisplay,
+          allowedCompanyIds,
+          actorObject,
+        );
+      } catch (err) {
+        return {
+          error: `İptal yarıda kesildi — ${cancelled} vaka iptal edildi, ${c.id}'de hata: ${String(err?.message ?? err).slice(0, 120)}`,
+          cancelled, skipped, requested: ids.length,
+        };
+      }
+      if (!r) {
+        return {
+          error: `İptal yarıda kesildi — ${cancelled} vaka iptal edildi, ${c.id} işlenemedi (erişim/bulunamadı).`,
+          cancelled, skipped, requested: ids.length,
+        };
+      }
+      cancelled += 1;
+    }
+    return { cancelled, skipped, requested: ids.length };
+  },
+
+  /**
    * PR-SD — Arşivli vakayı geri yükle (SystemAdmin-only). Status enum
    * dokunulmaz. Audit: CaseActivity actionType='Restored', actor.
    */
