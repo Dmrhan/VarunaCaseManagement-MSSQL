@@ -921,10 +921,12 @@ router.post(
     const body = req.body ?? {};
     // İkincil savunma (deny-only policy; flag açıkken 'close' aksiyonuyla).
     await assertBulkCaseCancelPolicy(req, { caseIds: body.caseIds });
-    const actor = requireActor(req);
+    const actor = requireActor(req); // ActorContext: userId + role + displayName
+    // Codex #520 P2 — transitionStatus audit stamp'ı actorObject.userId okur;
+    // ActorContext geç (req.user'da alan 'id', stamp null kalırdı).
     const result = await caseRepository.bulkCancel(
       { caseIds: body.caseIds, cancellationReason: body.cancellationReason },
-      { actor, allowedCompanyIds: req.user.allowedCompanyIds, actorObject: req.user },
+      { actorDisplay: actor.displayName, allowedCompanyIds: req.user.allowedCompanyIds, actorObject: actor },
     );
     if (result?.error) return res.status(400).json(result);
     res.json(result);

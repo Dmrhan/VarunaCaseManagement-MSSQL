@@ -21,9 +21,11 @@ ok('1.1 CASE_BULK_CANCEL_ROLES = 5 rol (SystemAdmin dahil, Agent YOK)',
   && !/CASE_BULK_CANCEL_ROLES = \[[^\]]*'Agent'/.test(routes));
 ok('1.2 route /bulk-cancel requireRole(...CASE_BULK_CANCEL_ROLES) ile korunuyor (birincil kapı)',
   /'\/bulk-cancel',\s*\n\s*requireRole\(\.\.\.CASE_BULK_CANCEL_ROLES\)/.test(routes));
-ok('1.3 route repo.bulkCancel\'i actorObject + cross-tenant scope ile çağırır',
+ok('1.3 route repo.bulkCancel\'i ActorContext (userId stamp — Codex #520 P2) + scope ile çağırır',
   /caseRepository\.bulkCancel\(/.test(routes)
-  && /actorObject: req\.user/.test(routes)
+  && /actorObject: actor\b/.test(routes)
+  && /actorDisplay: actor\.displayName/.test(routes)
+  && !/actorObject: req\.user/.test(routes)
   && /allowedCompanyIds: req\.user\.allowedCompanyIds/.test(routes));
 ok('1.4 ikincil savunma: assertBulkCaseCancelPolicy (action close, flag açıkken)',
   /async function assertBulkCaseCancelPolicy/.test(routes)
@@ -40,8 +42,13 @@ ok('2.3 neden zorunlu (min 3) + max 100',
 ok('2.4 cross-tenant fail-fast (CaseAccessError, partial write yok)',
   /Toplu iptal: erişiminiz olmayan vaka/.test(repo)
   && /throw new CaseAccessError/.test(repo.split('async bulkCancel')[1]?.split('async ')[0] ?? ''));
-ok('2.5 idempotent: zaten IptalEdildi olan atlanır',
-  /c\.status !== 'IptalEdildi'/.test(repo));
+ok('2.5 (Codex #520 P2) iptal edilemezler hedef DIŞI: Cozuldu + IptalEdildi + arşivli atlanır',
+  /NOT_CANCELABLE = new Set\(\['IptalEdildi', 'Cozuldu'\]\)/.test(repo)
+  && /!NOT_CANCELABLE\.has\(c\.status\) && !c\.isArchived/.test(repo)
+  && /isArchived: true/.test(repo.split('async bulkCancel')[1]?.split('async ')[0] ?? ''));
+ok('2.6 (Codex #520 P2) hata YUTULMAZ — döngü durur + kısmi durum raporlanır (failed.push YOK)',
+  /İptal yarıda kesildi/.test(repo)
+  && !/failed\.push/.test(repo.split('async bulkCancel')[1]?.split('async ')[0] ?? ''));
 
 console.log('── Regresyon: mevcut invariant\'lar KORUNDU ──');
 ok('3.1 bulk-update terminal yasağı DOKUNULMADI (Cozuldu/IptalEdildi hâlâ blok)',

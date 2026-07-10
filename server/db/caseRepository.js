@@ -2657,8 +2657,12 @@ export const caseRepository = {
    * { error } / CaseAccessError. Zaten IptalEdildi olan atlanır (idempotent).
    * bulkUpdate'in terminal yasağına (3804) DOKUNULMAZ — bu ayrı, yetkili yol.
    */
-  async bulkCancel({ caseIds, cancellationReason }, { actor, allowedCompanyIds, actorObject = null }) {
-    assertActor(actor, 'caseRepository.bulkCancel');
+  async bulkCancel({ caseIds, cancellationReason }, { actorDisplay, allowedCompanyIds, actorObject }) {
+    // actorObject = ActorContext (userId + role). transitionStatus geçmiş/
+    // bildirim stamp'ı actorUserIdOf(actorObject).userId okur — Codex #520 P2:
+    // req.user.id DEĞİL (req.user'da alan adı 'id', ActorContext'te 'userId').
+    // actorDisplay = geçmiş 'actor' string'i (tekil transition paritesi).
+    assertActor(actorObject, 'caseRepository.bulkCancel');
     if (!Array.isArray(caseIds) || caseIds.length === 0) {
       return { error: 'caseIds dizisi gerekli (boş olamaz).' };
     }
@@ -2673,15 +2677,14 @@ export const caseRepository = {
     const ids = [...new Set(caseIds)];
     const cases = await prisma.case.findMany({
       where: { id: { in: ids } },
-      select: { id: true, companyId: true, status: true },
+      select: { id: true, companyId: true, status: true, isArchived: true },
     });
     if (cases.length !== ids.length) {
       const foundIds = new Set(cases.map((c) => c.id));
       const missing = ids.filter((id) => !foundIds.has(id));
       return { error: `Bazı vakalar bulunamadı: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ` (+${missing.length - 3})` : ''}` };
     }
-    // Cross-tenant fail-fast (bulkArchive paritesi) — partial write olmasın:
-    // döngüye girmeden tüm id'lerin scope'ta olduğunu doğrula.
+    // Cross-tenant fail-fast (bulkArchive paritesi) — döngüye girmeden reddet.
     if (allowedCompanyIds) {
       const outsider = cases.find((c) => !allowedCompanyIds.includes(c.companyId));
       if (outsider) {
@@ -2689,35 +2692,52 @@ export const caseRepository = {
       }
     }
 
-    const targets = cases.filter((c) => c.status !== 'IptalEdildi');
-    const alreadyCancelled = cases.length - targets.length;
+    // Codex #520 P2 — iptal edilemez olanları hedef DIŞI bırak (hata değil,
+    // atlanır): terminal statüler (Cozuldu = çözülmüş vaka İPTALE çekilmez;
+    // IptalEdildi = zaten iptal) + arşivli vakalar (aktif akış dışı;
+    // transitionStatus scope'u zaten reddederdi). Liste toplu seçime terminal/
+    // arşivli vaka da alabildiğinden bu filtre gerekli.
+    const NOT_CANCELABLE = new Set(['IptalEdildi', 'Cozuldu']);
+    const targets = cases.filter((c) => !NOT_CANCELABLE.has(c.status) && !c.isArchived);
+    const skipped = cases.length - targets.length;
     if (targets.length === 0) {
-      return { cancelled: 0, alreadyCancelled, requested: ids.length };
+      return { cancelled: 0, skipped, requested: ids.length };
     }
 
-    // Her hedef için terminal statü GEÇİŞİ (reuse). İptal guard-muaf
-    // olduğundan sıralı transitionStatus güvenli; yine de per-case hatayı
-    // defansif topla (fail-fast validasyon geçildi, hata beklenmez).
-    // this.* yerine ada göre — caseRepository const object, bağlamdan bağımsız.
+    // Terminal statü GEÇİŞİ (reuse). Bilinen tüm hata modları yukarıda
+    // elendi (bulunamadı/cross-tenant/terminal/arşiv); İptal guard-muaf →
+    // transitionStatus başarılı olmalı. Codex #520 P2 — hata YUTULMAZ:
+    // beklenmedik hata/null (race) olursa DÖNGÜYÜ DURDUR ve kısmi durumu
+    // dürüstçe raporla (sessizce devam edip başarısızı gizleme). Tam
+    // atomiklik transitionStatus tek-tx olmadığından mümkün değil; upfront
+    // validasyon + abort-on-error en dürüst yol.
     let cancelled = 0;
-    const failed = [];
     for (const c of targets) {
+      let r;
       try {
-        const r = await caseRepository.transitionStatus(
+        r = await caseRepository.transitionStatus(
           c.id,
           'İptalEdildi',
           { cancellationReason: trimmedReason },
-          actor,
+          actorDisplay,
           allowedCompanyIds,
           actorObject,
         );
-        if (r) cancelled += 1;
-        else failed.push(c.id);
-      } catch {
-        failed.push(c.id);
+      } catch (err) {
+        return {
+          error: `İptal yarıda kesildi — ${cancelled} vaka iptal edildi, ${c.id}'de hata: ${String(err?.message ?? err).slice(0, 120)}`,
+          cancelled, skipped, requested: ids.length,
+        };
       }
+      if (!r) {
+        return {
+          error: `İptal yarıda kesildi — ${cancelled} vaka iptal edildi, ${c.id} işlenemedi (erişim/bulunamadı).`,
+          cancelled, skipped, requested: ids.length,
+        };
+      }
+      cancelled += 1;
     }
-    return { cancelled, alreadyCancelled, failed: failed.length, requested: ids.length };
+    return { cancelled, skipped, requested: ids.length };
   },
 
   /**

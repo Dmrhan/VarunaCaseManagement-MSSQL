@@ -2182,8 +2182,8 @@ export const caseService = {
   async bulkCancel(
     caseIds: string[],
     cancellationReason: string,
-  ): Promise<{ cancelled: number; alreadyCancelled: number; failed?: number; requested: number } | undefined> {
-    const result = await apiFetch<{ cancelled: number; alreadyCancelled: number; failed?: number; requested: number }>(
+  ): Promise<{ cancelled: number; skipped: number; requested: number } | undefined> {
+    const result = await apiFetch<{ cancelled: number; skipped: number; requested: number }>(
       `${API_BASE}/bulk-cancel`,
       {
         method: 'POST',

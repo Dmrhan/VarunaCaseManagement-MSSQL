@@ -789,11 +789,10 @@ export function CasesListPage({
     const result = await caseService.bulkCancel(ids, reason.trim());
     setBulkSubmitting(false);
     setBulkField(null);
-    if (!result) return; // apiFetch toast gösterdi
+    if (!result) return; // apiFetch toast gösterdi (kısmi-abort hatası dahil)
     const parts = [`${result.cancelled} vaka iptal edildi`];
-    if (result.alreadyCancelled > 0) parts.push(`${result.alreadyCancelled} zaten iptalliydi`);
-    if (result.failed && result.failed > 0) parts.push(`${result.failed} başarısız`);
-    toast({ type: result.failed ? 'warn' : 'success', message: parts.join(' · ') + '.' });
+    if (result.skipped > 0) parts.push(`${result.skipped} atlandı (çözülmüş/arşivli/zaten iptal)`);
+    toast({ type: 'success', message: parts.join(' · ') + '.' });
     clearSelection();
     void load();
     void refreshStats();
