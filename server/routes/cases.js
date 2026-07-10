@@ -192,6 +192,12 @@ function asyncRoute(handler) {
   };
 }
 
+// Toplu iptal yetkisi (2026-07-10) — Agent HARİÇ tüm roller. Deny-only
+// resource policy varsayılan KAPALI olduğundan birincil kapı bu allowlist.
+// Kod tabanında "except" helper'ı yok; approvals.js:72 rol-sabiti idiyomu.
+// İleride casePolicy.js merkezileştirmesine (BACKLOG P0) taşınacak.
+const CASE_BULK_CANCEL_ROLES = ['Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'];
+
 function isAuthorizationResourceEnforcementEnabled() {
   return process.env.AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED === 'true';
 }
@@ -457,6 +463,38 @@ async function assertBulkCaseArchivePolicy(req, { caseIds }) {
       companyId,
       resourceKey: 'case',
       action: 'archive',
+    });
+  }
+  return null;
+}
+
+// Toplu iptal ikincil savunma — assertBulkCaseArchivePolicy ikizi, action
+// 'close' (iptal terminal geçiş). Birincil kapı route requireRole; bu
+// yalnız enforcement flag AÇIK ortamlarda per-company deny override uygular.
+async function assertBulkCaseCancelPolicy(req, { caseIds }) {
+  const resourceEnabled = isAuthorizationResourceEnforcementEnabled();
+  const securityFilterEnabled = isAuthorizationSecurityFilterEnforcementEnabled();
+  if (!resourceEnabled && !securityFilterEnabled) return null;
+  if (!Array.isArray(caseIds) || caseIds.length === 0) return null;
+  if (caseIds.length > 100) return null; // üst sınır kısa devresi (repo 400 üretir)
+
+  const allowedCompanyIds = Array.isArray(req.user.allowedCompanyIds)
+    ? req.user.allowedCompanyIds
+    : [];
+  const cases = await prisma.case.findMany({
+    where: { id: { in: caseIds }, companyId: { in: allowedCompanyIds } },
+    select: { id: true, companyId: true },
+  });
+  for (const c of cases) {
+    await assertCaseSecurityFilterAccess(req, { caseId: c.id, companyId: c.companyId });
+  }
+  if (!resourceEnabled) return null;
+  const companyIds = Array.from(new Set(cases.map((c) => c.companyId).filter(Boolean)));
+  for (const companyId of companyIds) {
+    await assertCompanyResourcePolicy(req, {
+      companyId,
+      resourceKey: 'case',
+      action: 'close',
     });
   }
   return null;
@@ -862,6 +900,33 @@ router.post(
     const result = await caseRepository.bulkArchive(
       { caseIds: body.caseIds, reason: body.reason },
       { actor, allowedCompanyIds: req.user.allowedCompanyIds },
+    );
+    if (result?.error) return res.status(400).json(result);
+    res.json(result);
+  }),
+);
+
+/**
+ * POST /api/cases/bulk-cancel — toplu iptal (2026-07-10). Agent HARİÇ
+ * tüm roller. bulk-archive'ın rol/statü-değişmiş ikizi: rol kapısı +
+ * cross-tenant koruması aynı; repo tarafında arşiv yerine terminal statü
+ * geçişi (transitionStatus 'İptalEdildi', SLA/history/neden reuse).
+ * Body: { caseIds: string[] (max 100), cancellationReason: string (min 3) }.
+ * Çözüldü toplu YASAK kalır; tekil iptal (/:id/transition) değişmez.
+ */
+router.post(
+  '/bulk-cancel',
+  requireRole(...CASE_BULK_CANCEL_ROLES),
+  asyncRoute(async (req, res) => {
+    const body = req.body ?? {};
+    // İkincil savunma (deny-only policy; flag açıkken 'close' aksiyonuyla).
+    await assertBulkCaseCancelPolicy(req, { caseIds: body.caseIds });
+    const actor = requireActor(req); // ActorContext: userId + role + displayName
+    // Codex #520 P2 — transitionStatus audit stamp'ı actorObject.userId okur;
+    // ActorContext geç (req.user'da alan 'id', stamp null kalırdı).
+    const result = await caseRepository.bulkCancel(
+      { caseIds: body.caseIds, cancellationReason: body.cancellationReason },
+      { actorDisplay: actor.displayName, allowedCompanyIds: req.user.allowedCompanyIds, actorObject: actor },
     );
     if (result?.error) return res.status(400).json(result);
     res.json(result);

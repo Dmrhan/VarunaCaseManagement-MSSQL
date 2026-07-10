@@ -36,6 +36,7 @@ import {
   Users2,
   User,
   X,
+  XCircle,
   Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -72,7 +73,7 @@ import { QuickCaseModal } from './QuickCaseModal';
 
 // Bulk action — kullanıcının açabileceği alan tipi.
 // 'assign' = 2 adımlı atama modalı (takım → kişi).
-type BulkField = 'priority' | 'status' | 'assign' | 'archive';
+type BulkField = 'priority' | 'status' | 'assign' | 'archive' | 'cancel';
 
 // Frontline = kişisel KPI'lar; Supervisor+ = global KPI'lar.
 const FRONTLINE_ROLES: UserRole[] = ['Agent', 'Backoffice', 'CSM'];
@@ -773,6 +774,25 @@ export function CasesListPage({
     if (!result) return; // apiFetch toast gösterdi
     const suffix = result.alreadyArchived > 0 ? ` (${result.alreadyArchived} zaten arşivliydi)` : '';
     toast({ type: 'success', message: `${result.archived} vaka arşivlendi.${suffix}` });
+    clearSelection();
+    void load();
+    void refreshStats();
+  }
+
+  // Toplu iptal (2026-07-10) — Agent HARİÇ roller (BE requireRole otorite).
+  // İptal terminal statü geçişi: her vaka "İptal Edildi"ye çekilir, neden
+  // geçmişe yazılır, SLA durur. Arşivden ayrı bir yetkili yol.
+  async function applyBulkCancel(reason: string) {
+    const ids = Array.from(selected);
+    if (ids.length === 0 || reason.trim().length < 3) return;
+    setBulkSubmitting(true);
+    const result = await caseService.bulkCancel(ids, reason.trim());
+    setBulkSubmitting(false);
+    setBulkField(null);
+    if (!result) return; // apiFetch toast gösterdi (kısmi-abort hatası dahil)
+    const parts = [`${result.cancelled} vaka iptal edildi`];
+    if (result.skipped > 0) parts.push(`${result.skipped} atlandı (çözülmüş/arşivli/zaten iptal)`);
+    toast({ type: 'success', message: parts.join(' · ') + '.' });
     clearSelection();
     void load();
     void refreshStats();
@@ -1716,12 +1736,28 @@ export function CasesListPage({
                           Codex review fix — duration kaynağı lastEmailInboundAt
                           (müşterinin bekleyen mail'i), outbound DEĞİL. */}
                       {c.pendingCustomerReply && (
-                        <div className="mt-1">
+                        <div className="mt-1 space-y-0.5">
                           <PendingReplyBadge
                             pending={c.pendingCustomerReply}
                             lastEmailInboundAt={c.lastEmailInboundAt}
                             size="sm"
                           />
+                          {/* Kullanıcı feedback (2026-07-10) — yanıt bekleyen
+                              vakada "kimden" görünsün: ajanlar gün içinde çok
+                              vakayla yazışıyor. customerContactName = vakanın
+                              muhatabı (açan/yazışan kişi); e-posta hover'da.
+                              Özellikle "Müşteri yok" satırlarında tek tanımlayıcı. */}
+                          {(c.customerContactName || c.customerContactEmail) && (
+                            <div
+                              className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-ndark-muted"
+                              title={c.customerContactEmail ?? undefined}
+                            >
+                              <User size={10} className="shrink-0 text-slate-400" />
+                              <span className="max-w-[190px] truncate">
+                                {c.customerContactName || c.customerContactEmail}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       )}
                       {snoozeMeta?.snoozeUntil && (
@@ -1922,6 +1958,7 @@ export function CasesListPage({
           onAction={(field) => setBulkField(field)}
           submitting={bulkSubmitting}
           canArchive={user?.role === 'SystemAdmin'}
+          canCancel={!!user && user.role !== 'Agent'}
         />
       )}
 
@@ -1944,7 +1981,15 @@ export function CasesListPage({
           onApply={(reason) => void applyBulkArchive(reason)}
         />
       )}
-      {bulkField && bulkField !== 'assign' && bulkField !== 'archive' && (
+      {bulkField === 'cancel' && (
+        <BulkCancelModal
+          count={selected.size}
+          submitting={bulkSubmitting}
+          onClose={() => setBulkField(null)}
+          onApply={(reason) => void applyBulkCancel(reason)}
+        />
+      )}
+      {bulkField && bulkField !== 'assign' && bulkField !== 'archive' && bulkField !== 'cancel' && (
         <BulkActionModal
           field={bulkField}
           count={selected.size}
@@ -2030,6 +2075,7 @@ function BulkActionBar({
   onAction,
   submitting,
   canArchive,
+  canCancel,
 }: {
   count: number;
   onClear: () => void;
@@ -2037,6 +2083,8 @@ function BulkActionBar({
   submitting: boolean;
   /** SystemAdmin-only: toplu "Arşivle" butonu (tekil arşiv yetki paritesi). */
   canArchive: boolean;
+  /** Agent HARİÇ tüm roller: toplu "İptal Et" butonu (BE requireRole otorite). */
+  canCancel: boolean;
 }) {
   return (
     <div
@@ -2075,6 +2123,18 @@ function BulkActionBar({
       >
         Durum Değiştir
       </Button>
+      {canCancel && (
+        <Button
+          size="sm"
+          variant="outline"
+          leftIcon={<XCircle size={12} />}
+          disabled={submitting}
+          onClick={() => onAction('cancel')}
+          className="border-rose-300 text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-400 dark:hover:bg-rose-950/40"
+        >
+          İptal Et
+        </Button>
+      )}
       {canArchive && (
         <Button
           size="sm"
@@ -2109,7 +2169,7 @@ function BulkActionModal({
   onClose,
   onApply,
 }: {
-  field: Exclude<BulkField, 'assign' | 'archive'>;
+  field: Exclude<BulkField, 'assign' | 'archive' | 'cancel'>;
   count: number;
   submitting: boolean;
   onClose: () => void;
@@ -2119,7 +2179,7 @@ function BulkActionModal({
   const [confirmed, setConfirmed] = useState<boolean>(count <= 10);
   const needsConfirm = count > 10 && !confirmed;
 
-  const config: Record<Exclude<BulkField, 'assign' | 'archive'>, { title: string; label: string; options: { value: string; label: string }[] }> = {
+  const config: Record<Exclude<BulkField, 'assign' | 'archive' | 'cancel'>, { title: string; label: string; options: { value: string; label: string }[] }> = {
     priority: {
       title: 'Toplu — Öncelik Değiştir',
       label: 'Yeni öncelik',
@@ -2246,6 +2306,80 @@ function BulkArchiveModal({
             autoFocus
             rows={2}
             placeholder="Örn: Otomatik yanıt seli temizliği / mükerrer kayıtlar"
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
+          />
+          {!reasonOk && reason.length > 0 && (
+            <p className="mt-1 text-xs text-rose-600">En az 3 karakter gerekli.</p>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// Toplu iptal modalı (2026-07-10) — BulkArchiveModal ikizi. İptal TERMİNAL
+// bir statü geçişi (arşiv değil): vakalar "İptal Edildi"ye geçer, neden
+// geçmişe yazılır, SLA durur. Neden zorunlu (tekil iptal paritesi, min 3).
+// ">10 vaka" ek onay adımı — kitlesel iptalin geri dönüşü yok.
+function BulkCancelModal({
+  count,
+  submitting,
+  onClose,
+  onApply,
+}: {
+  count: number;
+  submitting: boolean;
+  onClose: () => void;
+  onApply: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState<string>('');
+  const [confirmed, setConfirmed] = useState<boolean>(count <= 10);
+  const reasonOk = reason.trim().length >= 3;
+  const needsConfirm = count > 10 && !confirmed;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Toplu — İptal Et"
+      size="lg"
+      centered
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} disabled={submitting}>
+            Vazgeç
+          </Button>
+          {needsConfirm ? (
+            <Button onClick={() => setConfirmed(true)}>Anladım, devam et</Button>
+          ) : (
+            <Button onClick={() => onApply(reason)} disabled={!reasonOk || submitting}>
+              {submitting ? 'İptal ediliyor…' : `${count} Vakayı İptal Et`}
+            </Button>
+          )}
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <div className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2.5 text-sm text-rose-900 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-200">
+          <div className="flex items-center gap-2 font-medium">
+            <XCircle size={14} />
+            <span><strong>{count}</strong> vaka "İptal Edildi"ye taşınacak</span>
+          </div>
+          <p className="mt-1 text-xs">
+            İptal edilen vakalar <strong>terminal</strong> statüye geçer (kapanır); SLA sayacı
+            durur, her vakanın geçmişine iptal nedeni yazılır. Gerekirse vaka tek tek yeniden açılabilir.
+          </p>
+        </div>
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-ndark-text">
+            İptal nedeni <span className="text-rose-600">*</span>
+          </label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            autoFocus
+            rows={2}
+            placeholder="Örn: Mükerrer kayıt / test vakası / müşteri talebi geri çekildi"
             className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
           />
           {!reasonOk && reason.length > 0 && (

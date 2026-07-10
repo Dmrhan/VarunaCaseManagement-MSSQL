@@ -53,11 +53,11 @@ expectTrue('2.3 servis bulkArchive + invalidateCaseDetail',
   svc.includes("'/bulk-archive'".replace("'", '`').replace("'", '')) || /bulk-archive/.test(svc));
 expectTrue('2.4 modal centered prop (opsiyonel, default eski davranış)',
   modal.includes('centered = false') && /fixedHeight \|\| centered \? 'items-center'/.test(modal));
-expectTrue('2.5 üç toplu modal da belirgin (centered + lg)',
-  (page.match(/size="lg"\s*\n\s*centered/g) ?? []).length === 3);
-expectTrue('2.6 archive alanı BulkActionModal\'a sızmaz (Exclude tip + koşul)',
-  page.includes("Exclude<BulkField, 'assign' | 'archive'>")
-  && page.includes("bulkField !== 'assign' && bulkField !== 'archive'"));
+expectTrue('2.5 dört toplu modal da belirgin (centered + lg) — +BulkCancelModal 2026-07-10',
+  (page.match(/size="lg"\s*\n\s*centered/g) ?? []).length === 4);
+expectTrue('2.6 archive alanı BulkActionModal\'a sızmaz (Exclude tip + koşul; cancel de dışlanır)',
+  page.includes("Exclude<BulkField, 'assign' | 'archive' | 'cancel'>")
+  && page.includes("bulkField !== 'assign' && bulkField !== 'archive' && bulkField !== 'cancel'"));
 
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);
