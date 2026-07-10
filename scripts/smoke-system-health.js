@@ -83,6 +83,43 @@ ok('5.3 README kurulum + iki yön + fail-closed token notu',
   && /YÖN B/.test(read('docs/integrations/zabbix/README.md'))
   && /fail-closed/.test(read('docs/integrations/zabbix/README.md')));
 
+// ── Faz 2: SystemHealthPage (dosyalar varsa koşar — Faz 1 branch'inde SKIP) ──
+if (existsSync('src/features/admin/SystemHealthPage.tsx')) {
+  console.log('── Faz 2: pano UI ──');
+  const page = read('src/features/admin/SystemHealthPage.tsx');
+  const svc = read('src/services/systemHealthService.ts');
+  const app = read('src/App.tsx');
+  ok('7.1 service JWT ucunu kullanır (silent — hata panoda yönetilir)',
+    /\/api\/system\/health/.test(svc) && /silent: true/.test(svc));
+  ok('7.2 SystemAdmin-ONLY gating (nav + render çifte koşul)',
+    /user\.role === 'SystemAdmin'/.test(app)
+    && /view === 'system-health' && showSystemHealth/.test(app));
+  ok('7.3 lazy yüklenir (bundle\'a girmez)',
+    /SystemHealthPage = lazy\(/.test(app));
+  ok('7.4 exception-first alert şeridi + eşikler görünür (mockup paritesi)',
+    /Dikkat gerektirenler/.test(page) && /buildAlerts/.test(page) && /eşik:/.test(page));
+  ok('7.5 60sn otomatik yenileme + elle yenile',
+    /setInterval\(\(\) => \{ void load\(\); \}, 60_000\)/.test(page) && /RefreshCw/.test(page));
+  ok('7.6 alan-adı toleransı (#516 sırasından bağımsız: pollable ?? active)',
+    /pollableInboxCount \?\? health\.mail\?\.activeInboxCount/.test(page));
+  ok('7.7 bölüm hatası izole gösterilir (kısmi görüş > körlük)',
+    /SectionError/.test(page) && /kalan bölümler sağlıklı raporlanıyor/.test(page));
+  ok('7.8 Zabbix bölümü yapılandırma-durumuna göre (empty-state + README yönlendirme)',
+    /zabbixConfigured \?/.test(page) && /docs\/integrations\/zabbix\/README\.md/.test(page));
+  ok('7.9 döngü dedektörü kartı + eşik sabitleri template ile senkron',
+    /loopCritPer5m: 15/.test(page) && /Döngü Dedektörü/.test(page));
+  ok('7.10 iş metrikleri YOK — Operasyon Panosu\'na yönlendirme',
+    /Operasyon Panosu/.test(page) && !/SLA skoru|atanmamış vaka listesi/.test(page));
+  const dispPage = read('src/features/admin/NotificationDispatchesPage.tsx');
+  ok('7.11 dispatch drill-down: kartlar mevcut Bildirim Kayıtları sayfasını filtreli açar (REUSE, yeni endpoint YOK)',
+    /onOpenDispatches/.test(page)
+    && /onOpenDispatches\('Pending'\)/.test(page) && /onOpenDispatches\('Failed'\)/.test(page)
+    && /initialState\?: DispatchState \| ''/.test(dispPage)
+    && /useState<DispatchState \| ''>\(initialState\)/.test(dispPage)
+    && /setView\('admin-notification-dispatches'\)/.test(app)
+    && /key=\{dispatchesInitialState \|\| 'all'\}/.test(app));
+}
+
 console.log('── Regresyon guard: mail düzenine dokunulmadı ──');
 try {
   const changed = execSync('git diff --name-only dev...HEAD 2>/dev/null || git diff --name-only dev', { encoding: 'utf8' });
