@@ -38,7 +38,7 @@ ok('2.2 PII yok: başlık/gövde/e-posta içeriği select edilmez',
 ok('2.3 bölüm izolasyonu (section try/catch) + cache',
   /async function section\(fn\)/.test(health) && /CACHE_TTL_MS = 20_000/.test(health));
 ok('2.4 döngü dedektörü (5 dk vaka sayısı) + disk statfs',
-  /casesCreatedLast5m/.test(health) && /statfs\(STORAGE_ROOT_DIR\)/.test(health));
+  /casesCreatedLast5m/.test(health) && /statfsNearestExisting\(STORAGE_ROOT_DIR\)/.test(health));
 ok('2.5 schemaVersion sözleşmesi',
   /schemaVersion: 1/.test(health));
 ok('2.6 (Codex #514 P2) lastInboundAgeMin HER ZAMAN sayısal (null yok; sentinel + 0)',
@@ -51,6 +51,13 @@ ok('2.8 (Codex #515 P2) sentinel kapısı POLL EDİLEN kutuya bakar (listEnabled
 ok('2.7 (Codex #514 P2) storage yazılabilirlik = var olan en yakın ataya W_OK (mkdir-recursive paritesi)',
   /err\?\.code !== 'ENOENT'/.test(health)
   && /path\.dirname\(dir\)/.test(health));
+ok('2.9 (Codex #518 P2) statfs de en yakın var olan ataya düşer (taze kurulumda free_pct null kalmaz)',
+  /statfsNearestExisting\(STORAGE_ROOT_DIR\)/.test(health)
+  && /return await fsp\.statfs\(dir\)/.test(health)
+  && !/fsp\.statfs\(STORAGE_ROOT_DIR\)\.catch/.test(health));
+ok('2.10 (Codex #518 P2 + #519 P1) döngü dedektörü SAKLANAN origin ile filtreler (Eposta — enumMap toDb; görünen "E-posta" DEĞİL)',
+  /origin: 'Eposta' \}/.test(health)
+  && !/origin: 'E-posta' \}/.test(health));
 
 console.log('── route + mount ──');
 ok('3.1 çift kimlik: HEALTH_TOKEN timing-safe VEYA SystemAdmin JWT',
