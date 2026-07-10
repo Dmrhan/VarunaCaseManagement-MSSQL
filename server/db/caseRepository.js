@@ -2645,6 +2645,82 @@ export const caseRepository = {
   },
 
   /**
+   * Toplu iptal (2026-07-10) — Agent HARİÇ rollere açık (route requireRole
+   * ile korunur; otorite orada). bulkArchive'ın rol/statü-değişmiş ikizi
+   * AMA arşiv değil terminal STATÜ GEÇİŞİ: her vaka için transitionStatus
+   * ('İptalEdildi') çağrılır → SLA durdurma + per-case StatusChange history
+   * + cancellationReason kaydı + İptal-muaf kapanış guard yolu REUSE edilir
+   * (kopyalanmaz). Çözüldü'nün aksine İptal müşteri/ürün grubu/kapanış
+   * etiket kapılarından muaftır (bkz. transitionStatus, ~satır 4002).
+   *
+   * Partial-success YOK: bulunamayan/cross-tenant id → hiçbir şey yazmadan
+   * { error } / CaseAccessError. Zaten IptalEdildi olan atlanır (idempotent).
+   * bulkUpdate'in terminal yasağına (3804) DOKUNULMAZ — bu ayrı, yetkili yol.
+   */
+  async bulkCancel({ caseIds, cancellationReason }, { actor, allowedCompanyIds, actorObject = null }) {
+    assertActor(actor, 'caseRepository.bulkCancel');
+    if (!Array.isArray(caseIds) || caseIds.length === 0) {
+      return { error: 'caseIds dizisi gerekli (boş olamaz).' };
+    }
+    if (caseIds.length > 100) {
+      return { error: 'En fazla 100 vaka tek seferde iptal edilebilir.' };
+    }
+    const trimmedReason = typeof cancellationReason === 'string' ? cancellationReason.trim() : '';
+    if (trimmedReason.length < 3) {
+      return { error: 'İptal nedeni gerekli (en az 3 karakter).' };
+    }
+
+    const ids = [...new Set(caseIds)];
+    const cases = await prisma.case.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, companyId: true, status: true },
+    });
+    if (cases.length !== ids.length) {
+      const foundIds = new Set(cases.map((c) => c.id));
+      const missing = ids.filter((id) => !foundIds.has(id));
+      return { error: `Bazı vakalar bulunamadı: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ` (+${missing.length - 3})` : ''}` };
+    }
+    // Cross-tenant fail-fast (bulkArchive paritesi) — partial write olmasın:
+    // döngüye girmeden tüm id'lerin scope'ta olduğunu doğrula.
+    if (allowedCompanyIds) {
+      const outsider = cases.find((c) => !allowedCompanyIds.includes(c.companyId));
+      if (outsider) {
+        throw new CaseAccessError('Toplu iptal: erişiminiz olmayan vaka(lar) listede.');
+      }
+    }
+
+    const targets = cases.filter((c) => c.status !== 'IptalEdildi');
+    const alreadyCancelled = cases.length - targets.length;
+    if (targets.length === 0) {
+      return { cancelled: 0, alreadyCancelled, requested: ids.length };
+    }
+
+    // Her hedef için terminal statü GEÇİŞİ (reuse). İptal guard-muaf
+    // olduğundan sıralı transitionStatus güvenli; yine de per-case hatayı
+    // defansif topla (fail-fast validasyon geçildi, hata beklenmez).
+    // this.* yerine ada göre — caseRepository const object, bağlamdan bağımsız.
+    let cancelled = 0;
+    const failed = [];
+    for (const c of targets) {
+      try {
+        const r = await caseRepository.transitionStatus(
+          c.id,
+          'İptalEdildi',
+          { cancellationReason: trimmedReason },
+          actor,
+          allowedCompanyIds,
+          actorObject,
+        );
+        if (r) cancelled += 1;
+        else failed.push(c.id);
+      } catch {
+        failed.push(c.id);
+      }
+    }
+    return { cancelled, alreadyCancelled, failed: failed.length, requested: ids.length };
+  },
+
+  /**
    * PR-SD — Arşivli vakayı geri yükle (SystemAdmin-only). Status enum
    * dokunulmaz. Audit: CaseActivity actionType='Restored', actor.
    */
