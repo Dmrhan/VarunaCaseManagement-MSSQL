@@ -1736,12 +1736,28 @@ export function CasesListPage({
                           Codex review fix — duration kaynağı lastEmailInboundAt
                           (müşterinin bekleyen mail'i), outbound DEĞİL. */}
                       {c.pendingCustomerReply && (
-                        <div className="mt-1">
+                        <div className="mt-1 space-y-0.5">
                           <PendingReplyBadge
                             pending={c.pendingCustomerReply}
                             lastEmailInboundAt={c.lastEmailInboundAt}
                             size="sm"
                           />
+                          {/* Kullanıcı feedback (2026-07-10) — yanıt bekleyen
+                              vakada "kimden" görünsün: ajanlar gün içinde çok
+                              vakayla yazışıyor. customerContactName = vakanın
+                              muhatabı (açan/yazışan kişi); e-posta hover'da.
+                              Özellikle "Müşteri yok" satırlarında tek tanımlayıcı. */}
+                          {(c.customerContactName || c.customerContactEmail) && (
+                            <div
+                              className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-ndark-muted"
+                              title={c.customerContactEmail ?? undefined}
+                            >
+                              <User size={10} className="shrink-0 text-slate-400" />
+                              <span className="max-w-[190px] truncate">
+                                {c.customerContactName || c.customerContactEmail}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       )}
                       {snoozeMeta?.snoozeUntil && (
