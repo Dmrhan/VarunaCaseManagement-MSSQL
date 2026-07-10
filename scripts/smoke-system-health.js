@@ -41,6 +41,13 @@ ok('2.4 döngü dedektörü (5 dk vaka sayısı) + disk statfs',
   /casesCreatedLast5m/.test(health) && /statfs\(STORAGE_ROOT_DIR\)/.test(health));
 ok('2.5 schemaVersion sözleşmesi',
   /schemaVersion: 1/.test(health));
+ok('2.6 (Codex #514 P2) lastInboundAgeMin HER ZAMAN sayısal (null yok; sentinel + 0)',
+  /NO_INBOUND_EVER_SENTINEL_MIN = 525600/.test(health)
+  && /activeInboxes > 0 \? NO_INBOUND_EVER_SENTINEL_MIN : 0/.test(health)
+  && !/lastInboundAgeMin: lastInbound \? [^:]+ : null/.test(health));
+ok('2.7 (Codex #514 P2) storage yazılabilirlik = var olan en yakın ataya W_OK (mkdir-recursive paritesi)',
+  /err\?\.code !== 'ENOENT'/.test(health)
+  && /path\.dirname\(dir\)/.test(health));
 
 console.log('── route + mount ──');
 ok('3.1 çift kimlik: HEALTH_TOKEN timing-safe VEYA SystemAdmin JWT',
@@ -96,6 +103,8 @@ if (process.env.SMOKE_DB === '1') {
     ok('6.3 mail bölümü dolu (24s sayılar + aktif kutu + döngü sayacı)',
       Number.isInteger(h.mail?.inbound24h) && Number.isInteger(h.mail?.casesCreatedLast5m)
       && h.mail?.activeInboxCount > 0);
+    ok('6.3b direction filtresi GERÇEKTEN eşleşiyor (canlıda inbound var → yaş < sentinel; 0 sayaç bug\'ı yakalar)',
+      Number.isFinite(h.mail?.lastInboundAgeMin) && h.mail.lastInboundAgeMin < 525600);
     ok('6.4 depolama: ek byte toplamları > 0 (canlı Univera verisi)',
       h.storage?.emailAttachmentBytes > 0 && h.storage?.caseAttachmentBytes > 0);
     ok('6.5 db: vaka + mail sayıları > 0, data MB > 0',
