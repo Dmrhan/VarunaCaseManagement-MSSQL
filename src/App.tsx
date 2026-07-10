@@ -1124,7 +1124,14 @@ export default function App() {
             />
           )}
           {view === 'analytics-qa-scores' && <QAScoresPage />}
-          {view === 'system-health' && showSystemHealth && <SystemHealthPage />}
+          {view === 'system-health' && showSystemHealth && (
+            // Codex #517 P1 — lazy bileşen Suspense sınırı ister: chunk ilk
+            // kez yüklenirken sarmalayıcı yoksa React suspend hatası fırlatır
+            // (satır ~500'deki AdminEmailTemplatesPage deseniyle aynı).
+            <Suspense fallback={<p className="p-4 text-sm text-slate-400">Sistem Sağlığı yükleniyor…</p>}>
+              <SystemHealthPage />
+            </Suspense>
+          )}
           {(view === 'analytics-people-performance' || (isDetail && caseDetailOrigin === 'analytics-people-performance')) && (
             <div className={isDetail ? 'hidden' : 'contents'}>
               <PeoplePerformancePage onSelectCase={openCase} />
