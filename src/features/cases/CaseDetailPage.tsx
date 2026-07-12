@@ -512,7 +512,14 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
   );
 
   async function handleAddNote() {
-    if (!item || !noteText.trim() || wideViewReadOnly) return;
+    // 2026-07-12 — kullanıcı kararı: not EKLEME artık "Tümü" (wide,
+    // dar-kapsam-kanıtlanmamış) görünümde de serbest — kendi vakası
+    // olmayan bir vakaya da not eklenebilir (silme AYRI kalır, buraya
+    // dokunulmadı — bkz. NotesTab/handleDeleteNote). Amaç: bir vakayı
+    // başka takıma devreden kullanıcı bağlam eklemeyi unutursa, daha
+    // sonra geri dönüp ekleyebilsin; bugüne kadar wideViewReadOnly bunu
+    // sessizce engelliyordu (buton aktif görünüp hiçbir şey yapmıyordu).
+    if (!item || !noteText.trim()) return;
     // Ref guard catches the rare double-click that lands before
     // setNoteSubmitting paints; React state guard catches everything
     // after first paint. Both must clear on completion.
@@ -1422,8 +1429,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
                 inputRef={noteRef}
               />
             )}
+            {/* 2026-07-12 — dosya EKLEME artık wideViewReadOnly'den bağımsız
+                (serbest); SİLME hâlâ canDelete={!wideViewReadOnly} ile korunuyor. */}
             {tab === 'files' && (
-              <FilesTab item={item} onItemUpdated={(c) => setItem(c)} readOnly={wideViewReadOnly} />
+              <FilesTab item={item} onItemUpdated={(c) => setItem(c)} canDelete={!wideViewReadOnly} />
             )}
             {tab === 'links' && (
               <LinksTab item={item} onShowCase={navigateToCase} />
