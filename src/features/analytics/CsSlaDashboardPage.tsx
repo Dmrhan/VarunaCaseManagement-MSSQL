@@ -186,7 +186,11 @@ interface Props {
 }
 
 export function CsSlaDashboardPage({ onSelectCase }: Props) {
-  const [filters, setFilters] = useState<SlaDashboardFilters>({ page: 1 });
+  // Saha feedback 2026-07-13: her dropdown tıkı ANINDA sorgu atmasın —
+  // filtreler taslakta (draft) birikir, "Filtrele" ile uygulanır (applied).
+  // Sayfalama uygulanmış filtre üzerinde anında çalışır.
+  const [draft, setDraft] = useState<SlaDashboardFilters>({});
+  const [applied, setApplied] = useState<SlaDashboardFilters>({ page: 1 });
   const [data, setData] = useState<SlaDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -200,18 +204,31 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
   }, []);
 
   useEffect(() => {
-    void load(filters);
-  }, [filters, load]);
+    void load(applied);
+  }, [applied, load]);
 
   const set = (patch: Partial<SlaDashboardFilters>) =>
-    setFilters((f) => ({ ...f, ...patch, page: 1 }));
+    setDraft((d) => ({ ...d, ...patch }));
+
+  const normalizeF = (f: SlaDashboardFilters) =>
+    JSON.stringify({
+      y: f.year ?? null, m: f.month ?? null,
+      c: f.companyId ?? [], w: f.waitingDept ?? [], l: f.supportLevel ?? [],
+      s: f.status ?? [], a: f.accountId ?? [], o: f.openAge ?? [], r: f.requestType ?? [],
+    });
+  const dirty = normalizeF(draft) !== normalizeF(applied);
+  const applyFilters = () => setApplied({ ...draft, page: 1 });
+  const clearFilters = () => {
+    setDraft({});
+    setApplied({ page: 1 });
+  };
 
   // Excel export — CaseTaggingReviewPage deseninin ikizi (dinamik xlsx importu:
   // kütüphane yalnız export anında yüklenir, ana bundle'a girmez).
   async function handleExport() {
     setExporting(true);
     try {
-      const res = await analyticsService.exportSlaDashboard(filters);
+      const res = await analyticsService.exportSlaDashboard(applied);
       if (!res) return;
       const rows = res.rows.map((r) => ({
         'Müşteri (Proje)': r.accountName ?? '',
@@ -257,7 +274,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         key: 'companyId',
         label: 'Şirket',
         multiple: true,
-        values: filters.companyId ?? [],
+        values: draft.companyId ?? [],
         options: (data?.options.companies ?? []).map((c) => ({ v: c.id, l: c.name })),
         onChange: (vals: string[]) => set({ companyId: vals }),
       },
@@ -265,16 +282,16 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         key: 'year',
         label: 'Yıl',
         multiple: false,
-        values: filters.year ? [String(filters.year)] : [],
+        values: draft.year ? [String(draft.year)] : [],
         options: YEARS.map((y) => ({ v: String(y), l: String(y) })),
         onChange: (vals: string[]) =>
-          set({ year: vals[0] ? Number(vals[0]) : null, month: vals[0] ? filters.month : null }),
+          set({ year: vals[0] ? Number(vals[0]) : null, month: vals[0] ? draft.month : null }),
       },
       {
         key: 'month',
         label: 'Ay',
         multiple: false,
-        values: filters.month ? [String(filters.month)] : [],
+        values: draft.month ? [String(draft.month)] : [],
         options: MONTHS.map((m, i) => ({ v: String(i + 1), l: m })),
         onChange: (vals: string[]) => set({ month: vals[0] ? Number(vals[0]) : null }),
       },
@@ -282,7 +299,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         key: 'waitingDept',
         label: 'Bekleyen Bölüm',
         multiple: true,
-        values: filters.waitingDept ?? [],
+        values: draft.waitingDept ?? [],
         options: (data?.options.waitingDepts ?? []).map((d) => ({ v: d, l: d })),
         onChange: (vals: string[]) => set({ waitingDept: vals }),
       },
@@ -290,7 +307,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         key: 'supportLevel',
         label: 'Support L1-L2',
         multiple: true,
-        values: filters.supportLevel ?? [],
+        values: draft.supportLevel ?? [],
         options: SUPPORT_LEVELS.map((l) => ({ v: l, l })),
         onChange: (vals: string[]) => set({ supportLevel: vals }),
       },
@@ -298,7 +315,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         key: 'status',
         label: 'Vaka Durumu',
         multiple: true,
-        values: filters.status ?? [],
+        values: draft.status ?? [],
         options: (data?.options.statuses ?? []).map((s) => ({ v: s, l: s })),
         onChange: (vals: string[]) => set({ status: vals }),
       },
@@ -306,7 +323,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         key: 'accountId',
         label: 'Müşteri (Proje)',
         multiple: true,
-        values: filters.accountId ?? [],
+        values: draft.accountId ?? [],
         options: (data?.options.accounts ?? []).map((a) => ({ v: a.id, l: a.name })),
         onChange: (vals: string[]) => set({ accountId: vals }),
       },
@@ -314,7 +331,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         key: 'openAge',
         label: 'Açık Kalma Aralığı',
         multiple: true,
-        values: filters.openAge ?? [],
+        values: draft.openAge ?? [],
         options: OPEN_AGE_OPTIONS.map((b) => ({ v: b, l: `${b} gün` })),
         onChange: (vals: string[]) => set({ openAge: vals }),
       },
@@ -322,24 +339,24 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         key: 'requestType',
         label: 'Bildirim Tipi',
         multiple: true,
-        values: filters.requestType ?? [],
+        values: draft.requestType ?? [],
         options: (data?.options.requestTypes ?? []).map((t) => ({ v: t, l: t })),
         onChange: (vals: string[]) => set({ requestType: vals }),
       },
     ],
-    [filters, data],
+    [draft, data],
   );
 
   const activeFilterCount =
-    (filters.companyId?.length ?? 0) +
-    (filters.year ? 1 : 0) +
-    (filters.month ? 1 : 0) +
-    (filters.waitingDept?.length ?? 0) +
-    (filters.supportLevel?.length ?? 0) +
-    (filters.status?.length ?? 0) +
-    (filters.accountId?.length ?? 0) +
-    (filters.openAge?.length ?? 0) +
-    (filters.requestType?.length ?? 0);
+    (draft.companyId?.length ?? 0) +
+    (draft.year ? 1 : 0) +
+    (draft.month ? 1 : 0) +
+    (draft.waitingDept?.length ?? 0) +
+    (draft.supportLevel?.length ?? 0) +
+    (draft.status?.length ?? 0) +
+    (draft.accountId?.length ?? 0) +
+    (draft.openAge?.length ?? 0) +
+    (draft.requestType?.length ?? 0);
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-5">
@@ -352,7 +369,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
           {activeFilterCount > 0 && (
             <button
               type="button"
-              onClick={() => setFilters({ page: 1 })}
+              onClick={clearFilters}
               className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-red-400 hover:text-red-600 dark:border-ndark-border dark:text-ndark-muted"
               title="Tüm filtreleri sıfırla"
             >
@@ -371,7 +388,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
           </button>
           <button
             type="button"
-            onClick={() => void load(filters)}
+            onClick={() => void load(applied)}
             className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-brand-400 hover:text-brand-600 dark:border-ndark-border dark:text-ndark-muted"
             title="Yenile"
           >
@@ -396,6 +413,25 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
             onChange={f.onChange}
           />
         ))}
+      </div>
+      <div className="mt-2 flex items-center justify-end gap-2.5">
+        {dirty && (
+          <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+            Filtre değişti — henüz uygulanmadı
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={applyFilters}
+          disabled={loading && !dirty}
+          className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${
+            dirty
+              ? 'bg-brand-600 text-white hover:bg-brand-700'
+              : 'border border-slate-200 text-slate-500 hover:border-brand-400 hover:text-brand-600 dark:border-ndark-border dark:text-ndark-muted'
+          }`}
+        >
+          Filtrele
+        </button>
       </div>
 
       {/* Ana tablo */}
@@ -518,7 +554,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         <button
           type="button"
           disabled={(data?.page ?? 1) <= 1 || loading}
-          onClick={() => setFilters((f) => ({ ...f, page: Math.max((data?.page ?? 1) - 1, 1) }))}
+          onClick={() => setApplied((f) => ({ ...f, page: Math.max((data?.page ?? 1) - 1, 1) }))}
           className="rounded-md border border-slate-200 bg-white px-3 py-1 hover:border-brand-400 hover:text-brand-600 disabled:opacity-40 dark:border-ndark-border dark:bg-ndark-card"
         >
           ‹ Önceki
@@ -530,7 +566,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
           type="button"
           disabled={(data?.page ?? 1) >= (data?.totalPages ?? 1) || loading}
           onClick={() =>
-            setFilters((f) => ({ ...f, page: Math.min((data?.page ?? 1) + 1, data?.totalPages ?? 1) }))
+            setApplied((f) => ({ ...f, page: Math.min((data?.page ?? 1) + 1, data?.totalPages ?? 1) }))
           }
           className="rounded-md border border-slate-200 bg-white px-3 py-1 hover:border-brand-400 hover:text-brand-600 disabled:opacity-40 dark:border-ndark-border dark:bg-ndark-card"
         >

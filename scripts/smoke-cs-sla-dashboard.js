@@ -124,5 +124,13 @@ ok('20 seçenekler KASKAD + KENDİNİ-DIŞLA (saha feedback): matches(r, exclude
   && agg.includes("['companyId', (r) => r.companyId]")
   && page.includes("label: 'Şirket'"));
 
+ok('21 uygula-butonlu filtreleme: draft/applied ayrımı + Filtrele + dirty uyarısı + export uygulananla',
+  page.includes('const [draft, setDraft]')
+  && page.includes('const [applied, setApplied]')
+  && page.includes('applyFilters')
+  && page.includes('Filtre değişti — henüz uygulanmadı')
+  && page.includes('exportSlaDashboard(applied)')
+  && page.includes('void load(applied)'));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);
