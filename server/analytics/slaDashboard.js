@@ -163,11 +163,33 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
 
   // ── Yardımcı haritalar (tenant-scoped; IN(caseIds) 2100-parametre
   //    tuzağından kaçınmak için bilinçli olarak geniş groupBy) ─────────
-  const mailAgg = await prisma.caseEmail.groupBy({
-    by: ['caseId', 'direction'],
-    where: { companyId: { in: allowedCompanyIds } },
-    _max: { sentAt: true, receivedAt: true },
-  });
+  // Seçenek evreni FİLTREDEN BAĞIMSIZ sabittir — aksi halde bir filtre
+  // seçilince diğer dropdown'ların içeriği kırpılır (saha bug'ı 2026-07-13).
+  const [mailAgg, teamRows, thirdPartyRows, topAccounts] = await Promise.all([
+    prisma.caseEmail.groupBy({
+      by: ['caseId', 'direction'],
+      where: { companyId: { in: allowedCompanyIds } },
+      _max: { sentAt: true, receivedAt: true },
+    }),
+    prisma.team.findMany({
+      where: { companyId: { in: allowedCompanyIds }, isActive: true },
+      select: { name: true },
+    }),
+    prisma.thirdParty.findMany({
+      where: {
+        isActive: true,
+        OR: [{ companyId: { in: allowedCompanyIds } }, { companyId: null }],
+      },
+      select: { name: true },
+    }),
+    prisma.case.groupBy({
+      by: ['accountId'],
+      where: { companyId: { in: allowedCompanyIds }, isArchived: false, accountId: { not: null } },
+      _count: { _all: true },
+      orderBy: { _count: { accountId: 'desc' } },
+      take: 200,
+    }),
+  ]);
   const mailByCase = new Map();
   for (const m of mailAgg) {
     const e = mailByCase.get(m.caseId) ?? { lastOutboundAt: null, lastInboundAt: null };
@@ -282,15 +304,20 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
   const page = Math.min(Math.max(Number(params.page) || 1, 1), totalPages);
   const rows = filtered.slice((page - 1) * pageSize, page * pageSize);
 
-  // ── Filtre seçenekleri (base set'ten; müşteri listesi 200 ile sınırlı) ──
-  const accountOpt = new Map();
-  const waitingOpt = new Set();
-  for (const r of computed) {
-    if (r.accountId && r.accountName && accountOpt.size < 200 && !accountOpt.has(r.accountId)) {
-      accountOpt.set(r.accountId, r.accountName);
-    }
-    if (r.waitingDept !== '—') waitingOpt.add(r.waitingDept);
-  }
+  // ── Filtre seçenekleri — sabit evren (yukarıdaki Promise.all):
+  //    Havuzda + Müşteri + aktif takımlar + aktif 3rd party'ler; müşteriler
+  //    tenant genelinde en çok vakası olan 200 hesap (filtreden bağımsız).
+  const waitingOpt = new Set(['Havuzda', 'Müşteri']);
+  for (const t of teamRows) if (t.name?.trim()) waitingOpt.add(t.name.trim());
+  for (const tp of thirdPartyRows) if (tp.name?.trim()) waitingOpt.add(tp.name.trim());
+  const topAccountIds = topAccounts.map((a) => a.accountId).filter(Boolean);
+  const accountRows = topAccountIds.length
+    ? await prisma.account.findMany({
+        where: { id: { in: topAccountIds } },
+        select: { id: true, name: true },
+      })
+    : [];
+  const accountOpt = new Map(accountRows.map((a) => [a.id, a.name]));
 
   return {
     rows,

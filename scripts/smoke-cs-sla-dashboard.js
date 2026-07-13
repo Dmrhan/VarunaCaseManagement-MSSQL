@@ -116,5 +116,12 @@ ok('19 çoklu seçim: backend toList+IN (kısmen geçersiz liste geçerlilerle s
   && page.includes('Filtreleri Temizle')
   && page.includes('Seçimi temizle'));
 
+ok('20 filtre seçenekleri SABİT EVRENDEN (takım+3rdParty+top200 hesap) — filtrelenmiş sonuçtan DEĞİL (saha bug regresyonu)',
+  agg.includes('FİLTREDEN BAĞIMSIZ')
+  && agg.includes('prisma.team.findMany')
+  && agg.includes('prisma.thirdParty.findMany')
+  && /prisma\.case\.groupBy\(\{\s*by: \['accountId'\]/.test(agg)
+  && !/for \(const r of computed\) \{[\s\S]{0,200}waitingOpt\.add\(r\.waitingDept\)/.test(agg));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);
