@@ -251,6 +251,15 @@ function resolveDispatchReason(d: NotificationDispatch): string | null {
     if (id === 'phone') {
       return 'SMS kanalı bu ortamda aktif değil; bildirim beklemede.';
     }
+    // Codex P2 — Manual/LogOnly Pending, operatör aksiyonu beklenen kayıttır;
+    // "kuyrukta bekliyor" metni yanıltıcı. Yalnız mode=Active'de gönderici
+    // pipeline'ının işleyeceği anlamda "kuyrukta" ifadesi geçerli.
+    if (d.mode === 'Manual') {
+      return 'Operatör manuel onay bekliyor — vaka detayından "Manuel Olarak Hallettim" ile kapatılabilir.';
+    }
+    if (d.mode === 'LogOnly') {
+      return 'Yalnızca kayıt (LogOnly) modu — otomatik gönderim yapılmayacak; kayıt denetim için tutuluyor.';
+    }
     if (d.channel === 'Email' && id.includes('@')) {
       return 'Gönderim kuyruğunda, henüz denenmedi.';
     }
