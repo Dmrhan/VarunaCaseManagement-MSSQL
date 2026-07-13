@@ -27,12 +27,17 @@ import { NOTIFICATION_DISPATCHES_HELP } from './helpContents';
  * No mutation surfaces here — manual-confirm lives on CaseDetail.
  */
 
+// Backend ALLOWED_EVENTS ile PARİTE — notificationRepository.js:107 ile senkron.
+// Yeni event eklenirse hem oraya hem buraya + NotificationEvent type'ına eklenmeli.
 const EVENT_OPTIONS: NotificationEvent[] = [
   'resolution_submitted',
   'resolution_approved',
   'resolution_rejected',
   'case_closed',
   'case_reopened',
+  'case_created',
+  'status_changed',
+  'customer_replied',
 ];
 
 const STATE_OPTIONS: DispatchState[] = ['Pending', 'Sent', 'Failed', 'Suppressed'];
