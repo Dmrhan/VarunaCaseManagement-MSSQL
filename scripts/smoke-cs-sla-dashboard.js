@@ -92,5 +92,11 @@ ok('16 sayfa: 8 filtre + 15 kolon başlığı + KPI + empty-state + amaç satır
   && page.includes('Filtreye uyan vaka yok')
   && page.includes('çözüm ve müdahale SLA'));
 
+ok('17 Codex #530 P2 seti: terminalde çözüm+müdahale sayaçları donar; supportLevel kalıcı kolondan',
+  agg.includes('TERMINAL.has(c.status) && c.resolvedAt')
+  && agg.includes('respMet ?? resolved ?? now')
+  && /supportLevel: true/.test(agg)
+  && !/personLevel|teamLevel/.test(agg));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

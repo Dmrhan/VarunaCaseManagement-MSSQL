@@ -141,6 +141,7 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
       assignedTeamName: true,
       assignedPersonId: true,
       assignedPersonName: true,
+      supportLevel: true,
       thirdPartyName: true,
       customFields: true,
       account: { select: { id: true, name: true } },
@@ -149,15 +150,11 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
 
   // ── Yardımcı haritalar (tenant-scoped; IN(caseIds) 2100-parametre
   //    tuzağından kaçınmak için bilinçli olarak geniş groupBy) ─────────
-  const [mailAgg, teams, persons] = await Promise.all([
-    prisma.caseEmail.groupBy({
-      by: ['caseId', 'direction'],
-      where: { companyId: { in: allowedCompanyIds } },
-      _max: { sentAt: true, receivedAt: true },
-    }),
-    prisma.team.findMany({ select: { id: true, defaultSupportLevel: true } }),
-    prisma.person.findMany({ select: { id: true, supportLevel: true } }),
-  ]);
+  const mailAgg = await prisma.caseEmail.groupBy({
+    by: ['caseId', 'direction'],
+    where: { companyId: { in: allowedCompanyIds } },
+    _max: { sentAt: true, receivedAt: true },
+  });
   const mailByCase = new Map();
   for (const m of mailAgg) {
     const e = mailByCase.get(m.caseId) ?? { lastOutboundAt: null, lastInboundAt: null };
@@ -166,27 +163,25 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
     if (m.direction === 'inbound') e.lastInboundAt = m._max.receivedAt ?? e.lastInboundAt;
     mailByCase.set(m.caseId, e);
   }
-  const teamLevel = new Map(teams.map((t) => [t.id, t.defaultSupportLevel ?? null]));
-  const personLevel = new Map(persons.map((p) => [p.id, p.supportLevel ?? null]));
-
   // ── Satır hesapları ────────────────────────────────────────────────
   const computed = cases.map((c) => {
     const created = c.createdAt.getTime();
-    const resolved = c.status === 'Cozuldu' && c.resolvedAt ? c.resolvedAt.getTime() : null;
+    // Codex #530 P2: resolvedAt her iki terminalde de damgalanır (transitionStatus
+    // İptal'de de yazar) — sayaç ikisinde de kapanış anında durur.
+    const resolved = TERMINAL.has(c.status) && c.resolvedAt ? c.resolvedAt.getTime() : null;
     const end = resolved ?? now;
 
     const resoDue = c.slaResolutionDueAt ? c.slaResolutionDueAt.getTime() : null;
     const respDue = c.slaResponseDueAt ? c.slaResponseDueAt.getTime() : null;
     const respMet = c.slaResponseMetAt ? c.slaResponseMetAt.getTime() : null;
-    const respEnd = respMet ?? now;
+    // Codex #530 P2: terminal vakada müdahale sayacı da durur (respMet yoksa
+    // kapanış anı; legacy resolvedAt=null ise now'a düşer — bilinçli düşüş).
+    const respEnd = respMet ?? resolved ?? now;
 
     const waitingDept = deriveWaitingDept(c, mailByCase.get(c.id));
-    // supportLevel zinciri: atanan kişi → takım default (Case şemasındaki
-    // dokümante akış); ikisi de yoksa null.
-    const supportLevel =
-      (c.assignedPersonId ? personLevel.get(c.assignedPersonId) : null)
-      ?? (c.assignedTeamId ? teamLevel.get(c.assignedTeamId) : null)
-      ?? null;
+    // Codex #530 P2: Case.supportLevel yaratılışta damgalanan KALICI kolon
+    // (ürün/explicit kuralları uygulanmış hali) — yeniden türetme yerine onu oku.
+    const supportLevel = c.supportLevel ?? null;
 
     const openDays = (end - created) / DAY_MS;
     return {
