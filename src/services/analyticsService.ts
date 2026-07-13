@@ -614,4 +614,78 @@ export const analyticsService = {
       'Drill-down listesi yüklenemedi',
     );
   },
+
+  // CS Yönetim Panosu (SLA İzleme) — n4b Power BI karşılığı
+  async getSlaDashboard(
+    filters: SlaDashboardFilters,
+  ): Promise<SlaDashboardResponse | undefined> {
+    const qs = new URLSearchParams();
+    (Object.entries(filters) as Array<[string, string | number | null | undefined]>).forEach(
+      ([k, v]) => {
+        if (v !== null && v !== undefined && v !== '') qs.set(k, String(v));
+      },
+    );
+    return apiFetch<SlaDashboardResponse>(
+      `/api/analytics/sla-dashboard?${qs.toString()}`,
+      undefined,
+      'SLA panosu yüklenemedi',
+    );
+  },
 };
+
+// ── CS SLA Panosu tipleri ─────────────────────────────────────────────
+export interface SlaDashboardFilters {
+  year?: number | null;
+  month?: number | null;
+  waitingDept?: string | null;
+  supportLevel?: string | null;
+  status?: string | null;
+  accountId?: string | null;
+  openAge?: string | null;
+  requestType?: string | null;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface SlaDashboardRow {
+  id: string;
+  caseNumber: string;
+  accountId: string | null;
+  accountName: string | null;
+  priority: string | null;
+  requestType: string | null;
+  status: string;
+  teamName: string | null;
+  ownerName: string | null;
+  supportLevel: string | null;
+  waitingDept: string;
+  devopsIds: string[];
+  openAgeBucket: string;
+  resolutionTargetDays: number | null;
+  resolutionElapsedDays: number;
+  resolutionRemainingDays: number | null;
+  resolutionOnTarget: boolean | null;
+  responseTargetMin: number | null;
+  responseElapsedMin: number;
+  responseRemainingMin: number | null;
+  responseOnTarget: boolean | null;
+}
+
+export interface SlaDashboardResponse {
+  rows: SlaDashboardRow[];
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  kpis: {
+    totalCount: number;
+    resolution: { evet: number; hayir: number; withDue: number };
+    response: { evet: number; hayir: number; withDue: number };
+  };
+  options: {
+    waitingDepts: string[];
+    accounts: Array<{ id: string; name: string }>;
+    requestTypes: string[];
+    statuses: string[];
+  };
+  generatedAt: string;
+}
