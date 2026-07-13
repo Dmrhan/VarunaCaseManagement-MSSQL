@@ -254,6 +254,14 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
   const filterDefs = useMemo(
     () => [
       {
+        key: 'companyId',
+        label: 'Şirket',
+        multiple: true,
+        values: filters.companyId ?? [],
+        options: (data?.options.companies ?? []).map((c) => ({ v: c.id, l: c.name })),
+        onChange: (vals: string[]) => set({ companyId: vals }),
+      },
+      {
         key: 'year',
         label: 'Yıl',
         multiple: false,
@@ -323,6 +331,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
   );
 
   const activeFilterCount =
+    (filters.companyId?.length ?? 0) +
     (filters.year ? 1 : 0) +
     (filters.month ? 1 : 0) +
     (filters.waitingDept?.length ?? 0) +
@@ -376,7 +385,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
       </p>
 
       {/* 8 filtre — kaynaktaki sıra */}
-      <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
+      <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-9">
         {filterDefs.map((f) => (
           <MultiDropdown
             key={f.key}

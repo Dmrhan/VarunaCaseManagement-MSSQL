@@ -646,6 +646,7 @@ export interface SlaDashboardFilters {
   year?: number | null;
   month?: number | null;
   /** Çoklu seçim — boş dizi = filtre yok. Query'ye tekrar eden param olarak gider. */
+  companyId?: string[];
   waitingDept?: string[];
   supportLevel?: string[];
   status?: string[];
@@ -709,6 +710,7 @@ export interface SlaDashboardResponse {
     response: { evet: number; hayir: number; withDue: number };
   };
   options: {
+    companies: Array<{ id: string; name: string }>;
     waitingDepts: string[];
     accounts: Array<{ id: string; name: string }>;
     requestTypes: string[];

@@ -5,9 +5,9 @@
  * bazında çözüm + müdahale SLA hedef/geçen/kalan süreleri, türetilmiş
  * "Bekleyen Bölüm", KPI özetleri ve sunucu tarafı sayfalama.
  *
- * Tasarım kararları (kullanıcı onayı 2026-07-13, mockup üzerinden):
- *  - "Proje" kolonu = Account (müşteri firması). AccountProject %48 dolu
- *    olduğundan bilinçli olarak seçilmedi.
+ * Tasarım kararları (kullanıcı onayları 2026-07-13):
+ *  - "Proje" kolonu = Account (müşteri firması); ayrıca ŞİRKET (tenant)
+ *    filtresi var — çok-şirket görenler (SystemAdmin vb.) ayrıştırabilsin.
  *  - Bekleyen Bölüm türetimi (öncelik sırası):
  *      terminal (Cozuldu/IptalEdildi)         → '—'
  *      ThirdPartyWaiting                      → thirdPartyName ?? '3. Parti'
@@ -17,14 +17,20 @@
  *      aksi halde                             → assignedTeamName
  *    DİKKAT: pendingCustomerReply=true = top AJANDA (ajan yanıt borçlu) —
  *    ters okuma YASAK (reference_pending_customer_reply_semantics).
- *  - Bildirim Tipi = Case.requestType (saklanan: Bilgi/Oneri/Talep/Sikayet/Hata).
+ *  - Bildirim Tipi = Case.requestType; Support seviyesi = Case.supportLevel
+ *    (yaratılışta damgalanan KALICI kolon — Codex #530 P2).
+ *  - Terminal vakada çözüm VE müdahale sayaçları resolvedAt'te donar
+ *    (İptal'de de damgalanır — Codex #530 P2).
+ *  - FİLTRE SEÇENEKLERİ KASKAD + KENDİNİ-DIŞLA (saha feedback 2026-07-13):
+ *    her dropdown'un listesi DİĞER filtrelerle daralır (Power BI slicer
+ *    davranışı) ama KENDİ seçimiyle ASLA daralmaz — yoksa çoklu seçimde
+ *    2./3. şık listeden kaybolur. Bunun için tüm facet filtreleri JS'te
+ *    uygulanır; DB where yalnız tenant kapsamı + arşiv + yıl/ay taşır.
  *  - PRIVACY: requester kişi alanları (customerContact*) payload'a GİRMEZ;
  *    yalnız Account.name (firma) döner.
  *
- * Derived filtreler (bekleyen bölüm / L1-L2 / açık-kalma) DB'ye itilemediği
- * için base set çekilip JS'te süzülür; KPI'lar süzülmüş TÜM set üzerinden,
- * sayfalama en sonda. ~10k vakaya kadar tek sorgu kabul edilebilir; üstü
- * için ileride denormalize kolon gerekir (bilinçli v1 sınırı).
+ * Ölçek notu: base set tek sorguda çekilir (~10k vakaya kadar kabul; üstü
+ * için denormalize kolon gerekir — bilinçli v1 sınırı).
  */
 import { prisma } from '../db/client.js';
 import { M_STATUS, M_REQUEST } from '../db/enumMap.js';
@@ -38,6 +44,11 @@ export const SLA_DASH_EXPORT_CAP = 20000;
 
 const TERMINAL = new Set(['Cozuldu', 'IptalEdildi']);
 
+/** Tekil değer ya da dizi → temiz string listesi (çoklu filtre desteği). */
+function toList(v) {
+  return (v == null ? [] : Array.isArray(v) ? v : [v]).map(String).filter(Boolean);
+}
+
 /** Görünen → saklanan; bilinmeyen görünen değer null döner (sessiz 0 tuzağına karşı). */
 function storedStatus(display) {
   if (!display) return null;
@@ -48,11 +59,6 @@ function storedRequestType(display) {
   if (!display) return null;
   if (Object.values(M_REQUEST).includes(display)) return display;
   return M_REQUEST[display] ?? null;
-}
-
-/** Tekil değer ya da dizi → temiz string listesi (çoklu filtre desteği). */
-function toList(v) {
-  return (v == null ? [] : Array.isArray(v) ? v : [v]).map(String).filter(Boolean);
 }
 
 function round2(n) {
@@ -97,9 +103,9 @@ export function deriveWaitingDept(c, mail) {
 }
 
 /**
- * Ana hesap. params: { year, month, waitingDept, supportLevel, status,
- * accountId, openAge, requestType, page, pageSize } (hepsi opsiyonel).
- * allowedCompanyIds: verifyJwt'nin doldurduğu tenant kapsamı (ZORUNLU).
+ * Ana hesap. params: { year, month, companyId, waitingDept, supportLevel,
+ * status, accountId, openAge, requestType, page, pageSize, exportAll }
+ * (facet'ler tekil ya da liste). allowedCompanyIds: verifyJwt tenant kapsamı.
  */
 export async function computeSlaDashboard(params, allowedCompanyIds) {
   if (!Array.isArray(allowedCompanyIds) || allowedCompanyIds.length === 0) {
@@ -107,7 +113,25 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
   }
   const now = Date.now();
 
-  // ── DB'ye itilebilen filtreler ─────────────────────────────────────
+  // ── Facet seçimleri (görünen etiketler saklanana çevrilir) ─────────
+  const stIn = toList(params.status);
+  const stOk = stIn.map(storedStatus).filter(Boolean);
+  if (stIn.length && !stOk.length) return emptyResult(params); // tümü bilinmeyen → dürüst boş
+  const rtIn = toList(params.requestType);
+  const rtOk = rtIn.map(storedRequestType).filter(Boolean);
+  if (rtIn.length && !rtOk.length) return emptyResult(params);
+  const sel = {
+    companyId: new Set(toList(params.companyId)),
+    status: new Set(stOk),
+    requestType: new Set(rtOk),
+    accountId: new Set(toList(params.accountId)),
+    waitingDept: new Set(toList(params.waitingDept)),
+    supportLevel: new Set(toList(params.supportLevel)),
+    openAge: new Set(toList(params.openAge)),
+  };
+
+  // ── DB where: yalnız tenant kapsamı + arşiv + yıl/ay (facet'ler JS'te —
+  //    kendini-dışla kaskad seçenekleri tek base set ister) ───────────
   const where = {
     companyId: { in: allowedCompanyIds },
     isArchived: false, // liste paritesi: arşivli default hariç
@@ -121,73 +145,42 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
       : new Date(Date.UTC(year + 1, 0, 1));
     where.createdAt = { gte: from, lt: to };
   }
-  // Çoklu seçim: her parametre tekil değer YA DA liste olabilir. Görünen
-  // etiketler saklanana çevrilir; verilen listenin TAMAMI bilinmeyense
-  // dürüst-boş (kısmen geçerliyse geçerli olanlarla süzülür).
-  const stIn = toList(params.status);
-  const stOk = stIn.map(storedStatus).filter(Boolean);
-  if (stIn.length && !stOk.length) return emptyResult(params);
-  if (stOk.length) where.status = { in: stOk };
-  const rtIn = toList(params.requestType);
-  const rtOk = rtIn.map(storedRequestType).filter(Boolean);
-  if (rtIn.length && !rtOk.length) return emptyResult(params);
-  if (rtOk.length) where.requestType = { in: rtOk };
-  const accIn = toList(params.accountId);
-  if (accIn.length) where.accountId = { in: accIn };
 
   // ── Base set — yalnız gereken kolonlar (PRIVACY: customerContact* YOK) ──
-  const cases = await prisma.case.findMany({
-    where,
-    select: {
-      id: true,
-      caseNumber: true,
-      status: true,
-      priority: true,
-      requestType: true,
-      createdAt: true,
-      resolvedAt: true,
-      slaResponseDueAt: true,
-      slaResponseMetAt: true,
-      slaResolutionDueAt: true,
-      pendingCustomerReply: true,
-      assignedTeamId: true,
-      assignedTeamName: true,
-      assignedPersonId: true,
-      assignedPersonName: true,
-      supportLevel: true,
-      thirdPartyName: true,
-      customFields: true,
-      account: { select: { id: true, name: true } },
-    },
-  });
-
-  // ── Yardımcı haritalar (tenant-scoped; IN(caseIds) 2100-parametre
-  //    tuzağından kaçınmak için bilinçli olarak geniş groupBy) ─────────
-  // Seçenek evreni FİLTREDEN BAĞIMSIZ sabittir — aksi halde bir filtre
-  // seçilince diğer dropdown'ların içeriği kırpılır (saha bug'ı 2026-07-13).
-  const [mailAgg, teamRows, thirdPartyRows, topAccounts] = await Promise.all([
+  const [cases, mailAgg, companyRows] = await Promise.all([
+    prisma.case.findMany({
+      where,
+      select: {
+        id: true,
+        caseNumber: true,
+        companyId: true,
+        status: true,
+        priority: true,
+        requestType: true,
+        createdAt: true,
+        resolvedAt: true,
+        slaResponseDueAt: true,
+        slaResponseMetAt: true,
+        slaResolutionDueAt: true,
+        pendingCustomerReply: true,
+        assignedTeamId: true,
+        assignedTeamName: true,
+        assignedPersonId: true,
+        assignedPersonName: true,
+        supportLevel: true,
+        thirdPartyName: true,
+        customFields: true,
+        account: { select: { id: true, name: true } },
+      },
+    }),
     prisma.caseEmail.groupBy({
       by: ['caseId', 'direction'],
       where: { companyId: { in: allowedCompanyIds } },
       _max: { sentAt: true, receivedAt: true },
     }),
-    prisma.team.findMany({
-      where: { companyId: { in: allowedCompanyIds }, isActive: true },
-      select: { name: true },
-    }),
-    prisma.thirdParty.findMany({
-      where: {
-        isActive: true,
-        OR: [{ companyId: { in: allowedCompanyIds } }, { companyId: null }],
-      },
-      select: { name: true },
-    }),
-    prisma.case.groupBy({
-      by: ['accountId'],
-      where: { companyId: { in: allowedCompanyIds }, isArchived: false, accountId: { not: null } },
-      _count: { _all: true },
-      orderBy: { _count: { accountId: 'desc' } },
-      take: 200,
+    prisma.company.findMany({
+      where: { id: { in: allowedCompanyIds } },
+      select: { id: true, name: true },
     }),
   ]);
   const mailByCase = new Map();
@@ -198,6 +191,8 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
     if (m.direction === 'inbound') e.lastInboundAt = m._max.receivedAt ?? e.lastInboundAt;
     mailByCase.set(m.caseId, e);
   }
+  const companyName = new Map(companyRows.map((c) => [c.id, c.name]));
+
   // ── Satır hesapları ────────────────────────────────────────────────
   const computed = cases.map((c) => {
     const created = c.createdAt.getTime();
@@ -214,14 +209,11 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
     const respEnd = respMet ?? resolved ?? now;
 
     const waitingDept = deriveWaitingDept(c, mailByCase.get(c.id));
-    // Codex #530 P2: Case.supportLevel yaratılışta damgalanan KALICI kolon
-    // (ürün/explicit kuralları uygulanmış hali) — yeniden türetme yerine onu oku.
-    const supportLevel = c.supportLevel ?? null;
-
     const openDays = (end - created) / DAY_MS;
     return {
       id: c.id,
       caseNumber: c.caseNumber,
+      companyId: c.companyId,
       accountId: c.account?.id ?? null,
       accountName: c.account?.name ?? null,
       priority: c.priority,
@@ -229,7 +221,9 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
       status: c.status,
       teamName: c.assignedTeamName ?? null,
       ownerName: c.assignedPersonName ?? null,
-      supportLevel,
+      // Codex #530 P2: Case.supportLevel yaratılışta damgalanan KALICI kolon
+      // (ürün/explicit kuralları uygulanmış hali) — yeniden türetme yerine onu oku.
+      supportLevel: c.supportLevel ?? null,
       waitingDept,
       devopsIds: extractDevopsIds(c.customFields),
       openAgeBucket: openAgeBucket(openDays),
@@ -246,14 +240,47 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
     };
   });
 
-  // ── Türetilmiş filtreler (JS) ──────────────────────────────────────
-  let filtered = computed;
-  const wdSet = new Set(toList(params.waitingDept));
-  if (wdSet.size) filtered = filtered.filter((r) => wdSet.has(r.waitingDept));
-  const lvlSet = new Set(toList(params.supportLevel));
-  if (lvlSet.size) filtered = filtered.filter((r) => r.supportLevel != null && lvlSet.has(r.supportLevel));
-  const ageSet = new Set(toList(params.openAge));
-  if (ageSet.size) filtered = filtered.filter((r) => ageSet.has(r.openAgeBucket));
+  // ── Facet süzme: kendini-dışla desteğiyle ──────────────────────────
+  // matches(r, excludeKey): excludeKey DIŞINDAKİ tüm seçili facet'leri uygular.
+  // Seçenek listeleri excludeKey=kendisi ile hesaplanır → dropdown kendi
+  // seçimiyle daralmaz, diğer filtrelerle kaskad daralır (Power BI davranışı).
+  const FACETS = [
+    ['companyId', (r) => r.companyId],
+    ['status', (r) => r.status],
+    ['requestType', (r) => r.requestType],
+    ['accountId', (r) => r.accountId],
+    ['waitingDept', (r) => r.waitingDept],
+    ['supportLevel', (r) => r.supportLevel],
+    ['openAge', (r) => r.openAgeBucket],
+  ];
+  const matches = (r, excludeKey) => {
+    for (const [key, get] of FACETS) {
+      if (key === excludeKey) continue;
+      const set = sel[key];
+      if (set.size && !set.has(get(r))) return false;
+    }
+    return true;
+  };
+  const filtered = computed.filter((r) => matches(r, null));
+
+  // ── Seçenekler (kaskad + kendini-dışla) ────────────────────────────
+  const waitingOpt = new Set();
+  const companyOpt = new Map();
+  const accountCount = new Map();
+  for (const r of computed) {
+    if (r.waitingDept !== '—' && matches(r, 'waitingDept')) waitingOpt.add(r.waitingDept);
+    if (matches(r, 'companyId')) companyOpt.set(r.companyId, companyName.get(r.companyId) ?? r.companyId);
+    if (r.accountId && r.accountName && matches(r, 'accountId')) {
+      const e = accountCount.get(r.accountId) ?? { name: r.accountName, n: 0 };
+      e.n += 1;
+      accountCount.set(r.accountId, e);
+    }
+  }
+  const accounts = [...accountCount.entries()]
+    .sort((a, b) => b[1].n - a[1].n)
+    .slice(0, 200)
+    .map(([id, e]) => ({ id, name: e.name }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
 
   // ── KPI'lar — süzülmüş TAM set üzerinden ───────────────────────────
   const kpi = (arr, key) => {
@@ -271,7 +298,7 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
     response: kpi(filtered, 'responseOnTarget'),
   };
 
-  // ── Sıralama (geciken önce) + sayfalama ────────────────────────────
+  // ── Sıralama (geciken önce) ────────────────────────────────────────
   filtered.sort((a, b) => {
     const ar = a.resolutionRemainingDays;
     const br = b.resolutionRemainingDays;
@@ -280,6 +307,17 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
     if (br == null) return -1;
     return ar - br;
   });
+
+  const options = {
+    companies: [...companyOpt.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'tr')),
+    waitingDepts: [...waitingOpt].sort((a, b) => a.localeCompare(b, 'tr')),
+    accounts,
+    requestTypes: Object.keys(M_REQUEST), // görünen etiketler
+    statuses: Object.keys(M_STATUS),
+  };
+
   // Export modu: sayfalama yok — süzülmüş TÜM set (tavanlı) tek seferde
   // döner; FE xlsx üretir. exportTruncated dürüstlük bayrağı.
   if (params.exportAll) {
@@ -291,7 +329,7 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
       totalPages: 1,
       exportTruncated: filtered.length > SLA_DASH_EXPORT_CAP,
       kpis,
-      options: { waitingDepts: [], accounts: [], requestTypes: Object.keys(M_REQUEST), statuses: Object.keys(M_STATUS) },
+      options,
       generatedAt: new Date().toISOString(),
     };
   }
@@ -304,35 +342,13 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
   const page = Math.min(Math.max(Number(params.page) || 1, 1), totalPages);
   const rows = filtered.slice((page - 1) * pageSize, page * pageSize);
 
-  // ── Filtre seçenekleri — sabit evren (yukarıdaki Promise.all):
-  //    Havuzda + Müşteri + aktif takımlar + aktif 3rd party'ler; müşteriler
-  //    tenant genelinde en çok vakası olan 200 hesap (filtreden bağımsız).
-  const waitingOpt = new Set(['Havuzda', 'Müşteri']);
-  for (const t of teamRows) if (t.name?.trim()) waitingOpt.add(t.name.trim());
-  for (const tp of thirdPartyRows) if (tp.name?.trim()) waitingOpt.add(tp.name.trim());
-  const topAccountIds = topAccounts.map((a) => a.accountId).filter(Boolean);
-  const accountRows = topAccountIds.length
-    ? await prisma.account.findMany({
-        where: { id: { in: topAccountIds } },
-        select: { id: true, name: true },
-      })
-    : [];
-  const accountOpt = new Map(accountRows.map((a) => [a.id, a.name]));
-
   return {
     rows,
     page,
     pageSize,
     totalPages,
     kpis,
-    options: {
-      waitingDepts: [...waitingOpt].sort((a, b) => a.localeCompare(b, 'tr')),
-      accounts: [...accountOpt.entries()]
-        .map(([id, name]) => ({ id, name }))
-        .sort((a, b) => a.name.localeCompare(b.name, 'tr')),
-      requestTypes: Object.keys(M_REQUEST), // görünen etiketler
-      statuses: Object.keys(M_STATUS),
-    },
+    options,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -348,7 +364,7 @@ function emptyResult(params) {
     pageSize,
     totalPages: 1,
     kpis: { totalCount: 0, resolution: { evet: 0, hayir: 0, withDue: 0 }, response: { evet: 0, hayir: 0, withDue: 0 } },
-    options: { waitingDepts: [], accounts: [], requestTypes: Object.keys(M_REQUEST), statuses: Object.keys(M_STATUS) },
+    options: { companies: [], waitingDepts: [], accounts: [], requestTypes: Object.keys(M_REQUEST), statuses: Object.keys(M_STATUS) },
     generatedAt: new Date().toISOString(),
   };
 }

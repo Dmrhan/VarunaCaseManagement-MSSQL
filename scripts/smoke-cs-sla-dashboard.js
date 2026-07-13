@@ -107,21 +107,22 @@ ok('18 Excel export: backend exportAll (20k tavan + truncated bayrağı) + route
   && page.includes("await import('xlsx')")
   && svc.includes('exportSlaDashboard'));
 
-ok('19 çoklu seçim: backend toList+IN (kısmen geçersiz liste geçerlilerle süzer, tümü geçersizse boş) + route dizi geçirir + FE MultiDropdown + temizle',
+ok('19 çoklu seçim: backend toList + facet Set (tümü-geçersiz liste dürüst-boş) + route dizi geçirir + FE MultiDropdown + temizle',
   agg.includes('function toList(')
-  && agg.includes('where.status = { in: stOk }')
   && agg.includes('if (stIn.length && !stOk.length) return emptyResult')
   && /waitingDept: q\.waitingDept \?\? null/.test(route)
+  && /companyId: q\.companyId \?\? null/.test(route)
   && page.includes('function MultiDropdown(')
   && page.includes('Filtreleri Temizle')
   && page.includes('Seçimi temizle'));
 
-ok('20 filtre seçenekleri SABİT EVRENDEN (takım+3rdParty+top200 hesap) — filtrelenmiş sonuçtan DEĞİL (saha bug regresyonu)',
-  agg.includes('FİLTREDEN BAĞIMSIZ')
-  && agg.includes('prisma.team.findMany')
-  && agg.includes('prisma.thirdParty.findMany')
-  && /prisma\.case\.groupBy\(\{\s*by: \['accountId'\]/.test(agg)
-  && !/for \(const r of computed\) \{[\s\S]{0,200}waitingOpt\.add\(r\.waitingDept\)/.test(agg));
+ok('20 seçenekler KASKAD + KENDİNİ-DIŞLA (saha feedback): matches(r, excludeKey) + her seçenek kendi facet\'i hariç süzülür + Şirket facet\'i var',
+  agg.includes("matches(r, 'waitingDept')")
+  && agg.includes("matches(r, 'companyId')")
+  && agg.includes("matches(r, 'accountId')")
+  && agg.includes('if (key === excludeKey) continue;')
+  && agg.includes("['companyId', (r) => r.companyId]")
+  && page.includes("label: 'Şirket'"));
 
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);
