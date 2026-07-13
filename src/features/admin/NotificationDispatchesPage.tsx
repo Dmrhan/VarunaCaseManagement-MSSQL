@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Eye, History } from 'lucide-react';
+import { Eye, History, Info } from 'lucide-react';
 import { CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
@@ -154,7 +154,7 @@ export function NotificationDispatchesPage({ initialState = '' }: {
                       <Badge tint={d.mode === 'Manual' ? 'amber' : 'slate'}>{d.mode}</Badge>
                     </td>
                     <td className="px-3 py-2">
-                      <StateBadge state={d.state} reason={d.suppressionReason} />
+                      <StateBadge dispatch={d} />
                     </td>
                     <td className="px-3 py-2 text-right">
                       <button
@@ -203,6 +203,22 @@ export function NotificationDispatchesPage({ initialState = '' }: {
                 {viewer.snapshotBody}
               </pre>
             </div>
+            {(viewer.state === 'Failed' || viewer.state === 'Pending') && (() => {
+              const reason = resolveDispatchReason(viewer);
+              if (!reason) return null;
+              const label = viewer.state === 'Failed' ? 'Hata Sebebi' : 'Beklemede Kalma Nedeni';
+              const boxClass = viewer.state === 'Failed'
+                ? 'border-rose-200 bg-rose-50 text-rose-900'
+                : 'border-amber-200 bg-amber-50 text-amber-900';
+              return (
+                <div className="space-y-1">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+                  <div className={`rounded-md border px-3 py-2 text-xs whitespace-pre-wrap break-words ${boxClass}`}>
+                    {reason}
+                  </div>
+                </div>
+              );
+            })()}
             {viewer.deliveryNote && (
               <div className="space-y-1">
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Teslimat notu</div>
@@ -218,19 +234,73 @@ export function NotificationDispatchesPage({ initialState = '' }: {
   );
 }
 
-function StateBadge({ state, reason }: { state: DispatchState; reason: string | null }) {
-  if (state === 'Sent') return <Badge tint="emerald">Sent</Badge>;
-  if (state === 'Pending') return <Badge tint="amber">Pending</Badge>;
-  if (state === 'Failed') return <Badge tint="rose">Failed</Badge>;
-  if (state === 'Suppressed') {
+/**
+ * Failed → SMTP/gönderim hatası (failureReason'dan okunur).
+ * Pending → audienceIdentifier deseni + kanaldan çıkarım (kuyruk / adres yok / SMS beklemede).
+ * Sent / Suppressed → neden gösterilmez (Suppressed reason'ı zaten metin olarak yanında basılıyor).
+ */
+function resolveDispatchReason(d: NotificationDispatch): string | null {
+  if (d.state === 'Failed') {
+    return d.failureReason?.trim() || 'Hata sebebi kaydedilmemiş.';
+  }
+  if (d.state === 'Pending') {
+    const id = (d.audienceIdentifier ?? '').trim().toLowerCase();
+    if (id === 'manual' || id === 'unresolved') {
+      return 'Alıcı adresi çözülemedi — vakada müşteri iletişim bilgisi yok, otomatik gönderim yapılamıyor.';
+    }
+    if (id === 'phone') {
+      return 'SMS kanalı bu ortamda aktif değil; bildirim beklemede.';
+    }
+    // Codex P2 — Manual/LogOnly Pending, operatör aksiyonu beklenen kayıttır;
+    // "kuyrukta bekliyor" metni yanıltıcı. Yalnız mode=Active'de gönderici
+    // pipeline'ının işleyeceği anlamda "kuyrukta" ifadesi geçerli.
+    if (d.mode === 'Manual') {
+      return 'Operatör manuel onay bekliyor — vaka detayından "Manuel Olarak Hallettim" ile kapatılabilir.';
+    }
+    if (d.mode === 'LogOnly') {
+      return 'Yalnızca kayıt (LogOnly) modu — otomatik gönderim yapılmayacak; kayıt denetim için tutuluyor.';
+    }
+    if (d.channel === 'Email' && id.includes('@')) {
+      return 'Gönderim kuyruğunda, henüz denenmedi.';
+    }
+    return 'Beklemede.';
+  }
+  return null;
+}
+
+function StateBadge({ dispatch: d }: { dispatch: NotificationDispatch }) {
+  const reason = resolveDispatchReason(d);
+  if (d.state === 'Sent') return <Badge tint="emerald">Sent</Badge>;
+  if (d.state === 'Suppressed') {
     return (
       <span>
         <Badge tint="slate">Suppressed</Badge>
-        {reason && <span className="ml-1 text-[10px] text-slate-400">{reason}</span>}
+        {d.suppressionReason && (
+          <span className="ml-1 text-[10px] text-slate-400">{d.suppressionReason}</span>
+        )}
       </span>
     );
   }
-  return <Badge tint="slate">{state}</Badge>;
+  if (d.state === 'Pending' || d.state === 'Failed') {
+    const tint = d.state === 'Pending' ? 'amber' : 'rose';
+    const label = d.state === 'Pending' ? 'Beklemede kalma nedeni' : 'Hata sebebi';
+    return (
+      <span className="inline-flex items-center gap-1">
+        <Badge tint={tint}>{d.state}</Badge>
+        {reason && (
+          <button
+            type="button"
+            title={`${label}: ${reason}`}
+            aria-label={`${label}: ${reason}`}
+            className="inline-flex cursor-help items-center text-slate-400 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-300 rounded dark:text-ndark-dim dark:hover:text-ndark-fg"
+          >
+            <Info size={12} aria-hidden="true" />
+          </button>
+        )}
+      </span>
+    );
+  }
+  return <Badge tint="slate">{d.state}</Badge>;
 }
 
 function maskIdentifier(id: string, type: string): string {
