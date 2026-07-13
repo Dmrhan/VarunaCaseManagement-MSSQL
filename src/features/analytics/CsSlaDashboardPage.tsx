@@ -6,8 +6,8 @@
  * Yetki: TÜM roller (bilinçli — daraltma ileride nav + route listesinden).
  * Veri: GET /api/analytics/sla-dashboard (sunucu tarafı filtre+sayfalama).
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Download, Loader2, RefreshCw, SearchX } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, Download, FilterX, Loader2, RefreshCw, SearchX } from 'lucide-react';
 import { useToast } from '@/components/ui/Toast';
 import {
   analyticsService,
@@ -92,6 +92,95 @@ function DeptChip({ label }: { label: string | null }) {
   );
 }
 
+/** Checkbox'lı filtre dropdown'u — çoklu (default) ya da tekil mod. */
+function MultiDropdown({
+  label,
+  options,
+  values,
+  onChange,
+  multiple = true,
+}: {
+  label: string;
+  options: Array<{ v: string; l: string }>;
+  values: string[];
+  onChange: (vals: string[]) => void;
+  multiple?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+  const summary =
+    values.length === 0
+      ? 'Tümü'
+      : values.length === 1
+        ? (options.find((o) => o.v === values[0])?.l ?? values[0])
+        : `${values.length} seçili`;
+  const toggle = (v: string) => {
+    if (!multiple) {
+      onChange(values.includes(v) ? [] : [v]);
+      setOpen(false);
+      return;
+    }
+    onChange(values.includes(v) ? values.filter((x) => x !== v) : [...values, v]);
+  };
+  return (
+    <div className="relative" ref={ref}>
+      <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+        {label}
+      </span>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex w-full items-center justify-between gap-1 rounded-lg border bg-white px-2 py-1.5 text-left text-xs outline-none dark:bg-ndark-card ${
+          values.length
+            ? 'border-brand-400 text-brand-700 dark:text-ndark-link'
+            : 'border-slate-200 text-slate-800 dark:border-ndark-border dark:text-ndark-text'
+        }`}
+      >
+        <span className="truncate">{summary}</span>
+        <ChevronDown size={12} className="shrink-0 text-slate-400" />
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-ndark-border dark:bg-ndark-card">
+          {values.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="mb-0.5 w-full rounded px-2 py-1 text-left text-[11px] font-semibold text-brand-600 hover:bg-brand-50/60 dark:text-ndark-link dark:hover:bg-ndark-bg"
+            >
+              Seçimi temizle
+            </button>
+          )}
+          {options.map((o) => (
+            <label
+              key={o.v}
+              className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:text-ndark-text dark:hover:bg-ndark-bg"
+            >
+              <input
+                type="checkbox"
+                checked={values.includes(o.v)}
+                onChange={() => toggle(o.v)}
+                className="accent-brand-600"
+              />
+              <span className="truncate">{o.l}</span>
+            </label>
+          ))}
+          {options.length === 0 && (
+            <div className="px-2 py-2 text-[11px] text-slate-400 dark:text-ndark-dim">Seçenek yok</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   onSelectCase?: (caseId: string) => void;
 }
@@ -167,62 +256,81 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
       {
         key: 'year',
         label: 'Yıl',
-        value: filters.year ?? '',
+        multiple: false,
+        values: filters.year ? [String(filters.year)] : [],
         options: YEARS.map((y) => ({ v: String(y), l: String(y) })),
-        onChange: (v: string) => set({ year: v ? Number(v) : null, month: v ? filters.month : null }),
+        onChange: (vals: string[]) =>
+          set({ year: vals[0] ? Number(vals[0]) : null, month: vals[0] ? filters.month : null }),
       },
       {
         key: 'month',
         label: 'Ay',
-        value: filters.month ?? '',
+        multiple: false,
+        values: filters.month ? [String(filters.month)] : [],
         options: MONTHS.map((m, i) => ({ v: String(i + 1), l: m })),
-        onChange: (v: string) => set({ month: v ? Number(v) : null }),
+        onChange: (vals: string[]) => set({ month: vals[0] ? Number(vals[0]) : null }),
       },
       {
         key: 'waitingDept',
         label: 'Bekleyen Bölüm',
-        value: filters.waitingDept ?? '',
+        multiple: true,
+        values: filters.waitingDept ?? [],
         options: (data?.options.waitingDepts ?? []).map((d) => ({ v: d, l: d })),
-        onChange: (v: string) => set({ waitingDept: v || null }),
+        onChange: (vals: string[]) => set({ waitingDept: vals }),
       },
       {
         key: 'supportLevel',
         label: 'Support L1-L2',
-        value: filters.supportLevel ?? '',
+        multiple: true,
+        values: filters.supportLevel ?? [],
         options: SUPPORT_LEVELS.map((l) => ({ v: l, l })),
-        onChange: (v: string) => set({ supportLevel: v || null }),
+        onChange: (vals: string[]) => set({ supportLevel: vals }),
       },
       {
         key: 'status',
         label: 'Vaka Durumu',
-        value: filters.status ?? '',
+        multiple: true,
+        values: filters.status ?? [],
         options: (data?.options.statuses ?? []).map((s) => ({ v: s, l: s })),
-        onChange: (v: string) => set({ status: v || null }),
+        onChange: (vals: string[]) => set({ status: vals }),
       },
       {
         key: 'accountId',
         label: 'Müşteri (Proje)',
-        value: filters.accountId ?? '',
+        multiple: true,
+        values: filters.accountId ?? [],
         options: (data?.options.accounts ?? []).map((a) => ({ v: a.id, l: a.name })),
-        onChange: (v: string) => set({ accountId: v || null }),
+        onChange: (vals: string[]) => set({ accountId: vals }),
       },
       {
         key: 'openAge',
         label: 'Açık Kalma Aralığı',
-        value: filters.openAge ?? '',
+        multiple: true,
+        values: filters.openAge ?? [],
         options: OPEN_AGE_OPTIONS.map((b) => ({ v: b, l: `${b} gün` })),
-        onChange: (v: string) => set({ openAge: v || null }),
+        onChange: (vals: string[]) => set({ openAge: vals }),
       },
       {
         key: 'requestType',
         label: 'Bildirim Tipi',
-        value: filters.requestType ?? '',
+        multiple: true,
+        values: filters.requestType ?? [],
         options: (data?.options.requestTypes ?? []).map((t) => ({ v: t, l: t })),
-        onChange: (v: string) => set({ requestType: v || null }),
+        onChange: (vals: string[]) => set({ requestType: vals }),
       },
     ],
     [filters, data],
   );
+
+  const activeFilterCount =
+    (filters.year ? 1 : 0) +
+    (filters.month ? 1 : 0) +
+    (filters.waitingDept?.length ?? 0) +
+    (filters.supportLevel?.length ?? 0) +
+    (filters.status?.length ?? 0) +
+    (filters.accountId?.length ?? 0) +
+    (filters.openAge?.length ?? 0) +
+    (filters.requestType?.length ?? 0);
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-5">
@@ -232,6 +340,16 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
           CS Yönetim Panosu — SLA İzleme
         </h1>
         <div className="ml-auto flex items-center gap-2">
+          {activeFilterCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilters({ page: 1 })}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-red-400 hover:text-red-600 dark:border-ndark-border dark:text-ndark-muted"
+              title="Tüm filtreleri sıfırla"
+            >
+              <FilterX size={13} /> Filtreleri Temizle ({activeFilterCount})
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void handleExport()}
@@ -260,23 +378,14 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
       {/* 8 filtre — kaynaktaki sıra */}
       <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
         {filterDefs.map((f) => (
-          <label key={f.key} className="block">
-            <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
-              {f.label}
-            </span>
-            <select
-              value={String(f.value)}
-              onChange={(e) => f.onChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800 outline-none focus:border-brand-500 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
-            >
-              <option value="">Tümü</option>
-              {f.options.map((o) => (
-                <option key={o.v} value={o.v}>
-                  {o.l}
-                </option>
-              ))}
-            </select>
-          </label>
+          <MultiDropdown
+            key={f.key}
+            label={f.label}
+            options={f.options}
+            values={f.values}
+            multiple={f.multiple}
+            onChange={f.onChange}
+          />
         ))}
       </div>
 

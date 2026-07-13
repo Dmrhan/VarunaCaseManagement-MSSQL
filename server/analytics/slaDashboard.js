@@ -50,6 +50,11 @@ function storedRequestType(display) {
   return M_REQUEST[display] ?? null;
 }
 
+/** Tekil değer ya da dizi → temiz string listesi (çoklu filtre desteği). */
+function toList(v) {
+  return (v == null ? [] : Array.isArray(v) ? v : [v]).map(String).filter(Boolean);
+}
+
 function round2(n) {
   return Math.round(n * 100) / 100;
 }
@@ -116,13 +121,19 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
       : new Date(Date.UTC(year + 1, 0, 1));
     where.createdAt = { gte: from, lt: to };
   }
-  const st = storedStatus(params.status);
-  if (params.status && !st) return emptyResult(params); // bilinmeyen etiket → dürüst boş
-  if (st) where.status = st;
-  const rt = storedRequestType(params.requestType);
-  if (params.requestType && !rt) return emptyResult(params);
-  if (rt) where.requestType = rt;
-  if (params.accountId) where.accountId = String(params.accountId);
+  // Çoklu seçim: her parametre tekil değer YA DA liste olabilir. Görünen
+  // etiketler saklanana çevrilir; verilen listenin TAMAMI bilinmeyense
+  // dürüst-boş (kısmen geçerliyse geçerli olanlarla süzülür).
+  const stIn = toList(params.status);
+  const stOk = stIn.map(storedStatus).filter(Boolean);
+  if (stIn.length && !stOk.length) return emptyResult(params);
+  if (stOk.length) where.status = { in: stOk };
+  const rtIn = toList(params.requestType);
+  const rtOk = rtIn.map(storedRequestType).filter(Boolean);
+  if (rtIn.length && !rtOk.length) return emptyResult(params);
+  if (rtOk.length) where.requestType = { in: rtOk };
+  const accIn = toList(params.accountId);
+  if (accIn.length) where.accountId = { in: accIn };
 
   // ── Base set — yalnız gereken kolonlar (PRIVACY: customerContact* YOK) ──
   const cases = await prisma.case.findMany({
@@ -215,9 +226,12 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
 
   // ── Türetilmiş filtreler (JS) ──────────────────────────────────────
   let filtered = computed;
-  if (params.waitingDept) filtered = filtered.filter((r) => r.waitingDept === params.waitingDept);
-  if (params.supportLevel) filtered = filtered.filter((r) => r.supportLevel === params.supportLevel);
-  if (params.openAge) filtered = filtered.filter((r) => r.openAgeBucket === params.openAge);
+  const wdSet = new Set(toList(params.waitingDept));
+  if (wdSet.size) filtered = filtered.filter((r) => wdSet.has(r.waitingDept));
+  const lvlSet = new Set(toList(params.supportLevel));
+  if (lvlSet.size) filtered = filtered.filter((r) => r.supportLevel != null && lvlSet.has(r.supportLevel));
+  const ageSet = new Set(toList(params.openAge));
+  if (ageSet.size) filtered = filtered.filter((r) => ageSet.has(r.openAgeBucket));
 
   // ── KPI'lar — süzülmüş TAM set üzerinden ───────────────────────────
   const kpi = (arr, key) => {

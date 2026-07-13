@@ -619,12 +619,7 @@ export const analyticsService = {
   async getSlaDashboard(
     filters: SlaDashboardFilters,
   ): Promise<SlaDashboardResponse | undefined> {
-    const qs = new URLSearchParams();
-    (Object.entries(filters) as Array<[string, string | number | null | undefined]>).forEach(
-      ([k, v]) => {
-        if (v !== null && v !== undefined && v !== '') qs.set(k, String(v));
-      },
-    );
+    const qs = slaFiltersToQuery(filters);
     return apiFetch<SlaDashboardResponse>(
       `/api/analytics/sla-dashboard?${qs.toString()}`,
       undefined,
@@ -636,13 +631,7 @@ export const analyticsService = {
   async exportSlaDashboard(
     filters: SlaDashboardFilters,
   ): Promise<SlaDashboardResponse | undefined> {
-    const qs = new URLSearchParams();
-    (Object.entries(filters) as Array<[string, string | number | null | undefined]>).forEach(
-      ([k, v]) => {
-        if (k === 'page' || k === 'pageSize') return;
-        if (v !== null && v !== undefined && v !== '') qs.set(k, String(v));
-      },
-    );
+    const qs = slaFiltersToQuery(filters, true);
     qs.set('export', '1');
     return apiFetch<SlaDashboardResponse>(
       `/api/analytics/sla-dashboard?${qs.toString()}`,
@@ -656,14 +645,31 @@ export const analyticsService = {
 export interface SlaDashboardFilters {
   year?: number | null;
   month?: number | null;
-  waitingDept?: string | null;
-  supportLevel?: string | null;
-  status?: string | null;
-  accountId?: string | null;
-  openAge?: string | null;
-  requestType?: string | null;
+  /** Çoklu seçim — boş dizi = filtre yok. Query'ye tekrar eden param olarak gider. */
+  waitingDept?: string[];
+  supportLevel?: string[];
+  status?: string[];
+  accountId?: string[];
+  openAge?: string[];
+  requestType?: string[];
   page?: number;
   pageSize?: number;
+}
+
+function slaFiltersToQuery(filters: SlaDashboardFilters, skipPaging = false): URLSearchParams {
+  const qs = new URLSearchParams();
+  (Object.entries(filters) as Array<[string, string | number | string[] | null | undefined]>).forEach(
+    ([k, v]) => {
+      if (skipPaging && (k === 'page' || k === 'pageSize')) return;
+      if (v === null || v === undefined || v === '') return;
+      if (Array.isArray(v)) {
+        v.forEach((item) => item && qs.append(k, String(item)));
+      } else {
+        qs.set(k, String(v));
+      }
+    },
+  );
+  return qs;
 }
 
 export interface SlaDashboardRow {

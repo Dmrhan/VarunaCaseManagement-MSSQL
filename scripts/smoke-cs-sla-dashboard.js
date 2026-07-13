@@ -29,10 +29,10 @@ ok('2 tenant kapsamı req.user.allowedCompanyIds ile geçiyor (boşsa compute bo
   && /allowedCompanyIds\.length === 0\)\s*{\s*return emptyResult/.test(agg));
 
 // ── 2 · Saklanan-değer disiplini (görünen≠saklanan tuzağı) ──
-ok('3 durum/tip eşlemesi enumMap üzerinden; bilinmeyen etiket sessiz-0 değil dürüst-boş',
+ok('3 durum/tip eşlemesi enumMap üzerinden; tümü-bilinmeyen liste sessiz-0 değil dürüst-boş',
   agg.includes("import { M_STATUS, M_REQUEST } from '../db/enumMap.js'")
-  && agg.includes('if (params.status && !st) return emptyResult')
-  && agg.includes('if (params.requestType && !rt) return emptyResult'));
+  && agg.includes('if (stIn.length && !stOk.length) return emptyResult')
+  && agg.includes('if (rtIn.length && !rtOk.length) return emptyResult'));
 ok('4 terminal set saklanan değerlerle (Cozuldu/IptalEdildi) + mail direction küçük harf',
   /TERMINAL = new Set\(\['Cozuldu', 'IptalEdildi'\]\)/.test(agg)
   && agg.includes("m.direction === 'outbound'") && agg.includes("m.direction === 'inbound'"));
@@ -106,6 +106,15 @@ ok('18 Excel export: backend exportAll (20k tavan + truncated bayrağı) + route
   && page.includes("Excel'e Aktar")
   && page.includes("await import('xlsx')")
   && svc.includes('exportSlaDashboard'));
+
+ok('19 çoklu seçim: backend toList+IN (kısmen geçersiz liste geçerlilerle süzer, tümü geçersizse boş) + route dizi geçirir + FE MultiDropdown + temizle',
+  agg.includes('function toList(')
+  && agg.includes('where.status = { in: stOk }')
+  && agg.includes('if (stIn.length && !stOk.length) return emptyResult')
+  && /waitingDept: q\.waitingDept \?\? null/.test(route)
+  && page.includes('function MultiDropdown(')
+  && page.includes('Filtreleri Temizle')
+  && page.includes('Seçimi temizle'));
 
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

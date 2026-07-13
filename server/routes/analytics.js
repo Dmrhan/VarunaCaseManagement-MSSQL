@@ -1297,12 +1297,14 @@ router.get('/sla-dashboard', requireSlaDashboard, async (req, res) => {
       {
         year: q.year,
         month: q.month,
-        waitingDept: q.waitingDept ? String(q.waitingDept) : null,
-        supportLevel: q.supportLevel ? String(q.supportLevel) : null,
-        status: q.status ? String(q.status) : null,
-        accountId: q.accountId ? String(q.accountId) : null,
-        openAge: q.openAge ? String(q.openAge) : null,
-        requestType: q.requestType ? String(q.requestType) : null,
+        // Çoklu seçim: aynı isimli tekrar eden query paramları express dizi
+        // olarak verir; compute tekil|dizi ikisini de kabul eder (toList).
+        waitingDept: q.waitingDept ?? null,
+        supportLevel: q.supportLevel ?? null,
+        status: q.status ?? null,
+        accountId: q.accountId ?? null,
+        openAge: q.openAge ?? null,
+        requestType: q.requestType ?? null,
         page: q.page,
         pageSize: q.pageSize,
         exportAll: q.export === '1' || q.export === 'true',
