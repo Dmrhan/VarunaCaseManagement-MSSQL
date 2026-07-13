@@ -631,6 +631,25 @@ export const analyticsService = {
       'SLA panosu yüklenemedi',
     );
   },
+
+  // Excel export — sayfalama olmadan süzülmüş TÜM set (backend 20k tavanlı)
+  async exportSlaDashboard(
+    filters: SlaDashboardFilters,
+  ): Promise<SlaDashboardResponse | undefined> {
+    const qs = new URLSearchParams();
+    (Object.entries(filters) as Array<[string, string | number | null | undefined]>).forEach(
+      ([k, v]) => {
+        if (k === 'page' || k === 'pageSize') return;
+        if (v !== null && v !== undefined && v !== '') qs.set(k, String(v));
+      },
+    );
+    qs.set('export', '1');
+    return apiFetch<SlaDashboardResponse>(
+      `/api/analytics/sla-dashboard?${qs.toString()}`,
+      undefined,
+      'SLA export verisi alınamadı',
+    );
+  },
 };
 
 // ── CS SLA Panosu tipleri ─────────────────────────────────────────────
@@ -673,6 +692,8 @@ export interface SlaDashboardRow {
 
 export interface SlaDashboardResponse {
   rows: SlaDashboardRow[];
+  /** export=1 modunda: satır tavanı aşıldı, liste kırpıldı. */
+  exportTruncated?: boolean;
   page: number;
   pageSize: number;
   totalPages: number;

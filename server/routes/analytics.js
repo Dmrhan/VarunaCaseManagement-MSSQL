@@ -1305,6 +1305,7 @@ router.get('/sla-dashboard', requireSlaDashboard, async (req, res) => {
         requestType: q.requestType ? String(q.requestType) : null,
         page: q.page,
         pageSize: q.pageSize,
+        exportAll: q.export === '1' || q.export === 'true',
       },
       req.user?.allowedCompanyIds ?? [],
     );

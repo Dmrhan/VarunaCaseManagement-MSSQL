@@ -98,5 +98,14 @@ ok('17 Codex #530 P2 seti: terminalde çözüm+müdahale sayaçları donar; supp
   && /supportLevel: true/.test(agg)
   && !/personLevel|teamLevel/.test(agg));
 
+ok('18 Excel export: backend exportAll (20k tavan + truncated bayrağı) + route export=1 + FE dinamik xlsx',
+  agg.includes('SLA_DASH_EXPORT_CAP = 20000')
+  && agg.includes('params.exportAll')
+  && agg.includes('exportTruncated: filtered.length > SLA_DASH_EXPORT_CAP')
+  && /exportAll: q\.export === '1'/.test(route)
+  && page.includes("Excel'e Aktar")
+  && page.includes("await import('xlsx')")
+  && svc.includes('exportSlaDashboard'));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

@@ -33,6 +33,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_MS = 60 * 1000;
 export const SLA_DASH_MAX_PAGE_SIZE = 100;
 export const SLA_DASH_DEFAULT_PAGE_SIZE = 20;
+// Excel export tavanı — tek istekte dönebilecek satır (bellek guard'ı).
+export const SLA_DASH_EXPORT_CAP = 20000;
 
 const TERMINAL = new Set(['Cozuldu', 'IptalEdildi']);
 
@@ -242,6 +244,22 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
     if (br == null) return -1;
     return ar - br;
   });
+  // Export modu: sayfalama yok — süzülmüş TÜM set (tavanlı) tek seferde
+  // döner; FE xlsx üretir. exportTruncated dürüstlük bayrağı.
+  if (params.exportAll) {
+    const capped = filtered.slice(0, SLA_DASH_EXPORT_CAP);
+    return {
+      rows: capped,
+      page: 1,
+      pageSize: capped.length,
+      totalPages: 1,
+      exportTruncated: filtered.length > SLA_DASH_EXPORT_CAP,
+      kpis,
+      options: { waitingDepts: [], accounts: [], requestTypes: Object.keys(M_REQUEST), statuses: Object.keys(M_STATUS) },
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
   const pageSize = Math.min(
     Math.max(Number(params.pageSize) || SLA_DASH_DEFAULT_PAGE_SIZE, 1),
     SLA_DASH_MAX_PAGE_SIZE,

@@ -7,7 +7,8 @@
  * Veri: GET /api/analytics/sla-dashboard (sunucu tarafı filtre+sayfalama).
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCw, SearchX } from 'lucide-react';
+import { Download, Loader2, RefreshCw, SearchX } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
 import {
   analyticsService,
   type SlaDashboardFilters,
@@ -15,6 +16,15 @@ import {
   type SlaDashboardRow,
 } from '../../services/analyticsService';
 
+const STATUS_TR: Record<string, string> = {
+  Acik: 'Açık',
+  Incelemede: 'İncelemede',
+  ThirdPartyWaiting: '3rd Party',
+  Eskalasyon: 'Eskalasyon',
+  Cozuldu: 'Çözüldü',
+  YenidenAcildi: 'Yeniden Açıldı',
+  IptalEdildi: 'İptal Edildi',
+};
 const PRIORITY_TR: Record<string, string> = {
   Low: 'Düşük',
   Medium: 'Orta',
@@ -90,6 +100,8 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
   const [filters, setFilters] = useState<SlaDashboardFilters>({ page: 1 });
   const [data, setData] = useState<SlaDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const { toast } = useToast();
 
   const load = useCallback(async (f: SlaDashboardFilters) => {
     setLoading(true);
@@ -104,6 +116,48 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
 
   const set = (patch: Partial<SlaDashboardFilters>) =>
     setFilters((f) => ({ ...f, ...patch, page: 1 }));
+
+  // Excel export — CaseTaggingReviewPage deseninin ikizi (dinamik xlsx importu:
+  // kütüphane yalnız export anında yüklenir, ana bundle'a girmez).
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const res = await analyticsService.exportSlaDashboard(filters);
+      if (!res) return;
+      const rows = res.rows.map((r) => ({
+        'Müşteri (Proje)': r.accountName ?? '',
+        'Öncelik': PRIORITY_TR[r.priority ?? ''] ?? r.priority ?? '',
+        'Bölüm': r.teamName ?? '',
+        'Vaka No': r.caseNumber,
+        'DevOps No': r.devopsIds.join(', '),
+        'Sahibi': r.ownerName ?? '',
+        'Bekleyen Bölüm': r.waitingDept,
+        'Durum': STATUS_TR[r.status] ?? r.status,
+        'Support Seviyesi': r.supportLevel ?? '',
+        'Çözüm Uyum': r.resolutionOnTarget == null ? '' : r.resolutionOnTarget ? 'Evet' : 'Hayır',
+        'Hedef Çözüm (gün)': r.resolutionTargetDays,
+        'Geçen (gün)': r.resolutionElapsedDays,
+        'Kalan (gün)': r.resolutionRemainingDays,
+        'Müdahale Uyum': r.responseOnTarget == null ? '' : r.responseOnTarget ? 'Evet' : 'Hayır',
+        'Hedef Müdahale (dk)': r.responseTargetMin,
+        'Müd. Kalan (dk)': r.responseRemainingMin,
+        'Müd. Geçen (dk)': r.responseElapsedMin,
+      }));
+      const XLSX = await import('xlsx');
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'SLA İzleme');
+      const date = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `SLA_Izleme_${date}.xlsx`);
+      if (res.exportTruncated) {
+        toast({ type: 'info', message: 'Satır tavanı aşıldı — ilk 20.000 satır aktarıldı; filtreyi daraltın.' });
+      }
+    } catch {
+      toast({ type: 'error', message: 'Excel export başarısız.' });
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const kpis = data?.kpis;
   const pct = (n: number, d: number) => (d > 0 ? `%${nf.format((n / d) * 100).replace(',00', ',0')}` : '—');
@@ -177,14 +231,26 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         <h1 className="text-xl font-bold text-slate-800 dark:text-ndark-text">
           CS Yönetim Panosu — SLA İzleme
         </h1>
-        <button
-          type="button"
-          onClick={() => void load(filters)}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-brand-400 hover:text-brand-600 dark:border-ndark-border dark:text-ndark-muted"
-          title="Yenile"
-        >
-          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Yenile
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handleExport()}
+            disabled={exporting || loading}
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-brand-400 hover:text-brand-600 disabled:opacity-50 dark:border-ndark-border dark:text-ndark-muted"
+            title="Filtrelenmiş tüm listeyi Excel'e aktar"
+          >
+            {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+            {exporting ? 'Aktarılıyor…' : "Excel'e Aktar"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void load(filters)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-brand-400 hover:text-brand-600 dark:border-ndark-border dark:text-ndark-muted"
+            title="Yenile"
+          >
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Yenile
+          </button>
+        </div>
       </div>
       <p className="mt-1 max-w-4xl text-xs leading-relaxed text-slate-500 dark:text-ndark-muted">
         Tüm vakaların <b>çözüm ve müdahale SLA</b> durumu tek tabloda: hedef, geçen ve kalan
