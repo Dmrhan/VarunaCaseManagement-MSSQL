@@ -668,6 +668,11 @@ export const NOTIFICATION_DISPATCHES_HELP: HelpContent = {
 • customer_opted_out`,
     },
     {
+      heading: 'Neden Failed / Pending?',
+      content:
+        'Failed veya Pending rozetinin yanındaki ⓘ ikonuna gelin — hover\'da (mobilde tıklayarak) kaydın bu durumda kalma nedeni tooltip olarak görünür. Failed satırlarda SMTP/gönderim hata metni (ör. "connect ETIMEDOUT smtp.gmail.com:587"), Pending satırlarda beklemede kalma nedeni ("Alıcı adresi çözülemedi", "Gönderim kuyruğunda" vb.) gösterilir. Aynı bilgi satırın Görüntüle detayında "Hata Sebebi" / "Beklemede Kalma Nedeni" alanı olarak da bulunur.',
+    },
+    {
       heading: 'Operatörün manuel kapattığı kayıtlar',
       content:
         'Manuel iletişim akışında operatör Vaka Detayı\'ndan "Manuel Olarak Hallettim" diyerek kaydı kapattığında satır Sent durumuna geçer, mode "Manual" olur ve Teslimat notu görüntülenebilir. Bu zorunlu nottur — operatör neyi nasıl ulaştırdığını yazmadan onay veremez.',
