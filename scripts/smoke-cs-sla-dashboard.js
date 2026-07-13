@@ -141,5 +141,24 @@ ok('22 açılış/temizleme veri ÇEKMEZ: optionsOnly ucuz mod (vaka taraması y
   && page.includes('setApplied(null);\n    setData(null);')
   && page.includes('initialOptionsRef'));
 
+ok('23 denetim: useMemo [draft, options] + yarış guard\'ı + loadFailed durumu',
+  page.includes('[draft, options],')
+  && page.includes('reqIdRef')
+  && page.includes('myId !== reqIdRef.current')
+  && page.includes('loadFailed'));
+
+ok('24 denetim: Ay Yıl\'sız kilitli + varsayılan yıl penceresi + dropdown arama + listede-yok seçim korunur',
+  page.includes('disabled: !draft.year')
+  && page.includes('DEFAULT_DRAFT: SlaDashboardFilters = { year: CURRENT_YEAR }')
+  && page.includes("placeholder=\"Ara…\"")
+  && page.includes('(listede değil)'));
+
+ok('25 denetim: TR gün sınırı + legacy-terminal null + export options incelt + uygulanan chip özeti + sayfa boyutu',
+  agg.includes('TR_OFFSET_MS')
+  && agg.includes('legacyTerminal')
+  && agg.includes('options: emptyResult(params).options')
+  && page.includes('appliedChips')
+  && page.includes('Sayfa boyutu'));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

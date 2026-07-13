@@ -685,6 +685,7 @@ function slaFiltersToQuery(filters: SlaDashboardFilters, skipPaging = false): UR
 export interface SlaDashboardRow {
   id: string;
   caseNumber: string;
+  companyId: string;
   accountId: string | null;
   accountName: string | null;
   priority: string | null;

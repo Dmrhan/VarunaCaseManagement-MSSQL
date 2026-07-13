@@ -191,10 +191,13 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
   const year = Number(params.year) || null;
   const month = Number(params.month) || null; // 1-12
   if (year) {
-    const from = new Date(Date.UTC(year, month ? month - 1 : 0, 1));
+    // Yıl/ay sınırları TÜRKİYE gün sınırıyla (Europe/Istanbul, sabit UTC+3,
+    // DST yok) — düz UTC sınırı yerel geceyarısından 3 saat kayıyordu.
+    const TR_OFFSET_MS = 3 * 60 * 60 * 1000;
+    const from = new Date(Date.UTC(year, month ? month - 1 : 0, 1) - TR_OFFSET_MS);
     const to = month
-      ? new Date(Date.UTC(year, month, 1))
-      : new Date(Date.UTC(year + 1, 0, 1));
+      ? new Date(Date.UTC(year, month, 1) - TR_OFFSET_MS)
+      : new Date(Date.UTC(year + 1, 0, 1) - TR_OFFSET_MS);
     where.createdAt = { gte: from, lt: to };
   }
 
@@ -251,6 +254,9 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
     // Codex #530 P2: resolvedAt her iki terminalde de damgalanır (transitionStatus
     // İptal'de de yazar) — sayaç ikisinde de kapanış anında durur.
     const resolved = TERMINAL.has(c.status) && c.resolvedAt ? c.resolvedAt.getTime() : null;
+    // Legacy terminal (resolvedAt damgasız kapanmış): sayacın nerede durduğu
+    // bilinmiyor — kalan/uyum null (—) döner, zamanla 'ihlale kayma' olmaz.
+    const legacyTerminal = TERMINAL.has(c.status) && !c.resolvedAt;
     const end = resolved ?? now;
 
     const resoDue = c.slaResolutionDueAt ? c.slaResolutionDueAt.getTime() : null;
@@ -282,13 +288,13 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
       // Çözüm SLA (gün)
       resolutionTargetDays: resoDue ? round2((resoDue - created) / DAY_MS) : null,
       resolutionElapsedDays: round2((end - created) / DAY_MS),
-      resolutionRemainingDays: resoDue ? round2((resoDue - end) / DAY_MS) : null,
-      resolutionOnTarget: resoDue ? end <= resoDue : null,
+      resolutionRemainingDays: resoDue && !legacyTerminal ? round2((resoDue - end) / DAY_MS) : null,
+      resolutionOnTarget: resoDue && !legacyTerminal ? end <= resoDue : null,
       // Müdahale SLA (dk)
       responseTargetMin: respDue ? Math.round((respDue - created) / MIN_MS) : null,
       responseElapsedMin: Math.round((respEnd - created) / MIN_MS),
-      responseRemainingMin: respDue ? Math.round((respDue - respEnd) / MIN_MS) : null,
-      responseOnTarget: respDue ? respEnd <= respDue : null,
+      responseRemainingMin: respDue && !(legacyTerminal && !respMet) ? Math.round((respDue - respEnd) / MIN_MS) : null,
+      responseOnTarget: respDue && !(legacyTerminal && !respMet) ? respEnd <= respDue : null,
     };
   });
 
@@ -366,6 +372,10 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
       .sort((a, b) => a.name.localeCompare(b.name, 'tr')),
     waitingDepts: [...waitingOpt].sort((a, b) => a.localeCompare(b, 'tr')),
     accounts,
+    // BİLİNÇLİ: durum/tip/L-seviye/açık-kalma evrenleri SABİT küçük kümeler —
+    // kaskad üretilmez (7 durum + 5 tip her zaman anlamlı; boş kombinasyon
+    // seçilirse sonuç dürüstçe 0 döner). Kaskad yalnız büyük/dinamik
+    // evrenlerde: bekleyen-bölüm, müşteri, şirket.
     requestTypes: Object.keys(M_REQUEST), // görünen etiketler
     statuses: Object.keys(M_STATUS),
   };
@@ -381,7 +391,9 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
       totalPages: 1,
       exportTruncated: filtered.length > SLA_DASH_EXPORT_CAP,
       kpis,
-      options,
+      // Export tüketicisi options kullanmaz — 20k satırın yanına kaskad
+      // seçenek yükü bindirme (payload inceltme, denetim bulgusu).
+      options: emptyResult(params).options,
       generatedAt: new Date().toISOString(),
     };
   }
