@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Eye, History, Info } from 'lucide-react';
 import { CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -269,7 +270,51 @@ function resolveDispatchReason(d: NotificationDispatch): string | null {
 }
 
 function StateBadge({ dispatch: d }: { dispatch: NotificationDispatch }) {
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
   const reason = resolveDispatchReason(d);
+
+  // Dışına tıklama / ESC ile kapat. Popover fixed pozisyonlu (portal) —
+  // scroll'da yerinde kalmayacak; kapatarak çakışmayı engelliyoruz.
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      const t = e.target as Node;
+      if (popRef.current?.contains(t) || btnRef.current?.contains(t)) return;
+      setOpen(false);
+    }
+    function onEsc(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    function onScroll() {
+      setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onEsc);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onEsc);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [open]);
+
+  function togglePopover() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    // Popover'ı ikonun altına yasla; sağa dar ekranda taşarsa max-w ile
+    // kendini sıkıştırır. z-[100] modal katmanının üstünde değil (Modal
+    // zaten üstte); liste tablosu için yeterli.
+    setCoords({ top: rect.bottom + 4, left: rect.left });
+    setOpen(true);
+  }
+
   if (d.state === 'Sent') return <Badge tint="emerald">Sent</Badge>;
   if (d.state === 'Suppressed') {
     return (
@@ -288,14 +333,35 @@ function StateBadge({ dispatch: d }: { dispatch: NotificationDispatch }) {
       <span className="inline-flex items-center gap-1">
         <Badge tint={tint}>{d.state}</Badge>
         {reason && (
-          <button
-            type="button"
-            title={`${label}: ${reason}`}
-            aria-label={`${label}: ${reason}`}
-            className="inline-flex cursor-help items-center text-slate-400 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-300 rounded dark:text-ndark-dim dark:hover:text-ndark-fg"
-          >
-            <Info size={12} aria-hidden="true" />
-          </button>
+          <>
+            <button
+              ref={btnRef}
+              type="button"
+              title={`${label}: ${reason}`}
+              aria-label={`${label}: ${reason}`}
+              aria-expanded={open}
+              onClick={togglePopover}
+              className="inline-flex cursor-pointer items-center text-slate-400 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-300 rounded dark:text-ndark-dim dark:hover:text-ndark-fg"
+            >
+              <Info size={12} aria-hidden="true" />
+            </button>
+            {open && coords && createPortal(
+              <div
+                ref={popRef}
+                role="tooltip"
+                style={{ top: coords.top, left: coords.left }}
+                className="fixed z-[100] w-72 max-w-[calc(100vw-2rem)] rounded-md border border-slate-200 bg-white p-2 text-xs text-slate-700 shadow-lg dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-fg"
+              >
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  {label}
+                </div>
+                <div className="whitespace-pre-wrap break-words">
+                  {reason}
+                </div>
+              </div>,
+              document.body,
+            )}
+          </>
         )}
       </span>
     );
