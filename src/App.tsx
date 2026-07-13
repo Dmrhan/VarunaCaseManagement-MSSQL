@@ -172,12 +172,16 @@ export default function App() {
   // Gelen çağrıda otomatik screen-pop: callerId → müşteri eşleştir → Akıllı Ticket
   // (müşteri ön-seçili). Çağrı ÇALMAYA başladığında (inbound) OTOMATİK açılır; agent
   // banner'daki "Vaka Aç" ile de tetikler. Aynı çağrı için tek sefer (dedup).
-  const lastPoppedCallerRef = useRef<string | null>(null);
+  const lastPoppedCallKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    const popTicket = (callerId?: string) => {
+    // Screen-pop dedup'u STABİL çağrı KEY'i ile yapılır (callerId ile DEĞİL): her çağrının
+    // benzersiz key'i olduğundan çağrı başına TAM BİR KEZ açılır; aynı çağrının poll'ler
+    // arası titremesi (inbound flicker / callerId değişimi) yeni-vaka ekranını TEKRAR
+    // açmaz. Gerçek tekrar-arayan yeni key aldığından yeniden açılır.
+    const popTicket = (key?: string, callerId?: string) => {
       if (!callerId || callerId === 'Bilinmeyen') return;
-      if (lastPoppedCallerRef.current === callerId) return;
-      lastPoppedCallerRef.current = callerId;
+      if (!key || lastPoppedCallKeyRef.current === key) return;
+      lastPoppedCallKeyRef.current = key;
       void (async () => {
         let acc: { id: string; name: string } | null = null;
         try {
@@ -191,9 +195,12 @@ export default function App() {
     };
     const onIncoming = (e: Event) => {
       const d = (e as CustomEvent).detail;
-      if (d?.inbound) popTicket(d?.number as string | undefined); // yalnız gelen (inbound) çağrı
+      if (d?.inbound) popTicket(d?.key as string | undefined, d?.number as string | undefined); // yalnız gelen (inbound) çağrı
     };
-    const onAnswered = (e: Event) => popTicket((e as CustomEvent).detail?.number as string | undefined);
+    const onAnswered = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      popTicket(d?.key as string | undefined, d?.number as string | undefined);
+    };
     window.addEventListener(SOFTPHONE_INCOMING_EVENT, onIncoming);
     window.addEventListener(SOFTPHONE_ANSWERED_EVENT, onAnswered);
     return () => {
@@ -207,12 +214,14 @@ export default function App() {
   // wrapper'ında (width calc + contain:layout) yönetilir — bu yüzden App root'ta
   // ayrı rezervasyon YOK.
   const {
-    incomingCall,
     status: spStatus, panelCollapsed: spCollapsed,
     setPanelCollapsed: setSpCollapsed, openPanel: openSoftphonePanel,
   } = useSoftphone();
-  // Çağrı bitince dedup ref sıfırlanır → aynı numara tekrar arayınca yeniden açılır.
-  useEffect(() => { if (!incomingCall) lastPoppedCallerRef.current = null; }, [incomingCall]);
+  // NOT: Eski "incomingCall null olunca dedup ref'ini sıfırla" effect'i KALDIRILDI.
+  // Çağrı talking'e geçip AloTech'te inbound görünmeyince incomingCall null oluyor,
+  // bu da ref'i sıfırlayıp ANSWERED/flicker'da yeni-vaka ekranını TEKRAR açıyordu.
+  // Artık dedup stabil çağrı KEY'i ile (lastPoppedCallKeyRef) — reset gerekmez, her
+  // çağrı benzersiz key'le tam bir kez açılır.
 
   useHotkey('?', () => setHelpOpen(true));
 
