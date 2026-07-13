@@ -132,5 +132,14 @@ ok('21 uygula-butonlu filtreleme: draft/applied ayrımı + Filtrele + dirty uyar
   && page.includes('exportSlaDashboard(applied)')
   && page.includes('void load(applied)'));
 
+ok('22 açılış/temizleme veri ÇEKMEZ: optionsOnly ucuz mod (vaka taraması yok) + FE applied=null + temizle sunucusuz',
+  agg.includes('if (params.optionsOnly)')
+  && /optionsOnly: q\.optionsOnly === '1'/.test(route)
+  && svc.includes('optionsOnly=1')
+  && page.includes('useState<SlaDashboardFilters | null>(null)')
+  && page.includes('if (applied) void load(applied)')
+  && page.includes('setApplied(null);\n    setData(null);')
+  && page.includes('initialOptionsRef'));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

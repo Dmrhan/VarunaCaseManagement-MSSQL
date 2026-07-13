@@ -111,6 +111,58 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
   if (!Array.isArray(allowedCompanyIds) || allowedCompanyIds.length === 0) {
     return emptyResult(params);
   }
+
+  // ── optionsOnly: İLK AÇILIŞ modu (saha feedback 2026-07-13: açılışta
+  //    sunucu yorulmasın). Vaka taraması ve mail groupBy YOK — yalnız
+  //    4 mini sorgu ile dropdown evreni döner; rows/KPI boş kalır.
+  //    Kaskad seçenekler ilk gerçek sorguyla (Filtrele) devreye girer.
+  if (params.optionsOnly) {
+    const [companyRows, teamRows, thirdPartyRows, topAccounts] = await Promise.all([
+      prisma.company.findMany({
+        where: { id: { in: allowedCompanyIds } },
+        select: { id: true, name: true },
+      }),
+      prisma.team.findMany({
+        where: { companyId: { in: allowedCompanyIds }, isActive: true },
+        select: { name: true },
+      }),
+      prisma.thirdParty.findMany({
+        where: {
+          isActive: true,
+          OR: [{ companyId: { in: allowedCompanyIds } }, { companyId: null }],
+        },
+        select: { name: true },
+      }),
+      prisma.case.groupBy({
+        by: ['accountId'],
+        where: { companyId: { in: allowedCompanyIds }, isArchived: false, accountId: { not: null } },
+        _count: { _all: true },
+        orderBy: { _count: { accountId: 'desc' } },
+        take: 200,
+      }),
+    ]);
+    const waiting = new Set(['Havuzda', 'Müşteri']);
+    for (const t of teamRows) if (t.name?.trim()) waiting.add(t.name.trim());
+    for (const tp of thirdPartyRows) if (tp.name?.trim()) waiting.add(tp.name.trim());
+    const accIds = topAccounts.map((a) => a.accountId).filter(Boolean);
+    const accRows = accIds.length
+      ? await prisma.account.findMany({ where: { id: { in: accIds } }, select: { id: true, name: true } })
+      : [];
+    const base = emptyResult(params);
+    return {
+      ...base,
+      options: {
+        companies: companyRows
+          .map((c) => ({ id: c.id, name: c.name }))
+          .sort((a, b) => a.name.localeCompare(b.name, 'tr')),
+        waitingDepts: [...waiting].sort((a, b) => a.localeCompare(b, 'tr')),
+        accounts: accRows.sort((a, b) => a.name.localeCompare(b.name, 'tr')),
+        requestTypes: Object.keys(M_REQUEST),
+        statuses: Object.keys(M_STATUS),
+      },
+    };
+  }
+
   const now = Date.now();
 
   // ── Facet seçimleri (görünen etiketler saklanana çevrilir) ─────────

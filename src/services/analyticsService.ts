@@ -627,6 +627,15 @@ export const analyticsService = {
     );
   },
 
+  // İlk açılış: yalnız dropdown seçenekleri (vaka taraması YOK — ucuz)
+  async getSlaDashboardOptions(): Promise<SlaDashboardResponse | undefined> {
+    return apiFetch<SlaDashboardResponse>(
+      '/api/analytics/sla-dashboard?optionsOnly=1',
+      undefined,
+      'Filtre seçenekleri yüklenemedi',
+    );
+  },
+
   // Excel export — sayfalama olmadan süzülmüş TÜM set (backend 20k tavanlı)
   async exportSlaDashboard(
     filters: SlaDashboardFilters,

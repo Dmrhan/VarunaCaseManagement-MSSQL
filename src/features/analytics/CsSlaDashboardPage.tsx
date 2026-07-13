@@ -190,21 +190,40 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
   // filtreler taslakta (draft) birikir, "Filtrele" ile uygulanır (applied).
   // Sayfalama uygulanmış filtre üzerinde anında çalışır.
   const [draft, setDraft] = useState<SlaDashboardFilters>({});
-  const [applied, setApplied] = useState<SlaDashboardFilters>({ page: 1 });
+  // null = henüz Filtrele'ye basılmadı → VERİ ÇEKİLMEZ (saha feedback:
+  // açılışta/temizlemede sunucu yorulmasın). Seçenekler ucuz optionsOnly
+  // çağrısıyla dolar; ilk gerçek sorgu kullanıcının Filtrele'siyle atılır.
+  const [applied, setApplied] = useState<SlaDashboardFilters | null>(null);
   const [data, setData] = useState<SlaDashboardResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [options, setOptions] = useState<SlaDashboardResponse['options'] | null>(null);
+  const initialOptionsRef = useRef<SlaDashboardResponse['options'] | null>(null);
+  const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const { toast } = useToast();
 
   const load = useCallback(async (f: SlaDashboardFilters) => {
     setLoading(true);
     const res = await analyticsService.getSlaDashboard(f);
-    if (res) setData(res);
+    if (res) {
+      setData(res);
+      setOptions(res.options); // kaskad seçenekler sorgu sonucundan
+    }
     setLoading(false);
   }, []);
 
+  // Açılış: yalnız ucuz seçenek çağrısı (vaka taraması yok) — tablo boş bekler.
   useEffect(() => {
-    void load(applied);
+    void (async () => {
+      const res = await analyticsService.getSlaDashboardOptions();
+      if (res) {
+        setOptions(res.options);
+        initialOptionsRef.current = res.options;
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (applied) void load(applied);
   }, [applied, load]);
 
   const set = (patch: Partial<SlaDashboardFilters>) =>
@@ -216,16 +235,21 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
       c: f.companyId ?? [], w: f.waitingDept ?? [], l: f.supportLevel ?? [],
       s: f.status ?? [], a: f.accountId ?? [], o: f.openAge ?? [], r: f.requestType ?? [],
     });
-  const dirty = normalizeF(draft) !== normalizeF(applied);
+  const dirty = normalizeF(draft) !== normalizeF(applied ?? {});
   const applyFilters = () => setApplied({ ...draft, page: 1 });
+  // Temizle: SORGU ATMAZ — taslak+uygulanan+tablo sıfırlanır, seçenekler
+  // açılıştaki tam evrene döner (bellekten, sunucusuz).
   const clearFilters = () => {
     setDraft({});
-    setApplied({ page: 1 });
+    setApplied(null);
+    setData(null);
+    if (initialOptionsRef.current) setOptions(initialOptionsRef.current);
   };
 
   // Excel export — CaseTaggingReviewPage deseninin ikizi (dinamik xlsx importu:
   // kütüphane yalnız export anında yüklenir, ana bundle'a girmez).
   async function handleExport() {
+    if (!applied) return;
     setExporting(true);
     try {
       const res = await analyticsService.exportSlaDashboard(applied);
@@ -275,7 +299,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         label: 'Şirket',
         multiple: true,
         values: draft.companyId ?? [],
-        options: (data?.options.companies ?? []).map((c) => ({ v: c.id, l: c.name })),
+        options: (options?.companies ?? []).map((c) => ({ v: c.id, l: c.name })),
         onChange: (vals: string[]) => set({ companyId: vals }),
       },
       {
@@ -300,7 +324,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         label: 'Bekleyen Bölüm',
         multiple: true,
         values: draft.waitingDept ?? [],
-        options: (data?.options.waitingDepts ?? []).map((d) => ({ v: d, l: d })),
+        options: (options?.waitingDepts ?? []).map((d) => ({ v: d, l: d })),
         onChange: (vals: string[]) => set({ waitingDept: vals }),
       },
       {
@@ -316,7 +340,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         label: 'Vaka Durumu',
         multiple: true,
         values: draft.status ?? [],
-        options: (data?.options.statuses ?? []).map((s) => ({ v: s, l: s })),
+        options: (options?.statuses ?? []).map((s) => ({ v: s, l: s })),
         onChange: (vals: string[]) => set({ status: vals }),
       },
       {
@@ -324,7 +348,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         label: 'Müşteri (Proje)',
         multiple: true,
         values: draft.accountId ?? [],
-        options: (data?.options.accounts ?? []).map((a) => ({ v: a.id, l: a.name })),
+        options: (options?.accounts ?? []).map((a) => ({ v: a.id, l: a.name })),
         onChange: (vals: string[]) => set({ accountId: vals }),
       },
       {
@@ -340,7 +364,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         label: 'Bildirim Tipi',
         multiple: true,
         values: draft.requestType ?? [],
-        options: (data?.options.requestTypes ?? []).map((t) => ({ v: t, l: t })),
+        options: (options?.requestTypes ?? []).map((t) => ({ v: t, l: t })),
         onChange: (vals: string[]) => set({ requestType: vals }),
       },
     ],
@@ -379,7 +403,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
           <button
             type="button"
             onClick={() => void handleExport()}
-            disabled={exporting || loading}
+            disabled={!applied || exporting || loading}
             className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-brand-400 hover:text-brand-600 disabled:opacity-50 dark:border-ndark-border dark:text-ndark-muted"
             title="Filtrelenmiş tüm listeyi Excel'e aktar"
           >
@@ -388,9 +412,10 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
           </button>
           <button
             type="button"
-            onClick={() => void load(applied)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-brand-400 hover:text-brand-600 dark:border-ndark-border dark:text-ndark-muted"
-            title="Yenile"
+            onClick={() => applied && void load(applied)}
+            disabled={!applied || loading}
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-brand-400 hover:text-brand-600 disabled:opacity-50 dark:border-ndark-border dark:text-ndark-muted"
+            title="Yenile (uygulanan filtreyle)"
           >
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Yenile
           </button>
@@ -444,7 +469,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
             </span>
           </div>
           <div className="text-[11px] text-slate-400 dark:text-ndark-dim">
-            {kpis ? `${nf0.format(kpis.totalCount)} kayıt` : '…'}
+            {data && kpis ? `${nf0.format(kpis.totalCount)} kayıt` : '—'}
             {data ? ` · ${new Date(data.generatedAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}` : ''}
           </div>
         </div>
@@ -523,7 +548,16 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
                   </td>
                 </tr>
               ))}
-              {!loading && (data?.rows.length ?? 0) === 0 && (
+              {!loading && !data && (
+                <tr>
+                  <td colSpan={15} className="px-4 py-12 text-center text-slate-400 dark:text-ndark-dim">
+                    <Download size={20} className="mx-auto mb-2 rotate-180" />
+                    Açılışta veri çekilmez (sunucu dostu). Filtreleri seçip <b>Filtrele</b>'ye basın —
+                    filtresiz tam liste için de doğrudan Filtrele.
+                  </td>
+                </tr>
+              )}
+              {!loading && data && data.rows.length === 0 && (
                 <tr>
                   <td colSpan={15} className="px-4 py-10 text-center text-slate-400 dark:text-ndark-dim">
                     <SearchX size={20} className="mx-auto mb-2" />
@@ -554,7 +588,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         <button
           type="button"
           disabled={(data?.page ?? 1) <= 1 || loading}
-          onClick={() => setApplied((f) => ({ ...f, page: Math.max((data?.page ?? 1) - 1, 1) }))}
+          onClick={() => setApplied((f) => ({ ...(f ?? {}), page: Math.max((data?.page ?? 1) - 1, 1) }))}
           className="rounded-md border border-slate-200 bg-white px-3 py-1 hover:border-brand-400 hover:text-brand-600 disabled:opacity-40 dark:border-ndark-border dark:bg-ndark-card"
         >
           ‹ Önceki
@@ -566,7 +600,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
           type="button"
           disabled={(data?.page ?? 1) >= (data?.totalPages ?? 1) || loading}
           onClick={() =>
-            setApplied((f) => ({ ...f, page: Math.min((data?.page ?? 1) + 1, data?.totalPages ?? 1) }))
+            setApplied((f) => ({ ...(f ?? {}), page: Math.min((data?.page ?? 1) + 1, data?.totalPages ?? 1) }))
           }
           className="rounded-md border border-slate-200 bg-white px-3 py-1 hover:border-brand-400 hover:text-brand-600 disabled:opacity-40 dark:border-ndark-border dark:bg-ndark-card"
         >
@@ -581,7 +615,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
             Toplam Vaka
           </div>
           <div className="mt-1.5 text-3xl font-extrabold tabular-nums text-brand-600 dark:text-ndark-link">
-            {kpis ? nf0.format(kpis.totalCount) : '…'}
+            {data && kpis ? nf0.format(kpis.totalCount) : '—'}
           </div>
         </div>
         {(
@@ -603,13 +637,13 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
               <div className="flex-1">
                 <div className="text-[10px] font-bold text-slate-400 dark:text-ndark-dim">EVET</div>
                 <div className="text-lg font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-                  {c.k ? (c.isPct ? pct(c.k.evet, c.k.withDue) : nf0.format(c.k.evet)) : '…'}
+                  {data && c.k ? (c.isPct ? pct(c.k.evet, c.k.withDue) : nf0.format(c.k.evet)) : '—'}
                 </div>
               </div>
               <div className="flex-1">
                 <div className="text-[10px] font-bold text-slate-400 dark:text-ndark-dim">HAYIR</div>
                 <div className="text-lg font-bold tabular-nums text-red-600 dark:text-red-400">
-                  {c.k ? (c.isPct ? pct(c.k.hayir, c.k.withDue) : nf0.format(c.k.hayir)) : '…'}
+                  {data && c.k ? (c.isPct ? pct(c.k.hayir, c.k.withDue) : nf0.format(c.k.hayir)) : '—'}
                 </div>
               </div>
             </div>
