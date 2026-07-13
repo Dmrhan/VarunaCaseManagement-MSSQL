@@ -200,10 +200,14 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (r && 'agentStatus' in r) {
-        // Çağrı yanıtlandığında (talking) → screen pop event (callerId ile, bir kez).
-        if (r.agentStatus === 'talking' && lastAnsweredKey.current !== (lastInbound.current?.key ?? null)) {
-          lastAnsweredKey.current = lastInbound.current?.key ?? 'answered';
-          window.dispatchEvent(new CustomEvent(SOFTPHONE_ANSWERED_EVENT, { detail: { number: lastInbound.current?.callerId } }));
+        // Çağrı yanıtlandığında (talking) → screen pop event, çağrı başına BİR KEZ.
+        // Dedup STABİL çağrı key'i ile. lastInbound null'a düşse bile (aktif çağrı
+        // MyActiveCalls'ta inbound görünmüyorsa) 'answered' gibi resetlenebilir bir
+        // key'e düşürüp HER POLL'DE yeniden dispatch ETMEYELİM — aksi halde event
+        // 2sn'de bir tekrar tetikleniyor ve yeni-vaka ekranını sürekli açıyordu.
+        if (r.agentStatus === 'talking' && lastInbound.current && lastAnsweredKey.current !== lastInbound.current.key) {
+          lastAnsweredKey.current = lastInbound.current.key;
+          window.dispatchEvent(new CustomEvent(SOFTPHONE_ANSWERED_EVENT, { detail: { number: lastInbound.current.callerId, key: lastInbound.current.key } }));
         } else if (r.agentStatus !== 'talking' && r.agentStatus !== 'ringing' && r.agentStatus !== 'dialing') {
           lastAnsweredKey.current = null;
         }
