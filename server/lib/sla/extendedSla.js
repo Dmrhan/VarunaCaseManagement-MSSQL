@@ -43,7 +43,10 @@ export function resolveExtendedTargetMinutes(policyRow) {
  */
 export function extendedSlaTriggerMet(tpRow, devopsCount) {
   if (!tpRow?.triggersExtendedSla) return false;
-  if (tpRow.extendedSlaRequiresDevopsLink && !(devopsCount > 0)) return false;
+  // Codex #540 P2 — FAIL-CLOSED: alan kısmi select'te gelmezse (undefined)
+  // şema default'u (true) geçerli sayılır; DevOps şartı ancak AÇIKÇA
+  // false ise atlanır. Eksik alan asla şartı gevşetmez.
+  if (tpRow.extendedSlaRequiresDevopsLink !== false && !(devopsCount > 0)) return false;
   return true;
 }
 

@@ -32,6 +32,9 @@ ok('3 tetik: bayrak açık + DevOps-şartı açık → yalnız devopsCount>0 ike
   && extendedSlaTriggerMet({ triggersExtendedSla: true, extendedSlaRequiresDevopsLink: true }, 1) === true);
 ok('4 tetik: DevOps-şartı KAPALI → devir tek başına yeter (U-B esnekliği)',
   extendedSlaTriggerMet({ triggersExtendedSla: true, extendedSlaRequiresDevopsLink: false }, 0) === true);
+ok('4b tetik FAIL-CLOSED (Codex #540 P2): alan kısmi satırda EKSİKSE şema default\'u (true) geçerli — DevOps\'suz uzatma sızmaz',
+  extendedSlaTriggerMet({ triggersExtendedSla: true }, 0) === false
+  && extendedSlaTriggerMet({ triggersExtendedSla: true }, 2) === true);
 
 // ── 3 · buildExtendedSlaPatch: guard zinciri ──
 const NOW = Date.UTC(2026, 6, 14, 9, 0);
