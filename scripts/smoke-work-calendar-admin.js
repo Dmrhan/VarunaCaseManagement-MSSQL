@@ -92,5 +92,11 @@ ok('15 içe aktarma zinciri: repo importTrHolidays (mevcut atlanır + invalidate
   && page.includes('TR tatillerini ekle')
   && page.includes('Diyanet takvimiyle teyit edin'));
 
+ok('16 saha UX: ızgara günü tıklanınca tarih forma dolar + tatil işlemleri takvimi OTOMATİK kaydeder (pasif buton yok)',
+  page.includes('onClick={() => setHDate(dateIso)}')
+  && page.includes('async function ensureCalendarSaved()')
+  && (page.match(/await ensureCalendarSaved\(\)/g) ?? []).length >= 3
+  && !page.includes('disabled={!cal}'));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

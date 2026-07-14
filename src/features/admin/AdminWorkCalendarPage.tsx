@@ -201,6 +201,28 @@ export function AdminWorkCalendarPage() {
     effectiveFrom: draft.effectiveFrom ? `${draft.effectiveFrom}T00:00:00.000Z` : null,
   });
 
+  /**
+   * Tatil işlemleri kayıtlı takvim ister — kayıt yoksa taslağı otomatik
+   * kaydeder (saha bulgusu: pasif 'Ekle' butonu sessiz ölüydü; tek tık
+   * hem takvimi hem tatili kaydetsin).
+   */
+  async function ensureCalendarSaved(): Promise<WorkCalendar | null> {
+    if (cal) return cal;
+    const payload = draftPayload();
+    if (!payload.workDays.length) {
+      toast({ type: 'error', message: 'En az bir çalışma günü tanımlanmalı.' });
+      return null;
+    }
+    const saved = await adminService.workCalendar.save(companyId, payload);
+    if (saved) {
+      setCal(saved);
+      setDraft(draftFromCalendar(saved));
+      toast({ type: 'success', message: 'Çalışma takvimi kaydedildi.' });
+      return saved;
+    }
+    return null;
+  }
+
   async function handleSave() {
     if (!companyId) return;
     const payload = draftPayload();
@@ -223,10 +245,7 @@ export function AdminWorkCalendarPage() {
       toast({ type: 'error', message: 'Tarih ve tatil adı zorunlu.' });
       return;
     }
-    if (!cal) {
-      toast({ type: 'error', message: 'Önce takvimi kaydedin — tatiller kayıtlı takvime bağlanır.' });
-      return;
-    }
+    if (!(await ensureCalendarSaved())) return;
     const created = await adminService.workCalendar.addHoliday(companyId, {
       date: hDate,
       name: hName.trim(),
@@ -248,10 +267,8 @@ export function AdminWorkCalendarPage() {
   }
 
   async function handleImportTr() {
-    if (!companyId || !cal) {
-      toast({ type: 'error', message: 'Önce takvimi kaydedin.' });
-      return;
-    }
+    if (!companyId) return;
+    if (!(await ensureCalendarSaved())) return;
     const r = await adminService.workCalendar.importTrHolidays(companyId, trYear);
     if (r) {
       toast({
@@ -264,6 +281,7 @@ export function AdminWorkCalendarPage() {
 
   async function handleCopy() {
     if (!companyId || !copySource) return;
+    if (!(await ensureCalendarSaved())) return;
     const r = await adminService.workCalendar.copyFrom(companyId, copySource);
     if (r) {
       toast({ type: 'success', message: `${r.copied} tatil kopyalandı${r.skipped ? `, ${r.skipped} mevcut atlandı` : ''}.` });
@@ -499,7 +517,7 @@ export function AdminWorkCalendarPage() {
                   <option key={y} value={y}>{y}</option>
                 ))}
               </select>
-              <button type="button" onClick={() => void handleImportTr()} disabled={!cal}
+              <button type="button" onClick={() => void handleImportTr()}
                 title="Sabit ulusal tatiller + Diyanet tablosundaki dinî bayramlar (arifeler yarım gün) eklenir; mevcut tarihler atlanır"
                 className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-0.5 text-xs text-slate-600 hover:border-brand-400 hover:text-brand-600 disabled:opacity-40 dark:border-ndark-border dark:text-ndark-muted">
                 🇹🇷 TR tatillerini ekle
@@ -512,7 +530,7 @@ export function AdminWorkCalendarPage() {
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
-              <button type="button" onClick={() => void handleCopy()} disabled={!copySource || !cal}
+              <button type="button" onClick={() => void handleCopy()} disabled={!copySource}
                 className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-0.5 text-xs text-slate-600 hover:border-brand-400 hover:text-brand-600 disabled:opacity-40 dark:border-ndark-border dark:text-ndark-muted">
                 <Copy size={11} /> Kopyala
               </button>
@@ -540,8 +558,18 @@ export function AdminWorkCalendarPage() {
                           : off
                             ? 'bg-slate-50 text-slate-300 dark:bg-ndark-bg dark:text-ndark-dim'
                             : 'bg-slate-50 text-slate-600 dark:bg-ndark-bg dark:text-ndark-muted';
+                      const dateIso = `${calMonth}-${String(day).padStart(2, '0')}`;
+                      const picked = hDate === dateIso;
                       return (
-                        <div key={day} className={`flex aspect-square items-center justify-center rounded-md text-[11px] ${cls}`}>{day}</div>
+                        <button
+                          type="button"
+                          key={day}
+                          onClick={() => setHDate(dateIso)}
+                          title="Bu günü tatil formuna seç"
+                          className={`flex aspect-square cursor-pointer items-center justify-center rounded-md text-[11px] transition-shadow hover:ring-1 hover:ring-brand-400 ${cls} ${
+                            picked ? 'ring-2 ring-brand-500' : ''
+                          }`}
+                        >{day}</button>
                       );
                     })}
                   </div>
@@ -583,7 +611,7 @@ export function AdminWorkCalendarPage() {
                     </tr>
                   ))}
                   {(cal?.holidays.length ?? 0) === 0 && (
-                    <tr><td colSpan={4} className="px-2 py-4 text-center text-slate-400 dark:text-ndark-dim">Henüz tatil tanımlanmadı{!cal ? ' — önce takvimi kaydedin' : ''}.</td></tr>
+                    <tr><td colSpan={4} className="px-2 py-4 text-center text-slate-400 dark:text-ndark-dim">Henüz tatil tanımlanmadı — takvimden bir güne tıklayın ya da tarih girin; \"Ekle\" takvimi de otomatik kaydeder.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -597,7 +625,7 @@ export function AdminWorkCalendarPage() {
                   <option value="half">Yarım gün</option>
                 </select>
                 {hHalf && <TimeSelect value={hHalfEnd} onChange={setHHalfEnd} />}
-                <button type="button" onClick={() => void handleAddHoliday()} disabled={!cal}
+                <button type="button" onClick={() => void handleAddHoliday()}
                   className="rounded-md bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-40">
                   + Ekle
                 </button>
