@@ -96,5 +96,12 @@ ok('18 ters sıra negatif simetrik',
 ok('19 tatil haftası toplamı: Pzt-Paz (13-19 Tem) tam hafta = Pzt 510 + Salı 510 + Çarş 0(tatil) + Perş 210(arife) + Cuma 510 = 1740 iş-dk',
   businessMinutesBetween(ms('2026-07-13', 0), ms('2026-07-20', 0), cal) === 1740);
 
+// Codex #538 P2×2
+const jm = (await import('node:fs')).readFileSync('server/db/jsonFieldMap.js', 'utf8');
+ok('20b json köprüsü: WorkCalendar.workDays jsonFieldMap kayıtlı (generator koşuldu)',
+  /"WorkCalendar": \{\s*"json": \[\s*"workDays"/.test(jm) && jm.includes('"Holiday"'));
+ok('20 guard dürüstlüğü: MAX_WALK_DAYS aşan aralık kısmi toplam DEĞİL null döner',
+  businessMinutesBetween(ms('2026-07-14', 9), ms('2026-07-14', 9) + 4 * 366 * 24 * 60 * 60000, cal) === null);
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

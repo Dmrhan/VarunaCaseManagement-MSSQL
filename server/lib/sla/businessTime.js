@@ -198,7 +198,7 @@ export function businessMinutesBetween(aMs, bMs, cal) {
   const bLocal = toLocal(bMs);
 
   for (let guard = 0; guard < MAX_WALK_DAYS; guard += 1) {
-    if (dayStartMs > bLocal.dayStartMs) break;
+    if (dayStartMs > bLocal.dayStartMs) return total; // aralık tamamen tarandı
     const lo = dayStartMs === aLocal.dayStartMs ? aLocal.minuteOfDay : 0;
     const hi = dayStartMs === bLocal.dayStartMs ? bLocal.minuteOfDay : 24 * 60;
     for (const [x, y] of dayIntervals(dayStartMs, cal)) {
@@ -206,7 +206,10 @@ export function businessMinutesBetween(aMs, bMs, cal) {
     }
     dayStartMs += DAY_MS;
   }
-  return total;
+  // Codex #538 P2: guard tükendi (aralık > MAX_WALK_DAYS) — KISMİ toplam
+  // döndürmek sessiz yanlış sonuç olur; dürüst geri çekilme = null
+  // (addBusinessMinutes'in guard davranışıyla simetrik).
+  return null;
 }
 
 /** startMs mesai içindeyse kendisi; değilse sonraki iş anı (UTC ms). */
