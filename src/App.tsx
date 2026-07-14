@@ -56,6 +56,7 @@ import { AdminTeamsPage } from './features/admin/AdminTeamsPage';
 import { AdminTaxonomyDefsPage } from './features/admin/AdminTaxonomyDefsPage';
 import { AdminCategoriesPage } from './features/admin/AdminCategoriesPage';
 import { AdminSlaPage } from './features/admin/AdminSlaPage';
+import { AdminWorkCalendarPage } from './features/admin/AdminWorkCalendarPage';
 import { AdminChecklistPage } from './features/admin/AdminChecklistPage';
 import { AdminOfferedSolutionsPage } from './features/admin/AdminOfferedSolutionsPage';
 import { AdminProductCatalogPage } from './features/admin/AdminProductCatalogPage';
@@ -482,6 +483,9 @@ export default function App() {
         user?.role === 'SystemAdmin'
         && key === 'admin-authorization-policies'
       ) return true;
+      // Çalışma Takvimi — SLA taahhüdünün akışını belirler; YALNIZ SystemAdmin
+      // (kullanıcı kararı 2026-07-14). Route katmanında da assertSystemAdmin var.
+      if (key === 'admin-work-calendar' && user?.role !== 'SystemAdmin') return false;
       return canShowView(key, true);
     };
     if (!canShowAdminView(view)) {
@@ -501,6 +505,7 @@ export default function App() {
       >
         {view === 'admin-categories' && <AdminCategoriesPage />}
         {view === 'admin-sla' && <AdminSlaPage />}
+        {view === 'admin-work-calendar' && <AdminWorkCalendarPage />}
         {view === 'admin-thirdparty' && <AdminThirdPartyPage />}
         {view === 'admin-documents' && <AdminDocumentsPage />}
         {view === 'admin-checklist' && <AdminChecklistPage />}

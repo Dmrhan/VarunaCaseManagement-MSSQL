@@ -34,6 +34,7 @@
  */
 import { prisma } from '../db/client.js';
 import { M_STATUS, M_REQUEST } from '../db/enumMap.js';
+import { getCalendarGateFor, diffMinutes, netDayMinutes } from '../lib/sla/businessTime.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_MS = 60 * 1000;
@@ -253,6 +254,12 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
   const companyName = new Map(companyRows.map((c) => [c.id, c.name]));
 
   // ── Satır hesapları ────────────────────────────────────────────────
+  // Faz 4 — iş-saati görünümü: her satır, DAMGASIYLA aynı rejimi okur
+  // (kapı = vakanın createdAt'i; kesim öncesi vakalar duvar-saati kalır).
+  const calGates = new Map();
+  for (const cid of new Set(cases.map((c) => c.companyId))) {
+    calGates.set(cid, await getCalendarGateFor(cid));
+  }
   const computed = cases.map((c) => {
     const created = c.createdAt.getTime();
     // Codex #530 P2: resolvedAt her iki terminalde de damgalanır (transitionStatus
@@ -271,6 +278,8 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
     const respEnd = respMet ?? resolved ?? now;
 
     const waitingDept = deriveWaitingDept(c, mailByCase.get(c.id));
+    const cal = calGates.get(c.companyId)(created);
+    const dayMin = netDayMinutes(cal); // takvimsizde 1440 → mevcut duvar-gün davranışı
     const openDays = (end - created) / DAY_MS;
     return {
       id: c.id,
@@ -289,15 +298,16 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
       waitingDept,
       devopsIds: extractDevopsIds(c.customFields),
       openAgeBucket: openAgeBucket(openDays),
-      // Çözüm SLA (gün)
-      resolutionTargetDays: resoDue ? round2((resoDue - created) / DAY_MS) : null,
-      resolutionElapsedDays: round2((end - created) / DAY_MS),
-      resolutionRemainingDays: resoDue && !legacyTerminal ? round2((resoDue - end) / DAY_MS) : null,
+      // Çözüm SLA (gün) — takvimli şirkette İŞ-dk / net-iş-günü; takvimsizde
+      // diffMinutes duvar-dk, dayMin=1440 → birebir eski davranış.
+      resolutionTargetDays: resoDue ? round2(diffMinutes(created, resoDue, cal) / dayMin) : null,
+      resolutionElapsedDays: round2(diffMinutes(created, end, cal) / dayMin),
+      resolutionRemainingDays: resoDue && !legacyTerminal ? round2(diffMinutes(end, resoDue, cal) / dayMin) : null,
       resolutionOnTarget: resoDue && !legacyTerminal ? end <= resoDue : null,
       // Müdahale SLA (dk)
-      responseTargetMin: respDue ? Math.round((respDue - created) / MIN_MS) : null,
-      responseElapsedMin: Math.round((respEnd - created) / MIN_MS),
-      responseRemainingMin: respDue && !(legacyTerminal && !respMet) ? Math.round((respDue - respEnd) / MIN_MS) : null,
+      responseTargetMin: respDue ? diffMinutes(created, respDue, cal) : null,
+      responseElapsedMin: diffMinutes(created, respEnd, cal),
+      responseRemainingMin: respDue && !(legacyTerminal && !respMet) ? diffMinutes(respEnd, respDue, cal) : null,
       responseOnTarget: respDue && !(legacyTerminal && !respMet) ? respEnd <= respDue : null,
     };
   });

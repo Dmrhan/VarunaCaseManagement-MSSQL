@@ -28,6 +28,7 @@
 
 import { prisma } from '../db/client.js';
 import { fromDb, M_STATUS } from '../db/enumMap.js';
+import { getCalendarGateFor, diffMinutes } from './sla/businessTime.js';
 
 // Codex P2 — DB'de status ASCII identifier tutulur (Cozuldu/IptalEdildi);
 // enumMap.M_STATUS TR → ASCII haritasıdır. UI literal'ı ile sorgulamak
@@ -74,6 +75,7 @@ export async function fetchSupervisorEnrichment({ caseId, allowedCompanyIds }) {
       slaResponseDueAt: true,
       slaResolutionDueAt: true,
       slaPausedAt: true,
+      slaCustomerWaitStartedAt: true,
       createdAt: true,
       escalationLevel: true,
       transferCount: true,
@@ -206,8 +208,13 @@ export async function fetchSupervisorEnrichment({ caseId, allowedCompanyIds }) {
     supportLevel: c.supportLevel ?? null,
   };
 
+  // Faz 4 — vakanın damga rejimindeki takvim (kesim öncesi vaka → null=duvar).
+  // build sync kaldığından async yük burada, compose katmanında alınır.
+  const slaCal = (await getCalendarGateFor(c.companyId))(new Date(c.createdAt).getTime());
+
   return {
     case: c,
+    slaCal,
     account: accountView,
     notes: notes.reverse(), // eskiden yeniye okumayı kolaylaştırmak için
     activity: activityRaw,
@@ -227,23 +234,26 @@ export async function fetchSupervisorEnrichment({ caseId, allowedCompanyIds }) {
  * (ai.js içindeki formatSlaInfo bir helper, dışa açık değil). Aynı çıktıyı
  * vermek için TR formatı: "5 dk kaldı" / "12 dk gecikme" vb.
  */
-function formatSlaSummary(c) {
+// Faz 4 — cal takvimliyse dk'lar İŞ-dakikasıdır (damganın rejimiyle aynı);
+// takvimsizde diffMinutes duvar-dk döner (eski davranış birebir).
+function formatSlaSummary(c, cal = null) {
   const now = Date.now();
   const fmt = (due, paused) => {
     if (!due) return '-';
     if (paused) return 'paused';
-    const ms = new Date(due).getTime() - now;
-    const mins = Math.round(ms / 60000);
+    const mins = diffMinutes(now, new Date(due).getTime(), cal);
     if (mins >= 0) return `${mins} dk kaldı`;
     return `${Math.abs(mins)} dk gecikme`;
   };
+  const paused = c.slaPausedAt ?? c.slaCustomerWaitStartedAt;
   const status =
     c.slaViolation === true ? 'İHLAL'
-      : c.slaPausedAt ? 'duraklatıldı'
-        : 'aktif';
+      : c.slaPausedAt ? 'duraklatıldı (3. parti)'
+        : c.slaCustomerWaitStartedAt ? 'duraklatıldı (müşteri-bekleme)'
+          : 'aktif';
   return {
-    response: fmt(c.slaResponseDueAt, c.slaPausedAt),
-    resolution: fmt(c.slaResolutionDueAt, c.slaPausedAt),
+    response: fmt(c.slaResponseDueAt, paused),
+    resolution: fmt(c.slaResolutionDueAt, paused),
     status,
   };
 }
@@ -324,7 +334,7 @@ export function buildSupervisorSummaryPrompt(enrichment) {
   const sections = [];
 
   // ───────── ## Vaka ─────────
-  const sla = formatSlaSummary(c);
+  const sla = formatSlaSummary(c, enrichment.slaCal ?? null);
   const statusTr = (fromDb({ status: c.status }).status) ?? c.status ?? '-';
   const priorityTr = c.priority ?? '-';
   const vakaLines = [];

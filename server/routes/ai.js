@@ -615,7 +615,8 @@ router.post(
             const flagStr = `[${flags.join(', ')}]`;
             const assigned = c.assignedPersonName ?? '(atanmamış)';
             const team = c.assignedTeamName ?? '-';
-            // SLA çözüm süresi — kalan/geçen
+            // SLA çözüm süresi — kalan/geçen (Faz 4: BİLİNÇLİ duvar-saat;
+            // FE snapshot'ında takvim bağlamı yok, metin AI'ya kaba bağlam)
             let slaInfo = '';
             if (c.slaResolutionDueAt) {
               const ms = new Date(c.slaResolutionDueAt).getTime();
@@ -1145,6 +1146,10 @@ router.post(
  * Vaka SLA bilgilerini human-readable forma çevirir.
  * Returns: { response, resolution, status }
  */
+// Faz 4 notu — BİLİNÇLİ duvar-saat: bu fonksiyon yalnız legacy fallback
+// yolunda, FE'nin gönderdiği kısa snapshot'la çalışır (takvim kapısı için
+// gereken companyId/createdAt bağlamı güvenilir değil). Çıktı AI-bağlam
+// metnidir, damga/uyum hesabı DEĞİL — iş-saati çevrimi kapsam dışı bırakıldı.
 function formatSlaInfo(c) {
   const now = Date.now();
   const fmt = (iso) => {

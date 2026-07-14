@@ -213,6 +213,8 @@ model Company {
   /// this table later.
   authorizationPolicies      AuthorizationPolicy[]
   thirdParties               ThirdParty[]
+  workCalendar               WorkCalendar?
+  holidays                   Holiday[]
   /// Per-tenant vaka numarası sayacı (1-1). Lazy-init on first case create.
   caseNumberCounter          CaseNumberCounter?
 }
@@ -1403,6 +1405,78 @@ model SLAPolicy {
   @@index([companyId])
 }
 
+// ─────────────────────────────────────────────────────────────────
+// SLA İş-Saati Takvimi (Faz 1, 2026-07-14) — SLA süreleri şirket bazlı
+// mesai penceresi + resmi tatillere göre akar. Takvimi olmayan (veya
+// isActive=false) şirket duvar-saati davranışında kalır → şirket şirket
+// kademeli geçiş. Motor: server/lib/sla/businessTime.js.
+// Faz 0 kararları (2026-07-13/14): şirket-bazlı; Pzt-Cu 08:30-18:00 +
+// öğle molası 12:00-13:00 (net 8,5 sa/gün); 7/24 yok; arife yarım-gün
+// v1'de; DAKİKA = tek doğruluk kaynağı (gün çevrimi tek katsayıyla).
+// ─────────────────────────────────────────────────────────────────
+model WorkCalendar {
+  id        String @id @default(cuid()) @db.NVarChar(450)
+  companyId String @unique @db.NVarChar(450) // şirket başına TEK takvim
+
+  /// Haftalık pencere — JSON (MSSQL JSON tipi yok; customFields deseni):
+  /// [{"day":1,"startMin":510,"endMin":1080},...] day: ISO 1=Pzt..7=Paz;
+  /// dakika = YEREL (Europe/Istanbul) gece yarısından itibaren.
+  /// Yalnız çalışılan günler listede bulunur.
+  workDays String @db.NVarChar(Max) // json
+
+  /// Öğle arası — TÜM çalışma günlerine uygulanır, mesaiden düşülür.
+  /// null = mola yok. (Kullanıcı kararı: tek tanım tüm günlere yeterli.)
+  breakStartMin Int?
+  breakEndMin   Int?
+
+  /// false → şirket duvar-saati davranışa döner (acil geri-alma anahtarı).
+  isActive Boolean @default(true)
+
+  /// K-F (parametrik duraklatma): müşteri yanıtı beklenirken çözüm SLA'sı
+  /// dursun mu. Default KAPALI (bugünkü davranış). Faz 3'te bağlanır.
+  pauseOnCustomerWait Boolean @default(false)
+
+  /// Kesim tarihi (duyurulu geçiş, karar #3): bu andan sonra AÇILAN vakalar
+  /// iş-saatiyle damgalanır; rapor dipnotu bu tarihi kullanır. null = takvim
+  /// kaydedilmiş ama geçiş başlamamış (Faz 3 damgası devreye girmez).
+  effectiveFrom DateTime?
+
+  createdByUserId String?  @db.NVarChar(450)
+  updatedByUserId String?  @db.NVarChar(450)
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt       DateTime @updatedAt
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  holidays Holiday[]
+}
+
+/// Resmi tatil — şirket bazlı; dini bayramlar kaydığı için her yıl girilir.
+model Holiday {
+  id         String @id @default(cuid()) @db.NVarChar(450)
+  calendarId String @db.NVarChar(450)
+  companyId  String @db.NVarChar(450) // denormalize: scope guard + sorgu kolaylığı
+
+  /// Yerel takvim günü (saat bileşeni yok).
+  date DateTime @db.Date
+  name String   @db.NVarChar(200)
+
+  /// Arife: mesai halfDayEndMin'de biter (UI default 13:00 = 780 dk).
+  isHalfDay     Boolean @default(false)
+  halfDayEndMin Int?
+
+  createdByUserId String?  @db.NVarChar(450)
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
+
+  // MSSQL çift-cascade tuzağı (CaseLink deseni): Company tarafı NoAction,
+  // calendar silinirse tatiller cascade temizlenir.
+  calendar WorkCalendar @relation(fields: [calendarId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  company  Company      @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([companyId, date])
+  @@index([companyId, date])
+  @@index([calendarId])
+}
+
 // ChecklistTemplate — items snapshot olarak Case.checklistItems'a kopyalanır
 model ChecklistTemplate {
   id              String   @id @default(cuid()) @db.NVarChar(450)
@@ -1558,6 +1632,11 @@ model Case {
   slaPausedAt            DateTime?
   slaPausedDurationMin   Int       @default(0)
   slaThirdPartyWaitMin   Int       @default(0)
+  // Faz 3b — müşteri-bekleme duraklatması (WorkCalendar.pauseOnCustomerWait
+  // toggle'ı açıkken). 3rd-party pause'dan (slaPausedAt) AYRI alan: çakışmada
+  // 3rd-party öncelikli, iki sayaç aynı anda işlemez (customerWaitPause.js).
+  slaCustomerWaitStartedAt DateTime?
+  slaCustomerWaitMin       Int      @default(0)
   slaResponseMetAt       DateTime? // ilk yanıt verildiğinde (Incelemede'ye geçiş)
   slaResolutionStartedAt DateTime? // vakayı ilk üstlenen kişinin claim zamanı
 

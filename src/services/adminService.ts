@@ -1532,7 +1532,126 @@ export const adminService = {
       return data;
     },
   },
+
+  // ── Çalışma Takvimi (SLA iş-saati Faz 2) — SysAdmin-only ──
+  workCalendar: {
+    async get(companyId: string): Promise<WorkCalendar | null> {
+      const data = await apiFetch<{ value: WorkCalendar | null }>(
+        `${ADMIN_BASE}/work-calendar/${encodeURIComponent(companyId)}`,
+        undefined,
+        'Çalışma takvimi yüklenemedi',
+      );
+      return data?.value ?? null;
+    },
+    async save(companyId: string, patch: WorkCalendarInput): Promise<WorkCalendar | undefined> {
+      return apiFetch<WorkCalendar>(
+        `${ADMIN_BASE}/work-calendar/${encodeURIComponent(companyId)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        },
+        'Çalışma takvimi kaydedilemedi',
+      );
+    },
+    async addHoliday(companyId: string, input: HolidayInput): Promise<WorkCalendarHoliday | undefined> {
+      return apiFetch<WorkCalendarHoliday>(
+        `${ADMIN_BASE}/work-calendar/${encodeURIComponent(companyId)}/holidays`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input),
+        },
+        'Tatil eklenemedi',
+      );
+    },
+    async removeHoliday(companyId: string, holidayId: string): Promise<unknown> {
+      return apiFetch(
+        `${ADMIN_BASE}/work-calendar/${encodeURIComponent(companyId)}/holidays/${encodeURIComponent(holidayId)}`,
+        { method: 'DELETE' },
+        'Tatil silinemedi',
+      );
+    },
+    async importTrHolidays(companyId: string, year: number): Promise<{ added: number; skipped: number } | undefined> {
+      return apiFetch<{ added: number; skipped: number }>(
+        `${ADMIN_BASE}/work-calendar/${encodeURIComponent(companyId)}/import-tr-holidays`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ year }),
+        },
+        'TR tatilleri içe aktarılamadı',
+      );
+    },
+    async copyFrom(companyId: string, sourceCompanyId: string): Promise<{ copied: number; skipped: number } | undefined> {
+      return apiFetch<{ copied: number; skipped: number }>(
+        `${ADMIN_BASE}/work-calendar/${encodeURIComponent(companyId)}/copy-from/${encodeURIComponent(sourceCompanyId)}`,
+        { method: 'POST' },
+        'Tatiller kopyalanamadı',
+      );
+    },
+    async preview(
+      calendar: WorkCalendarDraft,
+      scenarios: WorkCalendarScenario[],
+    ): Promise<{ results: WorkCalendarPreviewResult[] } | undefined> {
+      return apiFetch<{ results: WorkCalendarPreviewResult[] }>(
+        `${ADMIN_BASE}/work-calendar/preview`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ calendar, scenarios }),
+        },
+        'Örnek hesap alınamadı',
+      );
+    },
+  },
 };
+
+// ── Çalışma Takvimi tipleri ──
+export interface WorkCalendarDay { day: number; startMin: number; endMin: number }
+export interface WorkCalendarHoliday {
+  id: string;
+  date: string;
+  name: string;
+  isHalfDay: boolean;
+  halfDayEndMin: number | null;
+}
+export interface WorkCalendar {
+  id: string;
+  companyId: string;
+  workDays: WorkCalendarDay[];
+  breakStartMin: number | null;
+  breakEndMin: number | null;
+  isActive: boolean;
+  pauseOnCustomerWait: boolean;
+  effectiveFrom: string | null;
+  holidays: WorkCalendarHoliday[];
+}
+export interface WorkCalendarInput {
+  workDays?: WorkCalendarDay[];
+  breakStartMin?: number | null;
+  breakEndMin?: number | null;
+  isActive?: boolean;
+  pauseOnCustomerWait?: boolean;
+  effectiveFrom?: string | null;
+}
+export interface HolidayInput {
+  date: string;
+  name: string;
+  isHalfDay?: boolean;
+  halfDayEndMin?: number | null;
+}
+export interface WorkCalendarDraft extends WorkCalendarInput {
+  holidays?: Array<{ date: string; isHalfDay?: boolean; halfDayEndMin?: number | null }>;
+}
+export type WorkCalendarScenario =
+  | { startIso: string; addMinutes: number }
+  | { fromIso: string; toIso: string };
+export interface WorkCalendarPreviewResult {
+  kind: 'add' | 'between' | 'invalid';
+  resultIso?: string | null;
+  minutes?: number | null;
+}
 
 // ─────────────────────────────────────────────────────────────────
 // Smart Ticket TaxonomyDef

@@ -11,7 +11,9 @@ import {
 import { ActorRequiredError } from '../lib/actor.js';
 import { devopsClient, parseWorkItemId } from '../lib/devopsClient.js';
 import crypto from 'node:crypto';
-import { resolveSlaPolicy } from '../lib/sla/slaPolicyResolver.js';
+import { resolveSlaPolicy, resolveTargetMinutes } from '../lib/sla/slaPolicyResolver.js';
+import { getEffectiveCalendar, addBusinessMinutes, businessMinutesBetween, getCalendarGateFor, diffMinutes, netDayMinutes } from '../lib/sla/businessTime.js';
+import { closeCustomerWaitPatch } from '../lib/sla/customerWaitPause.js';
 
 /**
  * PR-1 (Codex P1) + PR-2 — defansif throw helper.
@@ -124,6 +126,35 @@ const CASE_INCLUDE = {
   // sadece display name).
   archivedByUser: { select: { id: true, fullName: true } },
 };
+
+// Faz 4 — SLA görünüm alanları (FE'de takvim kopyası YASAK; BE hesaplar).
+// shape() senkron kalsın diye ayrı, async post-process: yalnız liste + detay
+// dönüşlerinde koşar. Kalan dk, damganın rejimiyle okunur (takvimli şirkette
+// İŞ-dk, kesim öncesi/takvimsiz vakada duvar-dk) — FE alan doluysa onu
+// gösterir, yoksa eski duvar formatına düşer (geriye uyumlu).
+async function enrichSlaView(rows) {
+  const list = Array.isArray(rows) ? rows : [rows];
+  const gates = new Map();
+  for (const r of list) {
+    if (r && !gates.has(r.companyId)) gates.set(r.companyId, await getCalendarGateFor(r.companyId));
+  }
+  const nowMs = Date.now();
+  for (const r of list) {
+    if (!r) continue;
+    const cal = gates.get(r.companyId)(new Date(r.createdAt).getTime());
+    r.slaBusinessTime = !!cal;
+    // dk→gün çevrim katsayısı FE'ye BE'den gider (takvim kopyası yasak):
+    // takvimlide ortalama günlük net mesai, duvar rejiminde 1440.
+    r.slaDayMinutes = Math.round(netDayMinutes(cal));
+    r.slaResponseRemainingMin = r.slaResponseDueAt
+      ? diffMinutes(nowMs, new Date(r.slaResponseDueAt).getTime(), cal)
+      : null;
+    r.slaResolutionRemainingMin = r.slaResolutionDueAt
+      ? diffMinutes(nowMs, new Date(r.slaResolutionDueAt).getTime(), cal)
+      : null;
+  }
+  return rows;
+}
 
 // İzin verilen reaksiyon emojileri — UI + BFF whitelist.
 // Anahtarlar UI'da ikon olarak gösterilir; identifier ile saklanır ki ileride
@@ -1598,7 +1629,7 @@ export const caseRepository = {
       skip,
       take: pagination.pageSize,
     });
-    return { items: items.map(shape), total };
+    return { items: await enrichSlaView(items.map(shape)), total };
   },
 
   async get(id, allowedCompanyIds, actorRole) {
@@ -1610,7 +1641,7 @@ export const caseRepository = {
     // PR-SD — Arşivli vaka direct URL: yalnız SystemAdmin görür. Diğer
     // roller için 404 davranışı (null döner → route 404 yansıtır).
     if (c.isArchived && actorRole !== 'SystemAdmin') return null;
-    return shape(c);
+    return (await enrichSlaView([shape(c)]))[0];
   },
 
   /**
@@ -1864,12 +1895,28 @@ export const caseRepository = {
       priority: m.priority ?? null,
     });
     const slaCreatedAt = new Date();
-    const slaResponseDueAt = slaMatch
-      ? new Date(slaCreatedAt.getTime() + slaMatch.responseHours * 3600000)
-      : null;
-    const slaResolutionDueAt = slaMatch
-      ? new Date(slaCreatedAt.getTime() + slaMatch.resolutionHours * 3600000)
-      : null;
+    // Faz 3 (iş-saati SLA): hedef dakika TEK noktadan (resolveTargetMinutes);
+    // takvim aktif + kesim tarihi geçmişse motor damgalar, aksi halde
+    // duvar-saati (şirket şirket kademeli geçiş). Motor guard-null dönerse
+    // de duvar-saatine düşülür — sessiz yanlış damga sınıf olarak yok.
+    const slaTargets = resolveTargetMinutes(slaMatch);
+    let slaResponseDueAt = null;
+    let slaResolutionDueAt = null;
+    if (slaTargets) {
+      const slaCal = await getEffectiveCalendar(m.companyId, slaCreatedAt.getTime());
+      const respBiz = slaCal
+        ? addBusinessMinutes(slaCreatedAt.getTime(), slaTargets.responseMin, slaCal)
+        : null;
+      const resoBiz = slaCal
+        ? addBusinessMinutes(slaCreatedAt.getTime(), slaTargets.resolutionMin, slaCal)
+        : null;
+      slaResponseDueAt = new Date(
+        respBiz != null ? respBiz : slaCreatedAt.getTime() + slaTargets.responseMin * 60000,
+      );
+      slaResolutionDueAt = new Date(
+        resoBiz != null ? resoBiz : slaCreatedAt.getTime() + slaTargets.resolutionMin * 60000,
+      );
+    }
     const slaResolutionStartedAt = m.assignedPersonId ? slaCreatedAt : null;
 
     const created = await prisma.case.create({
@@ -4259,10 +4306,18 @@ export const caseRepository = {
     const enteringPause = dbNext === 'ThirdPartyWaiting' && prev.status !== 'ThirdPartyWaiting';
     const leavingPause = prev.status === 'ThirdPartyWaiting' && dbNext !== 'ThirdPartyWaiting';
 
+    // Faz 3b — müşteri-bekleme duraklaması şu geçişlerde KAPANIR:
+    //  (a) 3rdPartyBekleniyor'a giriş: çakışma kuralı — 3rd-party pause
+    //      öncelikli, iki sayaç aynı anda işlemez (çifte due ötelemesi yok).
+    //  (b) terminal (Cozuldu/IptalEdildi): kapanışta bekleme muhasebesi
+    //      kapatılır ki uyum hesabı (resolvedAt<=dueAt) ötelenmiş due görsün.
+    const cwCloseNeeded = enteringPause || dbNext === 'Cozuldu' || dbNext === 'IptalEdildi';
+    const cwClose = cwCloseNeeded ? await closeCustomerWaitPatch(prev) : null;
+
     let nextSlaPausedAt = prev.slaPausedAt;
-    let nextPausedDurationMin = prev.slaPausedDurationMin;
+    let nextPausedDurationMin = cwClose ? cwClose.slaPausedDurationMin : prev.slaPausedDurationMin;
     let nextThirdPartyWaitMin = prev.slaThirdPartyWaitMin;
-    let nextResolutionDueAt = prev.slaResolutionDueAt;
+    let nextResolutionDueAt = cwClose?.slaResolutionDueAt ?? prev.slaResolutionDueAt;
     let resolvedThirdPartyId = prev.thirdPartyId;
     let resolvedThirdPartyName = prev.thirdPartyName;
 
@@ -4293,13 +4348,20 @@ export const caseRepository = {
       }
     } else if (leavingPause) {
       if (prev.slaPausedAt) {
-        const pausedMin = Math.round((Date.now() - new Date(prev.slaPausedAt).getTime()) / 60000);
+        const pausedFromMs = new Date(prev.slaPausedAt).getTime();
+        const nowMs = Date.now();
+        // Faz 3 (iş-saati SLA): takvimli şirkette duraklama İŞ-DAKİKASIYLA
+        // ölçülür ve due iş-zamanında ötelenir — gece/hafta sonu geçen
+        // duraklama due'yu şişirmez. Takvimsiz şirkette mevcut duvar-dk.
+        const pauseCal = await getEffectiveCalendar(prev.companyId, nowMs);
+        const bizPaused = pauseCal ? businessMinutesBetween(pausedFromMs, nowMs, pauseCal) : null;
+        const pausedMin = bizPaused != null ? bizPaused : Math.round((nowMs - pausedFromMs) / 60000);
         nextPausedDurationMin += pausedMin;
         nextThirdPartyWaitMin += pausedMin;
         if (prev.slaResolutionDueAt) {
-          nextResolutionDueAt = new Date(
-            new Date(prev.slaResolutionDueAt).getTime() + pausedMin * 60000,
-          );
+          const dueMs = new Date(prev.slaResolutionDueAt).getTime();
+          const shifted = pauseCal ? addBusinessMinutes(dueMs, pausedMin, pauseCal) : null;
+          nextResolutionDueAt = new Date(shifted != null ? shifted : dueMs + pausedMin * 60000);
         }
         nextSlaPausedAt = null;
       }
@@ -4431,6 +4493,14 @@ export const caseRepository = {
         slaPausedDurationMin: nextPausedDurationMin,
         slaThirdPartyWaitMin: nextThirdPartyWaitMin,
         slaResolutionDueAt: nextResolutionDueAt,
+        // Faz 3b — cwClose'un dk/due etkisi yukarıdaki next* değişkenlerinden
+        // akar; burada yalnız damga temizliği + müşteri-bekleme sayacı yazılır.
+        ...(cwClose
+          ? {
+              slaCustomerWaitStartedAt: null,
+              slaCustomerWaitMin: cwClose.slaCustomerWaitMin,
+            }
+          : {}),
         slaResponseMetAt: nextSlaResponseMetAt,
         resolvedAt: (dbNext === 'Cozuldu' || dbNext === 'IptalEdildi') ? new Date() : prev.resolvedAt,
         // M6.1 — terminal'e (Çözüldü/İptal) geçişte pendingCustomerReply
