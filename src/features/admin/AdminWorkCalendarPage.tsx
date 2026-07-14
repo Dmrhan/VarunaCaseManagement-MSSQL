@@ -64,7 +64,7 @@ function draftFromCalendar(cal: WorkCalendar | null): Draft {
 }
 
 /**
- * 24 SAAT zaman seçici — native <input type="time"> tarayıcı diline göre
+ * 24 SAAT zaman seçici — native time girdisi tarayıcı diline göre
  * AM/PM gösterebiliyor (saha bulgusu); select ile format DETERMİNİSTİK.
  * 15 dk adım; kayıtlı değer adım dışındaysa listeye eklenir.
  */
@@ -106,7 +106,7 @@ const trToIso = (t: string): string | null => {
 };
 
 /**
- * GG.AA.YYYY tarih girişi — native <input type="date"> tarayıcı diline göre
+ * GG.AA.YYYY tarih girişi — native date girdisi tarayıcı diline göre
  * AA/GG/YYYY gösterebiliyor (saha bulgusu); metin girişi + doğrulama ile
  * format sabit. Geçersiz girişte eski değere geri döner.
  */
