@@ -1322,6 +1322,13 @@ model ThirdParty {
   isActive    Boolean  @default(true)
   companyId   String?  @db.NVarChar(450)
   pausesSla   Boolean  @default(true)
+  // Uzatılmış SLA v1 (U-B, 2026-07-14) — İKİ PARÇALI tetik, tanım bazında
+  // konfigüre: (1) bu tanıma devir uzatılmış çözüm süresini uygular mı,
+  // (2) ek şart olarak vakada DevOps kaydı aransın mı. Davranış bayrağı
+  // deseni (pausesSla ikizi) — tanımın ADI kural değildir, ad değişse
+  // bayrak kayıtta kalır.
+  triggersExtendedSla          Boolean @default(false)
+  extendedSlaRequiresDevopsLink Boolean @default(true)
   createdAt   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt   DateTime @updatedAt
 
@@ -1390,6 +1397,13 @@ model SLAPolicy {
   priority        String?  @db.NVarChar(50) // enum:CasePriority (Low/Medium/High/Critical)
   responseHours   Int
   resolutionHours Int
+  // Uzatılmış SLA v1 (U-A/U-D, 2026-07-14): yazılım geliştirme devrinde
+  // geçerli TOPLAM çözüm süresi, MESAİ DAKİKASI (kaynak-doğruluk dk —
+  // 1.830 dk gibi tam saate bölünmeyen sözleşme değerleri için saat değil).
+  // null = bu satırda uzatma tanımsız → tetik oluşsa bile davranış değişmez
+  // (fail-safe; takvimdeki boş-kesim-tarihi kapısının ikizi). Bileşen
+  // ayrıştırması (müdahale+çözüm+geliştirme) BİLEREK modellenmedi (U-D).
+  extendedResolutionMin Int?
   description     String?  @db.NVarChar(Max)
   isActive        Boolean  @default(true)
   /// PR-3 — admin audit attribution (nullable; eski satırlar NULL)
@@ -1637,6 +1651,12 @@ model Case {
   // 3rd-party öncelikli, iki sayaç aynı anda işlemez (customerWaitPause.js).
   slaCustomerWaitStartedAt DateTime?
   slaCustomerWaitMin       Int      @default(0)
+  // Uzatılmış SLA v1 — hangi hedefin neden uygulandığı vaka üzerinde izlenir:
+  // slaTargetSource 'standard'|'extended' (null = legacy, damga öncesi kayıt);
+  // slaResolutionTargetMin = uygulanan hedef dakika (due'dan geri-türetme
+  // kırılganlığını kaldırır; pano/dry-run hedef kolonunun kalıcı kaynağı).
+  slaTargetSource        String? @db.NVarChar(20)
+  slaResolutionTargetMin Int?
   slaResponseMetAt       DateTime? // ilk yanıt verildiğinde (Incelemede'ye geçiş)
   slaResolutionStartedAt DateTime? // vakayı ilk üstlenen kişinin claim zamanı
 
