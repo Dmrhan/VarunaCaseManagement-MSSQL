@@ -26,6 +26,30 @@ export function formatRemaining(iso?: string): string {
   return `${Math.round(hours / 24)} gün kaldı`;
 }
 
+/**
+ * Faz 4 — SLA kalan/geçen süre, BE-hesaplı dakikadan (iş-saati desteği).
+ * remainingMin: Case.slaResponseRemainingMin / slaResolutionRemainingMin —
+ * takvimli şirkette İŞ-dakikası gelir (FE'de takvim kopyası YASAK, hesap BE'de).
+ * businessTime=true iken saat/gün etiketine "iş" öneki eklenir ki okuyan
+ * duvar-saatle karıştırmasın; dayMinutes = dk→gün katsayısı (duvarda 1440).
+ * Alan yoksa (eski payload / enrich edilmemiş uç) çağıran iso-fallback kullanır.
+ */
+export function formatSlaRemaining(
+  remainingMin: number | null | undefined,
+  businessTime?: boolean,
+  dayMinutes?: number,
+): string | null {
+  if (remainingMin == null) return null;
+  const overdue = remainingMin < 0;
+  const abs = Math.abs(remainingMin);
+  const dayMin = dayMinutes && dayMinutes > 0 ? dayMinutes : 24 * 60;
+  let span: string;
+  if (abs < 60) span = `${abs} dk`;
+  else if (abs < dayMin) span = `${Math.round(abs / 60)} ${businessTime ? 'iş-sa' : 'sa'}`;
+  else span = `${Math.round(abs / dayMin)} ${businessTime ? 'iş günü' : 'gün'}`;
+  return overdue ? `${span} gecikme` : `${span} kaldı`;
+}
+
 export function formatRelative(iso?: string): string {
   if (!iso) return '—';
   const d = new Date(iso).getTime();

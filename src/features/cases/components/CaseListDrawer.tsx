@@ -22,6 +22,7 @@ import { MentionTextarea } from '@/features/cases/components/MentionTextarea';
 import { MentionContent } from '@/features/cases/components/MentionContent';
 import { ExpandableText } from '@/components/ui/ExpandableText';
 import type { Case, CaseFilters, CasePriority, CaseStatus, NoteVisibility } from '@/features/cases/types';
+import { formatSlaRemaining } from '@/lib/format';
 
 /**
  * Case List Drawer — Split layout:
@@ -705,7 +706,8 @@ function QuickEditPanel({
                     <span className="font-semibold text-rose-700 dark:text-rose-300">İhlal</span>
                   ) : (
                     <span className="font-medium text-slate-700 dark:text-ndark-text">
-                      {formatRemaining(caseItem.slaResolutionDueAt)}
+                      {formatSlaRemaining(caseItem.slaResolutionRemainingMin, caseItem.slaBusinessTime, caseItem.slaDayMinutes)
+                        ?? formatRemaining(caseItem.slaResolutionDueAt)}
                     </span>
                   )}
                 </div>

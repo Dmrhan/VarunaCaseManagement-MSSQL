@@ -12,7 +12,27 @@ export const JSON_FIELD_MAP = {
     "json": [],
     "relations": {
       "companies": "UserCompany",
-      "reminders": "CaseReminder"
+      "reminders": "CaseReminder",
+      "reportViews": "ReportView",
+      "teamsCreated": "Team",
+      "teamsUpdated": "Team",
+      "categoriesCreated": "CategoryDef",
+      "categoriesUpdated": "CategoryDef",
+      "slaPoliciesCreated": "SLAPolicy",
+      "slaPoliciesUpdated": "SLAPolicy",
+      "fieldDefinitionsCreated": "FieldDefinition",
+      "fieldDefinitionsUpdated": "FieldDefinition",
+      "taxonomyDefsCreated": "TaxonomyDef",
+      "taxonomyDefsUpdated": "TaxonomyDef",
+      "checklistTemplatesCreated": "ChecklistTemplate",
+      "checklistTemplatesUpdated": "ChecklistTemplate",
+      "caseActivities": "CaseActivity",
+      "caseAttachmentsAsUploader": "CaseAttachment",
+      "authorizationPoliciesCreated": "AuthorizationPolicy",
+      "authorizationPoliciesUpdated": "AuthorizationPolicy",
+      "casesArchived": "Case",
+      "casesCreated": "Case",
+      "caseEmailsSent": "CaseEmail"
     }
   },
   "UserCompany": {
@@ -40,13 +60,32 @@ export const JSON_FIELD_MAP = {
       "products": "Product",
       "packages": "Package",
       "externalKbSetting": "ExternalKbSetting",
+      "externalDevOpsSetting": "ExternalDevOpsSetting",
+      "externalMailSetting": "ExternalMailSetting",
+      "externalMailFromAliases": "ExternalMailSettingFromAlias",
+      "externalMailInboxes": "ExternalMailInbox",
+      "learnedSenderAccounts": "LearnedSenderAccount",
+      "caseEmails": "CaseEmail",
       "importJobs": "ImportJob",
       "resolutionApprovalPolicies": "ResolutionApprovalPolicy",
       "notificationRules": "NotificationRule",
       "notificationTemplates": "NotificationTemplate",
       "notificationDispatches": "NotificationDispatch",
+      "caseEmailTemplates": "CaseEmailTemplate",
       "taxonomies": "TaxonomyDef",
-      "solutionSteps": "CaseSolutionStep"
+      "solutionSteps": "CaseSolutionStep",
+      "reportViews": "ReportView",
+      "authorizationPolicies": "AuthorizationPolicy",
+      "thirdParties": "ThirdParty",
+      "workCalendar": "WorkCalendar",
+      "holidays": "Holiday",
+      "caseNumberCounter": "CaseNumberCounter"
+    }
+  },
+  "CaseNumberCounter": {
+    "json": [],
+    "relations": {
+      "company": "Company"
     }
   },
   "FieldDefinition": {
@@ -54,7 +93,9 @@ export const JSON_FIELD_MAP = {
       "options"
     ],
     "relations": {
-      "company": "Company"
+      "company": "Company",
+      "createdBy": "User",
+      "updatedBy": "User"
     }
   },
   "CompanySettings": {
@@ -69,6 +110,46 @@ export const JSON_FIELD_MAP = {
       "company": "Company"
     }
   },
+  "ExternalDevOpsSetting": {
+    "json": [],
+    "relations": {
+      "company": "Company"
+    }
+  },
+  "ExternalMailSetting": {
+    "json": [],
+    "relations": {
+      "company": "Company",
+      "fromAliases": "ExternalMailSettingFromAlias"
+    }
+  },
+  "ExternalMailSettingFromAlias": {
+    "json": [],
+    "relations": {
+      "company": "Company",
+      "setting": "ExternalMailSetting"
+    }
+  },
+  "ExternalMailInbox": {
+    "json": [],
+    "relations": {
+      "company": "Company",
+      "team": "Team"
+    }
+  },
+  "CaseEmailTemplate": {
+    "json": [],
+    "relations": {
+      "company": "Company"
+    }
+  },
+  "LearnedSenderAccount": {
+    "json": [],
+    "relations": {
+      "company": "Company",
+      "account": "Account"
+    }
+  },
   "Account": {
     "json": [],
     "relations": {
@@ -76,7 +157,9 @@ export const JSON_FIELD_MAP = {
       "cases": "Case",
       "companies": "AccountCompany",
       "contacts": "AccountContact",
-      "addresses": "Address"
+      "addresses": "Address",
+      "learnedSenderAccounts": "LearnedSenderAccount",
+      "anaFirmaProjects": "AccountProject"
     }
   },
   "AccountCompany": {
@@ -93,6 +176,7 @@ export const JSON_FIELD_MAP = {
     "json": [],
     "relations": {
       "accountCompany": "AccountCompany",
+      "anaFirma": "Account",
       "cases": "Case"
     }
   },
@@ -156,7 +240,9 @@ export const JSON_FIELD_MAP = {
     "relations": {
       "company": "Company",
       "parent": "TaxonomyDef",
-      "children": "TaxonomyDef"
+      "children": "TaxonomyDef",
+      "createdBy": "User",
+      "updatedBy": "User"
     }
   },
   "CaseSolutionStep": {
@@ -171,7 +257,10 @@ export const JSON_FIELD_MAP = {
     "relations": {
       "company": "Company",
       "members": "Person",
-      "cases": "Case"
+      "cases": "Case",
+      "createdBy": "User",
+      "updatedBy": "User",
+      "mailInboxes": "ExternalMailInbox"
     }
   },
   "Person": {
@@ -186,6 +275,7 @@ export const JSON_FIELD_MAP = {
   "ThirdParty": {
     "json": [],
     "relations": {
+      "company": "Company",
       "cases": "Case"
     }
   },
@@ -198,7 +288,9 @@ export const JSON_FIELD_MAP = {
     "relations": {
       "parent": "CategoryDef",
       "children": "CategoryDef",
-      "company": "Company"
+      "company": "Company",
+      "createdBy": "User",
+      "updatedBy": "User"
     }
   },
   "OfferedSolutionDef": {
@@ -210,6 +302,24 @@ export const JSON_FIELD_MAP = {
   "SLAPolicy": {
     "json": [],
     "relations": {
+      "company": "Company",
+      "createdBy": "User",
+      "updatedBy": "User"
+    }
+  },
+  "WorkCalendar": {
+    "json": [
+      "workDays"
+    ],
+    "relations": {
+      "company": "Company",
+      "holidays": "Holiday"
+    }
+  },
+  "Holiday": {
+    "json": [],
+    "relations": {
+      "calendar": "WorkCalendar",
       "company": "Company"
     }
   },
@@ -218,7 +328,9 @@ export const JSON_FIELD_MAP = {
       "items"
     ],
     "relations": {
-      "company": "Company"
+      "company": "Company",
+      "createdBy": "User",
+      "updatedBy": "User"
     }
   },
   "Case": {
@@ -233,9 +345,11 @@ export const JSON_FIELD_MAP = {
       "accountProject": "AccountProject",
       "assignedTeam": "Team",
       "assignedPerson": "Person",
+      "createdBy": "User",
       "thirdParty": "ThirdParty",
       "product": "Product",
       "package": "Package",
+      "archivedByUser": "User",
       "notes": "CaseNote",
       "attachments": "CaseAttachment",
       "history": "CaseActivity",
@@ -250,9 +364,11 @@ export const JSON_FIELD_MAP = {
       "reminders": "CaseReminder",
       "transfers": "CaseTransfer",
       "watchers": "CaseWatcher",
+      "taggingReview": "CaseTaggingReview",
       "outgoingLinks": "CaseLink",
       "incomingLinks": "CaseLink",
-      "solutionSteps": "CaseSolutionStep"
+      "solutionSteps": "CaseSolutionStep",
+      "caseEmails": "CaseEmail"
     }
   },
   "CaseReminder": {
@@ -265,7 +381,8 @@ export const JSON_FIELD_MAP = {
   "CaseActivity": {
     "json": [],
     "relations": {
-      "case": "Case"
+      "case": "Case",
+      "actorUser": "User"
     }
   },
   "CaseNote": {
@@ -290,7 +407,8 @@ export const JSON_FIELD_MAP = {
   "CaseAttachment": {
     "json": [],
     "relations": {
-      "case": "Case"
+      "case": "Case",
+      "uploadedByUser": "User"
     }
   },
   "CaseCallLog": {
@@ -348,7 +466,8 @@ export const JSON_FIELD_MAP = {
   },
   "PatternAlert": {
     "json": [
-      "caseIds"
+      "caseIds",
+      "aiHypothesis"
     ],
     "relations": {}
   },
@@ -369,6 +488,12 @@ export const JSON_FIELD_MAP = {
     }
   },
   "CaseTransfer": {
+    "json": [],
+    "relations": {
+      "case": "Case"
+    }
+  },
+  "CaseTaggingReview": {
     "json": [],
     "relations": {
       "case": "Case"
@@ -437,11 +562,45 @@ export const JSON_FIELD_MAP = {
       "case": "Case",
       "company": "Company",
       "rule": "NotificationRule",
-      "template": "NotificationTemplate"
+      "template": "NotificationTemplate",
+      "caseEmails": "CaseEmail"
+    }
+  },
+  "CaseEmail": {
+    "json": [],
+    "relations": {
+      "case": "Case",
+      "company": "Company",
+      "sentBy": "User",
+      "dispatch": "NotificationDispatch",
+      "attachments": "CaseEmailAttachment"
+    }
+  },
+  "CaseEmailAttachment": {
+    "json": [],
+    "relations": {
+      "email": "CaseEmail"
     }
   },
   "ActionItem": {
     "json": [],
     "relations": {}
+  },
+  "ReportView": {
+    "json": [],
+    "relations": {
+      "owner": "User",
+      "company": "Company"
+    }
+  },
+  "AuthorizationPolicy": {
+    "json": [
+      "filterJson"
+    ],
+    "relations": {
+      "company": "Company",
+      "createdBy": "User",
+      "updatedBy": "User"
+    }
   }
 };

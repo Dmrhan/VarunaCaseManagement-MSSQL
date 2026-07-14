@@ -115,7 +115,7 @@ import {
 import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
 import { useAuth } from '@/services/AuthContext';
 import { featureFlags } from '@/config/featureFlags';
-import { formatDateTime, formatRelative, formatRemaining } from '@/lib/format';
+import { formatDateTime, formatRelative, formatRemaining, formatSlaRemaining } from '@/lib/format';
 import {
   CALL_DISPOSITIONS,
   CALL_OUTCOMES,
@@ -1966,7 +1966,8 @@ function LeftPanel({
                 </div>
               ) : (
                 <div className="rounded-md bg-sky-50 px-2 py-1 text-[11px] text-sky-800 ring-1 ring-sky-200">
-                  Yanıta {formatRemaining(item.slaResponseDueAt)}
+                  Yanıta {formatSlaRemaining(item.slaResponseRemainingMin, item.slaBusinessTime, item.slaDayMinutes)
+                    ?? formatRemaining(item.slaResponseDueAt)}
                 </div>
               )
             )}
@@ -1983,14 +1984,15 @@ function LeftPanel({
                 </div>
               ) : item.status !== 'Çözüldü' && item.status !== 'İptalEdildi' && !item.slaPausedAt ? (
                 <div className="rounded-md bg-sky-50 px-2 py-1 text-[11px] text-sky-800 ring-1 ring-sky-200">
-                  Çözüme {formatRemaining(item.slaResolutionDueAt)}
+                  Çözüme {formatSlaRemaining(item.slaResolutionRemainingMin, item.slaBusinessTime, item.slaDayMinutes)
+                    ?? formatRemaining(item.slaResolutionDueAt)}
                 </div>
               ) : null
             )}
           </div>
 
-          {/* Duraklatma */}
-          {(item.slaPausedAt || item.slaPausedDurationMin > 0) && (
+          {/* Duraklatma — 3. parti (slaPausedAt) + müşteri-bekleme (Faz 3b) */}
+          {(item.slaPausedAt || item.slaCustomerWaitStartedAt || item.slaPausedDurationMin > 0) && (
             <div className="space-y-1">
               {item.slaPausedDurationMin > 0 && (
                 <SlaRow label="Duraklatma" value={`${item.slaPausedDurationMin} dk`} />
@@ -1998,6 +2000,11 @@ function LeftPanel({
               {item.slaPausedAt && (
                 <div className="rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800 ring-1 ring-amber-200">
                   Şu an duraklıyor — {formatRelative(item.slaPausedAt)}
+                </div>
+              )}
+              {!item.slaPausedAt && item.slaCustomerWaitStartedAt && (
+                <div className="rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800 ring-1 ring-amber-200">
+                  Müşteri yanıtı bekleniyor — sayaç durdu ({formatRelative(item.slaCustomerWaitStartedAt)})
                 </div>
               )}
             </div>
@@ -4727,10 +4734,10 @@ function KpiSummaryStrip({ item, caseId }: { item: Case; caseId: string }) {
   });
   if (reopened) parts.push({ key: 'reopen', node: <>Y.açılma Var</> });
   if (item.slaResponseDueAt) {
-    parts.push({ key: 'slaResp', node: <>Yanıt SLA {formatRelative(item.slaResponseDueAt)}</> });
+    parts.push({ key: 'slaResp', node: <>Yanıt SLA {formatSlaRemaining(item.slaResponseRemainingMin, item.slaBusinessTime, item.slaDayMinutes) ?? formatRelative(item.slaResponseDueAt)}</> });
   }
   if (item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt) {
-    parts.push({ key: 'slaRes', node: <>Çözüm SLA {formatRelative(item.slaResolutionDueAt)}</> });
+    parts.push({ key: 'slaRes', node: <>Çözüm SLA {formatSlaRemaining(item.slaResolutionRemainingMin, item.slaBusinessTime, item.slaDayMinutes) ?? formatRelative(item.slaResolutionDueAt)}</> });
   }
   parts.push({ key: 'updated', node: <>Son güncelleme {formatDateTime(item.updatedAt)}</> });
   if (item.resolvedAt) {

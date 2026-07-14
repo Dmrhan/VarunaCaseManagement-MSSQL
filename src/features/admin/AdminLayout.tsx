@@ -22,6 +22,7 @@ import {
   Tag,
   Timer,
   Users2,
+  CalendarDays,
 } from 'lucide-react';
 import { useAuth } from '@/services/AuthContext';
 
@@ -36,6 +37,7 @@ import { useAuth } from '@/services/AuthContext';
 export type AdminView =
   | 'admin-categories'
   | 'admin-sla'
+  | 'admin-work-calendar'
   | 'admin-thirdparty'
   | 'admin-documents'
   | 'admin-checklist'
@@ -61,6 +63,7 @@ export type AdminView =
 export const ADMIN_VIEWS: AdminView[] = [
   'admin-categories',
   'admin-sla',
+  'admin-work-calendar',
   'admin-thirdparty',
   'admin-documents',
   'admin-checklist',
@@ -99,6 +102,7 @@ const NAV: NavGroup[] = [
     items: [
       { key: 'admin-categories',        label: 'Kategori & Alt Kategori', icon: <FolderTree size={14} /> },
       { key: 'admin-sla',               label: 'SLA Kuralları',            icon: <Timer size={14} /> },
+      { key: 'admin-work-calendar',     label: 'Çalışma Takvimi',          icon: <CalendarDays size={14} /> },
       { key: 'admin-checklist',         label: 'Kontrol Listesi',          icon: <ClipboardCheck size={14} /> },
       { key: 'admin-thirdparty',        label: '3. Parti Tanımları',       icon: <Network size={14} /> },
       { key: 'admin-documents',         label: 'Belge Türleri',            icon: <FileText size={14} /> },
