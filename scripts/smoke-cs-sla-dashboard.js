@@ -29,10 +29,10 @@ ok('2 tenant kapsamı req.user.allowedCompanyIds ile geçiyor (boşsa compute bo
   && /allowedCompanyIds\.length === 0\)\s*{\s*return emptyResult/.test(agg));
 
 // ── 2 · Saklanan-değer disiplini (görünen≠saklanan tuzağı) ──
-ok('3 durum/tip eşlemesi enumMap üzerinden; bilinmeyen etiket sessiz-0 değil dürüst-boş',
+ok('3 durum/tip eşlemesi enumMap üzerinden; tümü-bilinmeyen liste sessiz-0 değil dürüst-boş',
   agg.includes("import { M_STATUS, M_REQUEST } from '../db/enumMap.js'")
-  && agg.includes('if (params.status && !st) return emptyResult')
-  && agg.includes('if (params.requestType && !rt) return emptyResult'));
+  && agg.includes('if (stIn.length && !stOk.length) return emptyResult')
+  && agg.includes('if (rtIn.length && !rtOk.length) return emptyResult'));
 ok('4 terminal set saklanan değerlerle (Cozuldu/IptalEdildi) + mail direction küçük harf',
   /TERMINAL = new Set\(\['Cozuldu', 'IptalEdildi'\]\)/.test(agg)
   && agg.includes("m.direction === 'outbound'") && agg.includes("m.direction === 'inbound'"));
@@ -97,6 +97,68 @@ ok('17 Codex #530 P2 seti: terminalde çözüm+müdahale sayaçları donar; supp
   && agg.includes('respMet ?? resolved ?? now')
   && /supportLevel: true/.test(agg)
   && !/personLevel|teamLevel/.test(agg));
+
+ok('18 Excel export: backend exportAll (20k tavan + truncated bayrağı) + route export=1 + FE dinamik xlsx',
+  agg.includes('SLA_DASH_EXPORT_CAP = 20000')
+  && agg.includes('params.exportAll')
+  && agg.includes('exportTruncated: filtered.length > SLA_DASH_EXPORT_CAP')
+  && /exportAll: q\.export === '1'/.test(route)
+  && page.includes("Excel'e Aktar")
+  && page.includes("await import('xlsx')")
+  && svc.includes('exportSlaDashboard'));
+
+ok('19 çoklu seçim: backend toList + facet Set (tümü-geçersiz liste dürüst-boş) + route dizi geçirir + FE MultiDropdown + temizle',
+  agg.includes('function toList(')
+  && agg.includes('if (stIn.length && !stOk.length) return emptyResult')
+  && /waitingDept: q\.waitingDept \?\? null/.test(route)
+  && /companyId: q\.companyId \?\? null/.test(route)
+  && page.includes('function MultiDropdown(')
+  && page.includes('Filtreleri Temizle')
+  && page.includes('Seçimi temizle'));
+
+ok('20 seçenekler KASKAD + KENDİNİ-DIŞLA (saha feedback): matches(r, excludeKey) + her seçenek kendi facet\'i hariç süzülür + Şirket facet\'i var',
+  agg.includes("matches(r, 'waitingDept')")
+  && agg.includes("matches(r, 'companyId')")
+  && agg.includes("matches(r, 'accountId')")
+  && agg.includes('if (key === excludeKey) continue;')
+  && agg.includes("['companyId', (r) => r.companyId]")
+  && page.includes("label: 'Şirket'"));
+
+ok('21 uygula-butonlu filtreleme: draft/applied ayrımı + Filtrele + dirty uyarısı + export uygulananla',
+  page.includes('const [draft, setDraft]')
+  && page.includes('const [applied, setApplied]')
+  && page.includes('applyFilters')
+  && page.includes('Filtre değişti — henüz uygulanmadı')
+  && page.includes('exportSlaDashboard(applied)')
+  && page.includes('void load(applied)'));
+
+ok('22 açılış/temizleme veri ÇEKMEZ: optionsOnly ucuz mod (vaka taraması yok) + FE applied=null + temizle sunucusuz',
+  agg.includes('if (params.optionsOnly)')
+  && /optionsOnly: q\.optionsOnly === '1'/.test(route)
+  && svc.includes('optionsOnly=1')
+  && page.includes('useState<SlaDashboardFilters | null>(null)')
+  && page.includes('if (applied) void load(applied)')
+  && page.includes('setApplied(null);\n    setData(null);')
+  && page.includes('initialOptionsRef'));
+
+ok('23 denetim: useMemo [draft, options] + yarış guard\'ı + loadFailed durumu',
+  page.includes('[draft, options],')
+  && page.includes('reqIdRef')
+  && page.includes('myId !== reqIdRef.current')
+  && page.includes('loadFailed'));
+
+ok('24 denetim: Ay Yıl\'sız kilitli + varsayılan yıl penceresi + dropdown arama + listede-yok seçim korunur',
+  page.includes('disabled: !draft.year')
+  && page.includes('DEFAULT_DRAFT: SlaDashboardFilters = { year: CURRENT_YEAR }')
+  && page.includes("placeholder=\"Ara…\"")
+  && page.includes('(listede değil)'));
+
+ok('25 denetim: TR gün sınırı + legacy-terminal null + export options incelt + uygulanan chip özeti + sayfa boyutu',
+  agg.includes('TR_OFFSET_MS')
+  && agg.includes('legacyTerminal')
+  && agg.includes('options: emptyResult(params).options')
+  && page.includes('appliedChips')
+  && page.includes('Sayfa boyutu'));
 
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);
