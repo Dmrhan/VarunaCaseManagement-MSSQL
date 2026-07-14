@@ -30,6 +30,8 @@ import {
   type SlaDashboardResponse,
   type SlaDashboardRow,
 } from '../../services/analyticsService';
+// Codex #532 P2: Expert eksikti — paylaşılan sabiti reuse et (L1/L2/L3/Expert)
+import { SUPPORT_LEVELS, SUPPORT_LEVEL_LABELS } from '../cases/types';
 
 const STATUS_TR: Record<string, string> = {
   Acik: 'Açık',
@@ -47,7 +49,6 @@ const PRIORITY_TR: Record<string, string> = {
   Critical: 'Kritik',
 };
 const OPEN_AGE_OPTIONS = ['0-1', '1-3', '3-7', '7+'];
-const SUPPORT_LEVELS = ['L1', 'L2', 'L3'];
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = [CURRENT_YEAR, CURRENT_YEAR - 1];
 const MONTHS = [
@@ -311,6 +312,10 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
   const applyFilters = () => setApplied({ ...draft, page: 1, pageSize: applied?.pageSize });
   // Sözleşme md. 4: Temizle SORGU ATMAZ — varsayılan taslağa döner.
   const clearFilters = () => {
+    // Codex #532 P2: uçan bir load() varsa iptal et — yoksa geç dönen yanıt
+    // temizlenen tabloyu geri doldurur (reqIdRef bump = o yanıt yok sayılır).
+    reqIdRef.current += 1;
+    setLoading(false);
     setDraft(DEFAULT_DRAFT);
     setApplied(null);
     setData(null);
@@ -414,7 +419,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         disabled: false,
         disabledHint: undefined as string | undefined,
         values: draft.supportLevel ?? [],
-        options: SUPPORT_LEVELS.map((l) => ({ v: l, l })),
+        options: SUPPORT_LEVELS.map((lv) => ({ v: lv, l: SUPPORT_LEVEL_LABELS[lv] })),
         onChange: (vals: string[]) => set({ supportLevel: vals }),
       },
       {
