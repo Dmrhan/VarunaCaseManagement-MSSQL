@@ -11,7 +11,8 @@ import {
 import { ActorRequiredError } from '../lib/actor.js';
 import { devopsClient, parseWorkItemId } from '../lib/devopsClient.js';
 import crypto from 'node:crypto';
-import { resolveSlaPolicy } from '../lib/sla/slaPolicyResolver.js';
+import { resolveSlaPolicy, resolveTargetMinutes } from '../lib/sla/slaPolicyResolver.js';
+import { getEffectiveCalendar, addBusinessMinutes, businessMinutesBetween } from '../lib/sla/businessTime.js';
 
 /**
  * PR-1 (Codex P1) + PR-2 — defansif throw helper.
@@ -1864,12 +1865,28 @@ export const caseRepository = {
       priority: m.priority ?? null,
     });
     const slaCreatedAt = new Date();
-    const slaResponseDueAt = slaMatch
-      ? new Date(slaCreatedAt.getTime() + slaMatch.responseHours * 3600000)
-      : null;
-    const slaResolutionDueAt = slaMatch
-      ? new Date(slaCreatedAt.getTime() + slaMatch.resolutionHours * 3600000)
-      : null;
+    // Faz 3 (iş-saati SLA): hedef dakika TEK noktadan (resolveTargetMinutes);
+    // takvim aktif + kesim tarihi geçmişse motor damgalar, aksi halde
+    // duvar-saati (şirket şirket kademeli geçiş). Motor guard-null dönerse
+    // de duvar-saatine düşülür — sessiz yanlış damga sınıf olarak yok.
+    const slaTargets = resolveTargetMinutes(slaMatch);
+    let slaResponseDueAt = null;
+    let slaResolutionDueAt = null;
+    if (slaTargets) {
+      const slaCal = await getEffectiveCalendar(m.companyId, slaCreatedAt.getTime());
+      const respBiz = slaCal
+        ? addBusinessMinutes(slaCreatedAt.getTime(), slaTargets.responseMin, slaCal)
+        : null;
+      const resoBiz = slaCal
+        ? addBusinessMinutes(slaCreatedAt.getTime(), slaTargets.resolutionMin, slaCal)
+        : null;
+      slaResponseDueAt = new Date(
+        respBiz != null ? respBiz : slaCreatedAt.getTime() + slaTargets.responseMin * 60000,
+      );
+      slaResolutionDueAt = new Date(
+        resoBiz != null ? resoBiz : slaCreatedAt.getTime() + slaTargets.resolutionMin * 60000,
+      );
+    }
     const slaResolutionStartedAt = m.assignedPersonId ? slaCreatedAt : null;
 
     const created = await prisma.case.create({
@@ -4293,13 +4310,20 @@ export const caseRepository = {
       }
     } else if (leavingPause) {
       if (prev.slaPausedAt) {
-        const pausedMin = Math.round((Date.now() - new Date(prev.slaPausedAt).getTime()) / 60000);
+        const pausedFromMs = new Date(prev.slaPausedAt).getTime();
+        const nowMs = Date.now();
+        // Faz 3 (iş-saati SLA): takvimli şirkette duraklama İŞ-DAKİKASIYLA
+        // ölçülür ve due iş-zamanında ötelenir — gece/hafta sonu geçen
+        // duraklama due'yu şişirmez. Takvimsiz şirkette mevcut duvar-dk.
+        const pauseCal = await getEffectiveCalendar(prev.companyId, nowMs);
+        const bizPaused = pauseCal ? businessMinutesBetween(pausedFromMs, nowMs, pauseCal) : null;
+        const pausedMin = bizPaused != null ? bizPaused : Math.round((nowMs - pausedFromMs) / 60000);
         nextPausedDurationMin += pausedMin;
         nextThirdPartyWaitMin += pausedMin;
         if (prev.slaResolutionDueAt) {
-          nextResolutionDueAt = new Date(
-            new Date(prev.slaResolutionDueAt).getTime() + pausedMin * 60000,
-          );
+          const dueMs = new Date(prev.slaResolutionDueAt).getTime();
+          const shifted = pauseCal ? addBusinessMinutes(dueMs, pausedMin, pauseCal) : null;
+          nextResolutionDueAt = new Date(shifted != null ? shifted : dueMs + pausedMin * 60000);
         }
         nextSlaPausedAt = null;
       }

@@ -15,6 +15,10 @@ export async function runSlaBreachSweep() {
       slaViolation: false,
       slaResolutionDueAt: { lt: now, not: null },
       status: { notIn: ['Cozuldu', 'IptalEdildi'] },
+      // Faz 3 (keşif yan bulgusu): duraklamadaki vaka (3rd-party bekleme)
+      // ihlal damgalanmaz — çıkışta due zaten ötelenecek; erken damga
+      // geri alınamadığından (unflag yok) yanlış-kalıcı ihlal üretiyordu.
+      slaPausedAt: null,
       // 2026-07-06 — arşivli vaka SLA ihlali İŞARETLENMEZ (arşivdeki 441
       // "Açık" temizlik vakası sweep'te ihlal damgalanıp sayaçları şişirmesin)
       isArchived: false,

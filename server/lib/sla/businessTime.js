@@ -229,19 +229,41 @@ export function invalidateWorkCalendarCache(companyId) {
   else _calCache.clear();
 }
 
+async function loadEntry(companyId) {
+  const now = Date.now();
+  const hit = _calCache.get(companyId);
+  if (hit && hit.expiresAt > now) return hit;
+  const raw = await prisma.workCalendar.findUnique({
+    where: { companyId },
+    include: { holidays: true },
+  });
+  const entry = {
+    cal: raw ? normalizeCalendar(raw) : null,
+    // Kesim tarihi (karar #3): null = takvim kayıtlı ama geçiş başlamamış.
+    effectiveFromMs: raw?.effectiveFrom ? new Date(raw.effectiveFrom).getTime() : null,
+    expiresAt: now + CACHE_TTL_MS,
+  };
+  _calCache.set(companyId, entry);
+  return entry;
+}
+
 /**
  * Şirketin hesap-hazır takvimi; tanımsız/pasif/bozuk ise null (çağıran
  * duvar-saati davranışına düşer — kademeli geçişin temeli).
  */
 export async function loadWorkCalendar(companyId) {
-  const now = Date.now();
-  const hit = _calCache.get(companyId);
-  if (hit && hit.expiresAt > now) return hit.cal;
-  const raw = await prisma.workCalendar.findUnique({
-    where: { companyId },
-    include: { holidays: true },
-  });
-  const cal = raw ? normalizeCalendar(raw) : null;
-  _calCache.set(companyId, { cal, expiresAt: now + CACHE_TTL_MS });
-  return cal;
+  return (await loadEntry(companyId)).cal;
+}
+
+/**
+ * DAMGA KAPISI (Faz 3): takvim aktif VE kesim tarihi (effectiveFrom)
+ * verilen anı kapsıyorsa takvimi döndürür; aksi halde null → çağıran
+ * duvar-saatiyle damgalar. Kesim tarihi boşsa geçiş BAŞLAMAMIŞTIR
+ * (takvim kayıtlı olsa bile) — duyurulu geçiş ilkesi.
+ */
+export async function getEffectiveCalendar(companyId, atMs = Date.now()) {
+  const entry = await loadEntry(companyId);
+  if (!entry.cal) return null;
+  if (entry.effectiveFromMs == null || atMs < entry.effectiveFromMs) return null;
+  return entry.cal;
 }
