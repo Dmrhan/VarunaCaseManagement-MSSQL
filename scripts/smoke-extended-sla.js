@@ -102,5 +102,25 @@ ok('15 migration: additive + TRY/TRAN + DF default\'lar (MSSQL deseni)',
   && migration.includes('DF_ThirdParty_triggersExtendedSla')
   && migration.includes('[extendedResolutionMin] INT NULL'));
 
+// ── 7 · Faz 2: olay bağlama (yapısal) ──
+const repo = rd('server/db/caseRepository.js');
+ok('16 transitionStatus 3P girişi: tp select bayrakları çeker + tetik değerlendirilir',
+  repo.includes('triggersExtendedSla: true,')
+  && repo.includes('extendedSlaRequiresDevopsLink: true,')
+  && repo.includes('if (extendedSlaTriggerMet(tp, readDevopsArray(prev.customFields).length))'));
+ok('17 atomiklik (kabul şartı 3): patch data + history AYNI transitionStatus update\'inde',
+  repo.includes('slaTargetSource: extendedPatch.data.slaTargetSource')
+  && repo.includes('...extendedPatch.historyEntry,')
+  && repo.includes('nextResolutionDueAt = extendedPatch.data.slaResolutionDueAt;'));
+ok('18 cwClose etkileşimi: patch GÜNCEL duraklama toplamını görür (çifte sayım imkânsız)',
+  repo.includes('{ ...prev, slaPausedDurationMin: nextPausedDurationMin }'));
+ok('19 linkDevops sonrası re-eval: vaka bayraklı 3P\'deyken link koşulu tamamlarsa uzatır (kendi içinde atomik)',
+  repo.includes("row?.status === 'ThirdPartyWaiting' && row.thirdPartyId && row.slaTargetSource !== 'extended'")
+  && repo.includes('DevOps #${workItemId}`'));
+ok('20 U-E: unlinkDevops + 3P çıkışı NO-OP — geri daraltma çağrısı YOK',
+  !repo.slice(repo.indexOf('async unlinkDevops'), repo.indexOf('async unlinkDevops') + 3000).includes('buildExtendedSlaPatch'));
+ok('21 hedef güncel politikadan (tek kaynak): re-eval resolveSlaPolicy ile açılış boyutlarını yeniden çözer',
+  (repo.match(/const extMatch = await resolveSlaPolicy\(/g) ?? []).length === 2);
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

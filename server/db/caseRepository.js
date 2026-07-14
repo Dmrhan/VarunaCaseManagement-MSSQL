@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 import { resolveSlaPolicy, resolveTargetMinutes } from '../lib/sla/slaPolicyResolver.js';
 import { getEffectiveCalendar, addBusinessMinutes, businessMinutesBetween, getCalendarGateFor, diffMinutes, netDayMinutes } from '../lib/sla/businessTime.js';
 import { closeCustomerWaitPatch } from '../lib/sla/customerWaitPause.js';
+import { resolveExtendedTargetMinutes, extendedSlaTriggerMet, buildExtendedSlaPatch } from '../lib/sla/extendedSla.js';
 
 /**
  * PR-1 (Codex P1) + PR-2 — defansif throw helper.
@@ -2955,6 +2956,50 @@ export const caseRepository = {
           at: new Date(),
         },
       });
+
+      // Uzatılmış SLA v1 — koşulun İKİNCİ yarısı sonradan tamamlanabilir:
+      // vaka ZATEN bayraklı 3. partide beklerken DevOps kaydı şimdi
+      // bağlandıysa uzatma bu olayla tetiklenir. Kendi içinde atomik:
+      // due + damga + ihlal + history TEK update. unlinkDevops'ta bilinçli
+      // karşılığı YOK (U-E — geri daraltma yok).
+      const row = await prisma.case.findUnique({ where: { id: caseId } });
+      if (row?.status === 'ThirdPartyWaiting' && row.thirdPartyId && row.slaTargetSource !== 'extended') {
+        const tp = await prisma.thirdParty.findUnique({
+          where: { id: row.thirdPartyId },
+          select: { name: true, triggersExtendedSla: true, extendedSlaRequiresDevopsLink: true },
+        });
+        if (extendedSlaTriggerMet(tp, readDevopsArray(row.customFields).length)) {
+          const extMatch = await resolveSlaPolicy({
+            companyId: row.companyId,
+            productGroup: row.productGroup ?? null,
+            categoryName: row.category ?? null,
+            subCategoryName: row.subCategory ?? null,
+            requestType: row.requestType ?? null,
+            priority: row.priority ?? null,
+          });
+          const extendedPatch = await buildExtendedSlaPatch(
+            row,
+            resolveExtendedTargetMinutes(extMatch),
+            `${tp.name} + DevOps #${workItemId}`,
+          );
+          if (extendedPatch) {
+            await prisma.case.update({
+              where: { id: caseId },
+              data: {
+                ...extendedPatch.data,
+                history: {
+                  create: [{
+                    companyId,
+                    ...extendedPatch.historyEntry,
+                    actor: actor.displayName,
+                    actorUserId: actor.userId ?? null,
+                  }],
+                },
+              },
+            });
+          }
+        }
+      }
     }
 
     const updated = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
@@ -4314,6 +4359,10 @@ export const caseRepository = {
     const cwCloseNeeded = enteringPause || dbNext === 'Cozuldu' || dbNext === 'IptalEdildi';
     const cwClose = cwCloseNeeded ? await closeCustomerWaitPatch(prev) : null;
 
+    // Uzatılmış SLA v1 — 3P girişinde tanım bayrağı tetiklerse dolar;
+    // data + history TEK update'e girer (kabul şartı: atomiklik).
+    let extendedPatch = null;
+
     let nextSlaPausedAt = prev.slaPausedAt;
     let nextPausedDurationMin = cwClose ? cwClose.slaPausedDurationMin : prev.slaPausedDurationMin;
     let nextThirdPartyWaitMin = prev.slaThirdPartyWaitMin;
@@ -4325,7 +4374,14 @@ export const caseRepository = {
       if (payload.thirdPartyId) {
         const tp = await prisma.thirdParty.findUnique({
           where: { id: payload.thirdPartyId },
-          select: { id: true, name: true, companyId: true, pausesSla: true },
+          select: {
+            id: true,
+            name: true,
+            companyId: true,
+            pausesSla: true,
+            triggersExtendedSla: true,
+            extendedSlaRequiresDevopsLink: true,
+          },
         });
         // Codex P2 fix — Global (companyId=null) 3. partiler tüm
         // şirketler için kullanılabilir; admin UI bunları oluşturuyor +
@@ -4341,6 +4397,32 @@ export const caseRepository = {
         resolvedThirdPartyName = tp.name;
         if (tp.pausesSla) {
           nextSlaPausedAt = new Date();
+        }
+        // Uzatılmış SLA v1 (U-B) — tanım bayraklı devir: uzatılmış hedef,
+        // GÜNCEL politika satırından okunur (tek kaynak; vaka açılışındaki
+        // eşleşme boyutlarıyla yeniden çözülür). Guard'lar helper'da
+        // (tek-yön/terminal/fail-safe) — koşul tutmazsa hiçbir şey değişmez.
+        if (extendedSlaTriggerMet(tp, readDevopsArray(prev.customFields).length)) {
+          const extMatch = await resolveSlaPolicy({
+            companyId: prev.companyId,
+            productGroup: prev.productGroup ?? null,
+            categoryName: prev.category ?? null,
+            subCategoryName: prev.subCategory ?? null,
+            requestType: prev.requestType ?? null,
+            priority: prev.priority ?? null,
+          });
+          const devopsIds = readDevopsArray(prev.customFields).map((e) => e?.id).filter(Boolean);
+          // cwClose bu geçişte duraklama dk'sı eklemiş olabilir — patch,
+          // GÜNCEL toplamı (nextPausedDurationMin) görmeli ki sıfırdan
+          // türetilen due o dakikaları da taşısın.
+          extendedPatch = await buildExtendedSlaPatch(
+            { ...prev, slaPausedDurationMin: nextPausedDurationMin },
+            resolveExtendedTargetMinutes(extMatch),
+            `${tp.name}${devopsIds.length ? ` + DevOps #${devopsIds.join(', #')}` : ''}`,
+          );
+          if (extendedPatch) {
+            nextResolutionDueAt = extendedPatch.data.slaResolutionDueAt;
+          }
         }
       } else {
         // thirdPartyId yoksa geri uyumluluk: SLA dursun.
@@ -4399,6 +4481,17 @@ export const caseRepository = {
         actorUserId: stampUid,
       },
     ];
+
+    // Uzatılmış SLA v1 — hedef değişimi, statü geçişiyle AYNI update'in
+    // history'sine düşer (atomiklik; kim/ne zaman/eski→yeni izlenebilir).
+    if (extendedPatch) {
+      historyEntries.push({
+        companyId,
+        ...extendedPatch.historyEntry,
+        actor,
+        actorUserId: stampUid,
+      });
+    }
 
     // 3rdPartyBekleniyor'a girilirken hangi 3. parti tanımına gönderildiği
     // history'ye düşer. Alanın kendisi (thirdPartyId/thirdPartyName) bu
@@ -4499,6 +4592,17 @@ export const caseRepository = {
           ? {
               slaCustomerWaitStartedAt: null,
               slaCustomerWaitMin: cwClose.slaCustomerWaitMin,
+            }
+          : {}),
+        // Uzatılmış SLA v1 — due ötelemesi nextResolutionDueAt üzerinden
+        // aktı; burada kaynak/hedef damgası + U-F koşullu ihlal geri çekme.
+        ...(extendedPatch
+          ? {
+              slaTargetSource: extendedPatch.data.slaTargetSource,
+              slaResolutionTargetMin: extendedPatch.data.slaResolutionTargetMin,
+              ...('slaViolation' in extendedPatch.data
+                ? { slaViolation: extendedPatch.data.slaViolation }
+                : {}),
             }
           : {}),
         slaResponseMetAt: nextSlaResponseMetAt,
