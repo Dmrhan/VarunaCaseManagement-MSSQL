@@ -3,6 +3,7 @@ import { prisma } from './client.js';
 import { fromDb, toDb } from './enumMap.js';
 import { assertActorObject } from '../lib/actor.js';
 import { invalidateWorkCalendarCache } from '../lib/sla/businessTime.js';
+import { getTrHolidays } from '../lib/sla/trHolidays.js';
 
 /**
  * PR-3 follow-up (Codex P2) — Audit field corruption guard.
@@ -2392,6 +2393,44 @@ export const workCalendarRepo = {
     await prisma.holiday.delete({ where: { id: holidayId } });
     invalidateWorkCalendarCache(companyId);
     return { id: holidayId, deleted: true };
+  },
+
+  /**
+   * TR resmî tatillerini yıla göre içe aktar (gömülü Diyanet tablosu;
+   * mevcut tarihler atlanır — copyHolidays deseni). Tablo dışı yıl AdminError.
+   */
+  async importTrHolidays(companyId, year, actor) {
+    assertActorObject(actor, 'workCalendarRepo.importTrHolidays');
+    const cal = await prisma.workCalendar.findUnique({ where: { companyId } });
+    if (!cal) throw new AdminError('Önce çalışma takvimi kaydedilmeli.');
+    const list = getTrHolidays(Number(year));
+    if (!list) {
+      throw new AdminError(
+        `${year} yılı gömülü TR tatil tablosunda yok — tatilleri elle girin ya da tabloyu güncelletin.`,
+      );
+    }
+    const existing = new Set(
+      (await prisma.holiday.findMany({ where: { companyId }, select: { date: true } }))
+        .map((h) => h.date.toISOString().slice(0, 10)),
+    );
+    let added = 0;
+    for (const h of list) {
+      if (existing.has(h.date)) continue;
+      await prisma.holiday.create({
+        data: {
+          calendarId: cal.id,
+          companyId,
+          date: new Date(h.date),
+          name: h.name,
+          isHalfDay: h.isHalfDay,
+          halfDayEndMin: h.halfDayEndMin,
+          createdByUserId: actor.userId,
+        },
+      });
+      added += 1;
+    }
+    invalidateWorkCalendarCache(companyId);
+    return { added, skipped: list.length - added };
   },
 
   /** Kaynak şirketin tatillerini hedefe kopyala (mevcut tarihler atlanır). */

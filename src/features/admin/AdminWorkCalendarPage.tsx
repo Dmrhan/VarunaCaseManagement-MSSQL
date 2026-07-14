@@ -168,6 +168,7 @@ export function AdminWorkCalendarPage() {
   const [hHalfEnd, setHHalfEnd] = useState(780);
   const [calMonth, setCalMonth] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM'
   const [copySource, setCopySource] = useState('');
+  const [trYear, setTrYear] = useState(() => new Date().getFullYear());
 
   useEffect(() => {
     if (!companyId && companies.length) setCompanyId(companies[0].id);
@@ -244,6 +245,21 @@ export function AdminWorkCalendarPage() {
     if (!companyId) return;
     await adminService.workCalendar.removeHoliday(companyId, id);
     await load(companyId);
+  }
+
+  async function handleImportTr() {
+    if (!companyId || !cal) {
+      toast({ type: 'error', message: 'Önce takvimi kaydedin.' });
+      return;
+    }
+    const r = await adminService.workCalendar.importTrHolidays(companyId, trYear);
+    if (r) {
+      toast({
+        type: 'success',
+        message: `${trYear} TR resmî tatilleri: ${r.added} eklendi${r.skipped ? `, ${r.skipped} mevcut atlandı` : ''}. Dinî bayram tarihlerini Diyanet takvimiyle teyit edin.`,
+      });
+      await load(companyId);
+    }
   }
 
   async function handleCopy() {
@@ -477,6 +493,18 @@ export function AdminWorkCalendarPage() {
             </span>
             <span className="text-[11px] text-slate-400 dark:text-ndark-dim">{cal?.holidays.length ?? 0} tatil tanımlı</span>
             <span className="ml-auto inline-flex items-center gap-1.5">
+              <select value={trYear} onChange={(e) => setTrYear(Number(e.target.value))}
+                className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-xs dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text">
+                {[2025, 2026, 2027, 2028].map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+              <button type="button" onClick={() => void handleImportTr()} disabled={!cal}
+                title="Sabit ulusal tatiller + Diyanet tablosundaki dinî bayramlar (arifeler yarım gün) eklenir; mevcut tarihler atlanır"
+                className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-0.5 text-xs text-slate-600 hover:border-brand-400 hover:text-brand-600 disabled:opacity-40 dark:border-ndark-border dark:text-ndark-muted">
+                🇹🇷 TR tatillerini ekle
+              </button>
+              <span className="mx-1 h-4 w-px bg-slate-200 dark:bg-ndark-border" />
               <select value={copySource} onChange={(e) => setCopySource(e.target.value)}
                 className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-xs dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text">
                 <option value="">Kopyala: kaynak şirket…</option>
@@ -575,8 +603,9 @@ export function AdminWorkCalendarPage() {
                 </button>
               </div>
               <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400 dark:text-ndark-dim">
-                Yarım günde mesai seçilen saatte kapanır (arife). Dini bayramlar yıl yıl kaydığından her yıl girilir;
-                "Kopyala" ile başka şirketin tatilleri hızlıca çoğaltılır.
+                Yarım günde mesai seçilen saatte kapanır (arife). "🇹🇷 TR tatillerini ekle" sabit ulusal günleri ve
+                Diyanet tablosundaki dinî bayramları (arifeler yarım gün) tek tıkla işler — dinî bayram tarihlerini
+                resmî takvimle teyit edin; "Kopyala" başka şirketin tatillerini çoğaltır.
               </p>
             </div>
           </div>

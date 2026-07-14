@@ -266,6 +266,15 @@ router.delete('/work-calendar/:companyId/holidays/:holidayId', asyncRoute(async 
   res.json(result);
 }));
 
+router.post('/work-calendar/:companyId/import-tr-holidays', asyncRoute(async (req, res) => {
+  assertSystemAdmin(req);
+  assertCompanyAdmin(req, req.params.companyId);
+  const actor = requireActor(req);
+  const year = Number(req.body?.year);
+  const result = await workCalendarRepo.importTrHolidays(req.params.companyId, year, actor);
+  res.json(result);
+}));
+
 router.post('/work-calendar/:companyId/copy-from/:sourceCompanyId', asyncRoute(async (req, res) => {
   assertSystemAdmin(req);
   assertCompanyAdmin(req, req.params.companyId);

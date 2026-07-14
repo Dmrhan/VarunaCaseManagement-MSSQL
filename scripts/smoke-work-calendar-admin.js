@@ -3,6 +3,7 @@
  * Yapısal guard'lar; DB'ye yazmaz.
  */
 import { readFileSync } from 'node:fs';
+import { getTrHolidays, TR_HOLIDAY_YEARS } from '../server/lib/sla/trHolidays.js';
 
 let pass = 0, fail = 0;
 const ok = (n, c) => { if (c) { pass++; console.log(`PASS — ${n}`); } else { fail++; console.log(`FAIL — ${n}`); } };
@@ -74,6 +75,22 @@ ok('12 yerel-ayar bağımsız format (saha bulgusu): sayfada native time/date/mo
   && page.includes('function DateInputTR(')
   && page.includes('placeholder="GG.AA.YYYY"')
   && page.includes('MONTH_NAMES[Number(calMonth.slice(5, 7)) - 1]'));
+
+// ── 8 · TR resmî tatil içe aktarma ──
+const tr26 = getTrHolidays(2026);
+ok('13 TR tatil üretici: 2026 = 8 sabit + 9 dinî = 17 kayıt; arifeler yarım gün 13:00',
+  Array.isArray(tr26) && tr26.length === 17
+  && tr26.filter((h) => h.isHalfDay).length === 3 // 28 Ekim + Ramazan arife + Kurban arife
+  && tr26.every((h) => !h.isHalfDay || h.halfDayEndMin === 780)
+  && tr26.some((h) => h.date === '2026-10-29' && h.name === 'Cumhuriyet Bayramı')
+  && tr26.some((h) => h.date === '2026-05-27' && h.name.startsWith('Kurban Bayramı 1')));
+ok('14 tablo dışı yıl DÜRÜST ret (uydurma tarih üretilmez) + destekli yıllar sabiti',
+  getTrHolidays(2035) === null && TR_HOLIDAY_YEARS.length >= 4);
+ok('15 içe aktarma zinciri: repo importTrHolidays (mevcut atlanır + invalidate) + SysAdmin route + FE butonu',
+  repo.includes('async importTrHolidays(companyId, year, actor)')
+  && routes.includes("'/work-calendar/:companyId/import-tr-holidays'")
+  && page.includes('TR tatillerini ekle')
+  && page.includes('Diyanet takvimiyle teyit edin'));
 
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

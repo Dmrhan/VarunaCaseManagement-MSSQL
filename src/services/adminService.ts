@@ -1572,6 +1572,17 @@ export const adminService = {
         'Tatil silinemedi',
       );
     },
+    async importTrHolidays(companyId: string, year: number): Promise<{ added: number; skipped: number } | undefined> {
+      return apiFetch<{ added: number; skipped: number }>(
+        `${ADMIN_BASE}/work-calendar/${encodeURIComponent(companyId)}/import-tr-holidays`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ year }),
+        },
+        'TR tatilleri içe aktarılamadı',
+      );
+    },
     async copyFrom(companyId: string, sourceCompanyId: string): Promise<{ copied: number; skipped: number } | undefined> {
       return apiFetch<{ copied: number; skipped: number }>(
         `${ADMIN_BASE}/work-calendar/${encodeURIComponent(companyId)}/copy-from/${encodeURIComponent(sourceCompanyId)}`,
