@@ -27,6 +27,7 @@ import {
   Gauge,
   Sun,
   Activity,
+  Timer,
 } from 'lucide-react';
 import { CasesListPage } from './features/cases/CasesListPage';
 import { CaseDetailPage } from './features/cases/CaseDetailPage';
@@ -83,6 +84,10 @@ const AdminEmailTemplatesPage = lazy(() =>
 const SystemHealthPage = lazy(() =>
   import('./features/admin/SystemHealthPage').then((m) => ({ default: m.SystemHealthPage })),
 );
+// CS Yönetim Panosu (SLA İzleme) — tüm roller; lazy: ana bundle'a girmesin
+const CsSlaDashboardPage = lazy(() =>
+  import('./features/analytics/CsSlaDashboardPage').then((m) => ({ default: m.CsSlaDashboardPage })),
+);
 import { AdminDataImportPage } from './features/admin/AdminDataImportPage';
 import { KnowledgeBasePage } from './features/kb/KnowledgeBasePage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
@@ -102,7 +107,7 @@ import { accountService } from './services/accountService';
 import { SOFTPHONE_ANSWERED_EVENT, SOFTPHONE_INCOMING_EVENT, useSoftphone } from './contexts/SoftphoneContext';
 import { CaseTaggingReviewPage } from './features/analytics/CaseTaggingReviewPage';
 
-type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'analytics-people-performance' | 'case-report-studio' | 'monthly-bulletin' | 'root-cause-report' | 'tagging-review' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | 'system-health' | AdminView;
+type View = 'my-home' | 'cases' | 'dashboard' | 'cs-sla-dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'analytics-people-performance' | 'case-report-studio' | 'monthly-bulletin' | 'root-cause-report' | 'tagging-review' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | 'system-health' | AdminView;
 
 interface NavItem {
   key: View;
@@ -876,6 +881,25 @@ export default function App() {
               </>
             )}
 
+            {/* SLA İzleme (CS Yönetim Panosu) — TÜM roller (kullanıcı kararı
+                2026-07-13); daraltma günü geldiğinde buraya show* koşulu +
+                route'taki requireRole listesi birlikte değişir. */}
+            <button
+              type="button"
+              onClick={() => handleNavSelect('cs-sla-dashboard')}
+              className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+              } ${
+                view === 'cs-sla-dashboard'
+                  ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                  : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+              }`}
+              title="SLA İzleme — CS Yönetim Panosu"
+            >
+              <Timer size={16} />
+              {sidebarExpanded && <span className="flex-1 text-left">SLA İzleme</span>}
+            </button>
+
             {/* Vaka Raporları — bölüm başlığı (Supervisor / Admin / SystemAdmin) */}
             {showReportsSection && (
               <div className="mt-3 px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-ndark-dim">
@@ -1153,6 +1177,13 @@ export default function App() {
                 }}
               />
             </Suspense>
+          )}
+          {(view === 'cs-sla-dashboard' || (isDetail && caseDetailOrigin === 'cs-sla-dashboard')) && (
+            <div className={isDetail ? 'hidden' : 'contents'}>
+              <Suspense fallback={<p className="p-4 text-sm text-slate-400">SLA panosu yükleniyor…</p>}>
+                <CsSlaDashboardPage onSelectCase={openCase} />
+              </Suspense>
+            </div>
           )}
           {(view === 'analytics-people-performance' || (isDetail && caseDetailOrigin === 'analytics-people-performance')) && (
             <div className={isDetail ? 'hidden' : 'contents'}>

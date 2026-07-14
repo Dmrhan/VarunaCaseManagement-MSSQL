@@ -6,6 +6,7 @@ import { verifyJwt, requireRole } from '../db/auth.js';
 import { computeOperationsOverview, computePeoplePerformanceOverview } from '../analytics/operationsAggregator.js';
 import { computePersonDetail, computePersonEngagement } from '../analytics/personDetailAggregator.js';
 import { computeMonthlyBulletin } from '../analytics/bulletinAggregator.js';
+import { computeSlaDashboard } from '../analytics/slaDashboard.js';
 import { enrichPatternAlert } from '../lib/patternInsight.js';
 import { generatePatternHypothesis } from '../lib/patternHypothesisAi.js';
 import { FORMULA_VERSION } from '../analytics/metricFormulas.js';
@@ -1267,6 +1268,54 @@ router.post('/monthly-bulletin', requireOverviewAnalytics, async (req, res) => {
     });
   } catch (err) {
     console.error('[analytics:monthly-bulletin]', err?.message, err?.stack);
+    res.status(500).json({ error: 'internal_error', message: err?.message ?? 'beklenmeyen hata' });
+  }
+});
+
+/**
+ * GET /api/analytics/sla-dashboard — CS Yönetim Panosu (SLA İzleme).
+ * n4b Power BI panosunun Varuna karşılığı; hesap slaDashboard.js'te.
+ *
+ * Yetki: TÜM roller (kullanıcı kararı 2026-07-13 — "yetki sınırı yapmayalım,
+ * sonra kullanıcı tipine göre daraltırız"). Daraltma günü geldiğinde YALNIZ
+ * aşağıdaki rol listesi değişir; requireRole zinciri şimdiden yerinde.
+ * Tenant kapsamı her durumda req.user.allowedCompanyIds ile sınırlı.
+ */
+const requireSlaDashboard = requireRole(
+  'Agent',
+  'Backoffice',
+  'CSM',
+  'Supervisor',
+  'Admin',
+  'SystemAdmin',
+);
+
+router.get('/sla-dashboard', requireSlaDashboard, async (req, res) => {
+  try {
+    const q = req.query ?? {};
+    const payload = await computeSlaDashboard(
+      {
+        year: q.year,
+        month: q.month,
+        // Çoklu seçim: aynı isimli tekrar eden query paramları express dizi
+        // olarak verir; compute tekil|dizi ikisini de kabul eder (toList).
+        companyId: q.companyId ?? null,
+        waitingDept: q.waitingDept ?? null,
+        supportLevel: q.supportLevel ?? null,
+        status: q.status ?? null,
+        accountId: q.accountId ?? null,
+        openAge: q.openAge ?? null,
+        requestType: q.requestType ?? null,
+        page: q.page,
+        pageSize: q.pageSize,
+        exportAll: q.export === '1' || q.export === 'true',
+        optionsOnly: q.optionsOnly === '1',
+      },
+      req.user?.allowedCompanyIds ?? [],
+    );
+    res.json(payload);
+  } catch (err) {
+    console.error('[analytics:sla-dashboard]', err?.message, err?.stack);
     res.status(500).json({ error: 'internal_error', message: err?.message ?? 'beklenmeyen hata' });
   }
 });

@@ -614,4 +614,117 @@ export const analyticsService = {
       'Drill-down listesi yüklenemedi',
     );
   },
+
+  // CS Yönetim Panosu (SLA İzleme) — n4b Power BI karşılığı
+  async getSlaDashboard(
+    filters: SlaDashboardFilters,
+  ): Promise<SlaDashboardResponse | undefined> {
+    const qs = slaFiltersToQuery(filters);
+    return apiFetch<SlaDashboardResponse>(
+      `/api/analytics/sla-dashboard?${qs.toString()}`,
+      undefined,
+      'SLA panosu yüklenemedi',
+    );
+  },
+
+  // İlk açılış: yalnız dropdown seçenekleri (vaka taraması YOK — ucuz)
+  async getSlaDashboardOptions(): Promise<SlaDashboardResponse | undefined> {
+    return apiFetch<SlaDashboardResponse>(
+      '/api/analytics/sla-dashboard?optionsOnly=1',
+      undefined,
+      'Filtre seçenekleri yüklenemedi',
+    );
+  },
+
+  // Excel export — sayfalama olmadan süzülmüş TÜM set (backend 20k tavanlı)
+  async exportSlaDashboard(
+    filters: SlaDashboardFilters,
+  ): Promise<SlaDashboardResponse | undefined> {
+    const qs = slaFiltersToQuery(filters, true);
+    qs.set('export', '1');
+    return apiFetch<SlaDashboardResponse>(
+      `/api/analytics/sla-dashboard?${qs.toString()}`,
+      undefined,
+      'SLA export verisi alınamadı',
+    );
+  },
 };
+
+// ── CS SLA Panosu tipleri ─────────────────────────────────────────────
+export interface SlaDashboardFilters {
+  year?: number | null;
+  month?: number | null;
+  /** Çoklu seçim — boş dizi = filtre yok. Query'ye tekrar eden param olarak gider. */
+  companyId?: string[];
+  waitingDept?: string[];
+  supportLevel?: string[];
+  status?: string[];
+  accountId?: string[];
+  openAge?: string[];
+  requestType?: string[];
+  page?: number;
+  pageSize?: number;
+}
+
+function slaFiltersToQuery(filters: SlaDashboardFilters, skipPaging = false): URLSearchParams {
+  const qs = new URLSearchParams();
+  (Object.entries(filters) as Array<[string, string | number | string[] | null | undefined]>).forEach(
+    ([k, v]) => {
+      if (skipPaging && (k === 'page' || k === 'pageSize')) return;
+      if (v === null || v === undefined || v === '') return;
+      if (Array.isArray(v)) {
+        v.forEach((item) => item && qs.append(k, String(item)));
+      } else {
+        qs.set(k, String(v));
+      }
+    },
+  );
+  return qs;
+}
+
+export interface SlaDashboardRow {
+  id: string;
+  caseNumber: string;
+  companyId: string;
+  accountId: string | null;
+  accountName: string | null;
+  priority: string | null;
+  requestType: string | null;
+  status: string;
+  teamName: string | null;
+  ownerName: string | null;
+  supportLevel: string | null;
+  waitingDept: string;
+  devopsIds: string[];
+  openAgeBucket: string;
+  resolutionTargetDays: number | null;
+  resolutionElapsedDays: number;
+  resolutionRemainingDays: number | null;
+  resolutionOnTarget: boolean | null;
+  responseTargetMin: number | null;
+  responseElapsedMin: number;
+  responseRemainingMin: number | null;
+  responseOnTarget: boolean | null;
+}
+
+export interface SlaDashboardResponse {
+  rows: SlaDashboardRow[];
+  /** export=1 modunda: satır tavanı aşıldı, liste kırpıldı. */
+  exportTruncated?: boolean;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  kpis: {
+    totalCount: number;
+    resolution: { evet: number; hayir: number; withDue: number };
+    response: { evet: number; hayir: number; withDue: number };
+  };
+  options: {
+    companies: Array<{ id: string; name: string }>;
+    waitingDepts: string[];
+    accounts: Array<{ id: string; name: string }>;
+    requestTypes: string[];
+    statuses: string[];
+  };
+  generatedAt: string;
+}
