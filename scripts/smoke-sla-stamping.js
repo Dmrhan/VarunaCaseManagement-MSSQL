@@ -13,6 +13,8 @@ const ok = (n, c) => { if (c) { pass++; console.log(`PASS — ${n}`); } else { f
 const repo = readFileSync('server/db/caseRepository.js', 'utf8');
 const sweep = readFileSync('server/cron/slaBreachSweep.js', 'utf8');
 const bt = readFileSync('server/lib/sla/businessTime.js', 'utf8');
+const mailRepo = readFileSync('server/db/caseEmailRepository.js', 'utf8');
+const cwp = readFileSync('server/lib/sla/customerWaitPause.js', 'utf8');
 
 // ── 1 · resolveTargetMinutes: hedefin TEK okunma noktası ──
 ok('1 resolveTargetMinutes: saat→dakika tek noktada (8sa→480dk, 26sa→1560dk; eşleşme yoksa null)',
@@ -52,6 +54,35 @@ const cal = normalizeCalendar({
 });
 ok('7 motor kapı zinciri sağlam: normalize edilmiş tek-gün takvimi geçerli, pasif takvim null',
   cal !== null && normalizeCalendar({ isActive: false, workDays: '[]' }) === null);
+
+// ── 6 · Faz 3b: müşteri-bekleme duraklatması (K-F toggle) ──
+ok('8 startCustomerWaitPatch guard zinciri: zaten-aktif / terminal / 3rd-party / toggle-kapalı → null',
+  cwp.includes('if (!row || row.slaCustomerWaitStartedAt) return null;')
+  && cwp.includes("if (row.status === 'Cozuldu' || row.status === 'IptalEdildi') return null;")
+  && cwp.includes("if (row.status === 'ThirdPartyWaiting') return null;")
+  && cwp.includes('if (!rules.pauseOnCustomerWait) return null;'));
+ok('9 closeCustomerWaitPatch: takvimli İŞ-dk / takvimsiz duvar-dk + due ötelemesi + damga temizliği',
+  cwp.includes('businessMinutesBetween(fromMs, nowMs, cal)')
+  && cwp.includes('Math.round((nowMs - fromMs) / 60000)')
+  && cwp.includes('addBusinessMinutes(dueMs, waitedMin, cal)')
+  && cwp.includes('slaCustomerWaitStartedAt: null'));
+ok('10 mail inbound (müşteri yazdı): aktif bekleme kapanır — closeCustomerWaitPatch tx içinde',
+  mailRepo.includes('const cwClose = await closeCustomerWaitPatch(c);')
+  && mailRepo.includes('...(cwClose ?? {}),'));
+ok('11 mail outbound (ajan yanıtladı): yalnız pending=false + !terminal + !eski-yanıt iken start',
+  mailRepo.includes("(!isTerminal && !isOldReply && pending === false)")
+  && mailRepo.includes('await startCustomerWaitPatch(c)')
+  && mailRepo.includes('...(cwStart ?? {}),'));
+ok('12 transitionStatus: 3rd-party girişi + terminal geçişte müşteri-bekleme kapanır (çifte sayım yok)',
+  repo.includes("const cwCloseNeeded = enteringPause || dbNext === 'Cozuldu' || dbNext === 'IptalEdildi';")
+  && repo.includes('cwClose ? cwClose.slaPausedDurationMin : prev.slaPausedDurationMin')
+  && repo.includes('cwClose?.slaResolutionDueAt ?? prev.slaResolutionDueAt')
+  && repo.includes('slaCustomerWaitMin: cwClose.slaCustomerWaitMin'));
+ok('13 sweep: müşteri-bekleme aktifken ihlal damgalanmaz (slaCustomerWaitStartedAt: null)',
+  sweep.includes('slaCustomerWaitStartedAt: null'));
+ok('14 getSlaPauseRules: pasif takvim = kural kapalı (kill-switch) + cache invalidation ortak',
+  bt.includes('export async function getSlaPauseRules(')
+  && bt.includes('pauseOnCustomerWait'));
 
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

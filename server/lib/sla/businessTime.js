@@ -241,6 +241,8 @@ async function loadEntry(companyId) {
     cal: raw ? normalizeCalendar(raw) : null,
     // Kesim tarihi (karar #3): null = takvim kayıtlı ama geçiş başlamamış.
     effectiveFromMs: raw?.effectiveFrom ? new Date(raw.effectiveFrom).getTime() : null,
+    // K-F toggle — isActive kapalıysa kural da kapalı (tek kill-switch).
+    pauseOnCustomerWait: !!(raw && raw.isActive !== false && raw.pauseOnCustomerWait),
     expiresAt: now + CACHE_TTL_MS,
   };
   _calCache.set(companyId, entry);
@@ -253,6 +255,17 @@ async function loadEntry(companyId) {
  */
 export async function loadWorkCalendar(companyId) {
   return (await loadEntry(companyId)).cal;
+}
+
+/**
+ * SLA duraklatma kuralları (Faz 3b) — Çalışma Takvimi ekranındaki
+ * parametrik toggle'lar. Takvim kaydı yoksa hepsi kapalı (bugünkü davranış).
+ * NOT: damga kapısından (getEffectiveCalendar) BAĞIMSIZ — duraklatma
+ * kuralı kesim tarihi beklemez (3rd-party pause bugün de takvimsiz çalışıyor).
+ */
+export async function getSlaPauseRules(companyId) {
+  const entry = await loadEntry(companyId);
+  return { pauseOnCustomerWait: entry.pauseOnCustomerWait };
 }
 
 /**

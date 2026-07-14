@@ -19,6 +19,9 @@ export async function runSlaBreachSweep() {
       // ihlal damgalanmaz — çıkışta due zaten ötelenecek; erken damga
       // geri alınamadığından (unflag yok) yanlış-kalıcı ihlal üretiyordu.
       slaPausedAt: null,
+      // Faz 3b — müşteri-bekleme duraklaması da aynı kural: aktifken ihlal
+      // damgalanmaz, bekleme kapanınca due ötelenir (bkz. customerWaitPause.js).
+      slaCustomerWaitStartedAt: null,
       // 2026-07-06 — arşivli vaka SLA ihlali İŞARETLENMEZ (arşivdeki 441
       // "Açık" temizlik vakası sweep'te ihlal damgalanıp sayaçları şişirmesin)
       isArchived: false,

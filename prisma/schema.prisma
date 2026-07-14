@@ -1632,6 +1632,11 @@ model Case {
   slaPausedAt            DateTime?
   slaPausedDurationMin   Int       @default(0)
   slaThirdPartyWaitMin   Int       @default(0)
+  // Faz 3b — müşteri-bekleme duraklatması (WorkCalendar.pauseOnCustomerWait
+  // toggle'ı açıkken). 3rd-party pause'dan (slaPausedAt) AYRI alan: çakışmada
+  // 3rd-party öncelikli, iki sayaç aynı anda işlemez (customerWaitPause.js).
+  slaCustomerWaitStartedAt DateTime?
+  slaCustomerWaitMin       Int      @default(0)
   slaResponseMetAt       DateTime? // ilk yanıt verildiğinde (Incelemede'ye geçiş)
   slaResolutionStartedAt DateTime? // vakayı ilk üstlenen kişinin claim zamanı
 

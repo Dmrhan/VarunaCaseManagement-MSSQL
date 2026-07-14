@@ -13,6 +13,7 @@ import { devopsClient, parseWorkItemId } from '../lib/devopsClient.js';
 import crypto from 'node:crypto';
 import { resolveSlaPolicy, resolveTargetMinutes } from '../lib/sla/slaPolicyResolver.js';
 import { getEffectiveCalendar, addBusinessMinutes, businessMinutesBetween } from '../lib/sla/businessTime.js';
+import { closeCustomerWaitPatch } from '../lib/sla/customerWaitPause.js';
 
 /**
  * PR-1 (Codex P1) + PR-2 — defansif throw helper.
@@ -4276,10 +4277,18 @@ export const caseRepository = {
     const enteringPause = dbNext === 'ThirdPartyWaiting' && prev.status !== 'ThirdPartyWaiting';
     const leavingPause = prev.status === 'ThirdPartyWaiting' && dbNext !== 'ThirdPartyWaiting';
 
+    // Faz 3b — müşteri-bekleme duraklaması şu geçişlerde KAPANIR:
+    //  (a) 3rdPartyBekleniyor'a giriş: çakışma kuralı — 3rd-party pause
+    //      öncelikli, iki sayaç aynı anda işlemez (çifte due ötelemesi yok).
+    //  (b) terminal (Cozuldu/IptalEdildi): kapanışta bekleme muhasebesi
+    //      kapatılır ki uyum hesabı (resolvedAt<=dueAt) ötelenmiş due görsün.
+    const cwCloseNeeded = enteringPause || dbNext === 'Cozuldu' || dbNext === 'IptalEdildi';
+    const cwClose = cwCloseNeeded ? await closeCustomerWaitPatch(prev) : null;
+
     let nextSlaPausedAt = prev.slaPausedAt;
-    let nextPausedDurationMin = prev.slaPausedDurationMin;
+    let nextPausedDurationMin = cwClose ? cwClose.slaPausedDurationMin : prev.slaPausedDurationMin;
     let nextThirdPartyWaitMin = prev.slaThirdPartyWaitMin;
-    let nextResolutionDueAt = prev.slaResolutionDueAt;
+    let nextResolutionDueAt = cwClose?.slaResolutionDueAt ?? prev.slaResolutionDueAt;
     let resolvedThirdPartyId = prev.thirdPartyId;
     let resolvedThirdPartyName = prev.thirdPartyName;
 
@@ -4455,6 +4464,14 @@ export const caseRepository = {
         slaPausedDurationMin: nextPausedDurationMin,
         slaThirdPartyWaitMin: nextThirdPartyWaitMin,
         slaResolutionDueAt: nextResolutionDueAt,
+        // Faz 3b — cwClose'un dk/due etkisi yukarıdaki next* değişkenlerinden
+        // akar; burada yalnız damga temizliği + müşteri-bekleme sayacı yazılır.
+        ...(cwClose
+          ? {
+              slaCustomerWaitStartedAt: null,
+              slaCustomerWaitMin: cwClose.slaCustomerWaitMin,
+            }
+          : {}),
         slaResponseMetAt: nextSlaResponseMetAt,
         resolvedAt: (dbNext === 'Cozuldu' || dbNext === 'IptalEdildi') ? new Date() : prev.resolvedAt,
         // M6.1 — terminal'e (Çözüldü/İptal) geçişte pendingCustomerReply
