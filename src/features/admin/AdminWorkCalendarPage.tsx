@@ -23,17 +23,12 @@ import {
 } from '../../services/adminService';
 
 const DAY_NAMES = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+const MONTH_NAMES = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
 /** Onaylı varsayılan: Pzt-Cu 08:30-18:00 + mola 12:00-13:00 (net 8,5 sa/gün). */
 const DEFAULT_DAYS: WorkCalendarDay[] = [1, 2, 3, 4, 5].map((day) => ({ day, startMin: 510, endMin: 1080 }));
 
 const toHHMM = (min: number | null | undefined) =>
   min == null ? '' : `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
-const fromHHMM = (v: string): number | null => {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(v);
-  if (!m) return null;
-  const n = Number(m[1]) * 60 + Number(m[2]);
-  return n >= 0 && n <= 1440 ? n : null;
-};
 const fmtMin = (m: number) => {
   const h = Math.floor(m / 60);
   const r = m % 60;
@@ -66,6 +61,76 @@ function draftFromCalendar(cal: WorkCalendar | null): Draft {
     pauseOnCustomerWait: cal?.pauseOnCustomerWait ?? false,
     effectiveFrom: cal?.effectiveFrom ? cal.effectiveFrom.slice(0, 10) : '',
   };
+}
+
+/**
+ * 24 SAAT zaman seçici — native <input type="time"> tarayıcı diline göre
+ * AM/PM gösterebiliyor (saha bulgusu); select ile format DETERMİNİSTİK.
+ * 15 dk adım; kayıtlı değer adım dışındaysa listeye eklenir.
+ */
+function TimeSelect({ value, onChange, disabled }: { value: number; onChange: (m: number) => void; disabled?: boolean }) {
+  const opts = useMemo(() => {
+    const base = Array.from({ length: 96 }, (_, i) => i * 15);
+    return base.includes(value) ? base : [...base, value].sort((a, b) => a - b);
+  }, [value]);
+  return (
+    <select
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-xs tabular-nums outline-none disabled:opacity-50 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
+    >
+      {opts.map((m) => (
+        <option key={m} value={m}>{toHHMM(m)}</option>
+      ))}
+    </select>
+  );
+}
+
+const shiftMonth = (ym: string, delta: number): string => {
+  const y = Number(ym.slice(0, 4));
+  const m = Number(ym.slice(5, 7)) - 1 + delta;
+  const d = new Date(Date.UTC(y, m, 1));
+  return d.toISOString().slice(0, 7);
+};
+
+const isoToTr = (iso: string) => (iso ? iso.split('-').reverse().join('.') : '');
+const trToIso = (t: string): string | null => {
+  const m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(t.trim());
+  if (!m) return null;
+  const dd = Number(m[1]);
+  const mm = Number(m[2]);
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+  const iso = `${m[3]}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+  return Number.isNaN(Date.parse(iso)) ? null : iso; // 31.02 gibi taşmalar NaN
+};
+
+/**
+ * GG.AA.YYYY tarih girişi — native <input type="date"> tarayıcı diline göre
+ * AA/GG/YYYY gösterebiliyor (saha bulgusu); metin girişi + doğrulama ile
+ * format sabit. Geçersiz girişte eski değere geri döner.
+ */
+function DateInputTR({ value, onChange, className }: { value: string; onChange: (iso: string) => void; className?: string }) {
+  const [text, setText] = useState(isoToTr(value));
+  useEffect(() => setText(isoToTr(value)), [value]);
+  const commit = () => {
+    if (!text.trim()) { onChange(''); return; }
+    const iso = trToIso(text);
+    if (iso) onChange(iso);
+    else setText(isoToTr(value));
+  };
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      placeholder="GG.AA.YYYY"
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') commit(); }}
+      className={className ?? 'w-28 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs tabular-nums dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text'}
+    />
+  );
 }
 
 function Toggle({ on, onChange, disabled }: { on: boolean; onChange?: (v: boolean) => void; disabled?: boolean }) {
@@ -316,17 +381,11 @@ export function AdminWorkCalendarPage() {
               <div key={d.day} className={`flex items-center gap-2.5 border-b border-slate-100 py-1.5 last:border-0 dark:border-ndark-border/40 ${d.enabled ? '' : 'opacity-50'}`}>
                 <span className="w-20 text-xs font-semibold text-slate-700 dark:text-ndark-text">{DAY_NAMES[i]}</span>
                 <Toggle on={d.enabled} onChange={(v) => setDraft((p) => ({ ...p, days: p.days.map((x, j) => (j === i ? { ...x, enabled: v } : x)) }))} />
-                <input
-                  type="time" value={toHHMM(d.startMin)} disabled={!d.enabled}
-                  onChange={(e) => { const v = fromHHMM(e.target.value); if (v != null) setDraft((p) => ({ ...p, days: p.days.map((x, j) => (j === i ? { ...x, startMin: v } : x)) })); }}
-                  className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-xs dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
-                />
+                <TimeSelect value={d.startMin} disabled={!d.enabled}
+                  onChange={(v) => setDraft((p) => ({ ...p, days: p.days.map((x, j) => (j === i ? { ...x, startMin: v } : x)) }))} />
                 <span className="text-xs text-slate-400">–</span>
-                <input
-                  type="time" value={toHHMM(d.endMin)} disabled={!d.enabled}
-                  onChange={(e) => { const v = fromHHMM(e.target.value); if (v != null) setDraft((p) => ({ ...p, days: p.days.map((x, j) => (j === i ? { ...x, endMin: v } : x)) })); }}
-                  className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-xs dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
-                />
+                <TimeSelect value={d.endMin} disabled={!d.enabled}
+                  onChange={(v) => setDraft((p) => ({ ...p, days: p.days.map((x, j) => (j === i ? { ...x, endMin: v } : x)) }))} />
               </div>
             ))}
           </div>
@@ -335,13 +394,11 @@ export function AdminWorkCalendarPage() {
               <Toggle on={draft.breakEnabled} onChange={(v) => setDraft((p) => ({ ...p, breakEnabled: v }))} />
               <span className="text-xs font-semibold text-slate-700 dark:text-ndark-text">Öğle Arası (mola)</span>
               <span className="ml-auto inline-flex items-center gap-1.5">
-                <input type="time" value={toHHMM(draft.breakStartMin)} disabled={!draft.breakEnabled}
-                  onChange={(e) => { const v = fromHHMM(e.target.value); if (v != null) setDraft((p) => ({ ...p, breakStartMin: v })); }}
-                  className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-xs dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text" />
+                <TimeSelect value={draft.breakStartMin} disabled={!draft.breakEnabled}
+                  onChange={(v) => setDraft((p) => ({ ...p, breakStartMin: v }))} />
                 <span className="text-xs text-slate-400">–</span>
-                <input type="time" value={toHHMM(draft.breakEndMin)} disabled={!draft.breakEnabled}
-                  onChange={(e) => { const v = fromHHMM(e.target.value); if (v != null) setDraft((p) => ({ ...p, breakEndMin: v })); }}
-                  className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-xs dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text" />
+                <TimeSelect value={draft.breakEndMin} disabled={!draft.breakEnabled}
+                  onChange={(v) => setDraft((p) => ({ ...p, breakEndMin: v }))} />
               </span>
             </div>
             <p className="mt-1 text-[11px] leading-relaxed text-slate-400 dark:text-ndark-dim">
@@ -394,11 +451,8 @@ export function AdminWorkCalendarPage() {
             <div className="flex flex-wrap items-center gap-3">
               <label className="block">
                 <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">İş-saati başlangıcı (kesim tarihi)</span>
-                <input
-                  type="date" value={draft.effectiveFrom}
-                  onChange={(e) => setDraft((p) => ({ ...p, effectiveFrom: e.target.value }))}
-                  className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
-                />
+                <DateInputTR value={draft.effectiveFrom}
+                  onChange={(iso) => setDraft((p) => ({ ...p, effectiveFrom: iso }))} />
               </label>
               <p className="min-w-[200px] flex-1 text-[11px] leading-relaxed text-slate-400 dark:text-ndark-dim">
                 Bu tarihten itibaren açılan vakalar iş-saatiyle damgalanır; boş bırakılırsa takvim kayıtlı
@@ -412,10 +466,15 @@ export function AdminWorkCalendarPage() {
         <section className="rounded-xl border border-slate-200 bg-white lg:col-span-2 dark:border-ndark-border dark:bg-ndark-card">
           <header className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-4 py-2.5 dark:border-ndark-border">
             <span className="text-sm font-bold text-slate-800 dark:text-ndark-text">3 · Resmi Tatiller</span>
-            <input
-              type="month" value={calMonth} onChange={(e) => setCalMonth(e.target.value)}
-              className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-xs dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
-            />
+            <span className="inline-flex items-center gap-1">
+              <button type="button" onClick={() => setCalMonth((m) => shiftMonth(m, -1))}
+                className="rounded-md border border-slate-200 px-1.5 py-0.5 text-xs text-slate-500 hover:border-brand-400 hover:text-brand-600 dark:border-ndark-border dark:text-ndark-muted">‹</button>
+              <span className="min-w-[92px] text-center text-xs font-semibold text-slate-600 dark:text-ndark-muted">
+                {MONTH_NAMES[Number(calMonth.slice(5, 7)) - 1]} {calMonth.slice(0, 4)}
+              </span>
+              <button type="button" onClick={() => setCalMonth((m) => shiftMonth(m, 1))}
+                className="rounded-md border border-slate-200 px-1.5 py-0.5 text-xs text-slate-500 hover:border-brand-400 hover:text-brand-600 dark:border-ndark-border dark:text-ndark-muted">›</button>
+            </span>
             <span className="text-[11px] text-slate-400 dark:text-ndark-dim">{cal?.holidays.length ?? 0} tatil tanımlı</span>
             <span className="ml-auto inline-flex items-center gap-1.5">
               <select value={copySource} onChange={(e) => setCopySource(e.target.value)}
@@ -501,8 +560,7 @@ export function AdminWorkCalendarPage() {
                 </tbody>
               </table>
               <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-dashed border-slate-200 pt-2.5 dark:border-ndark-border">
-                <input type="date" value={hDate} onChange={(e) => setHDate(e.target.value)}
-                  className="rounded-md border border-slate-200 bg-white px-1.5 py-1 text-xs dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text" />
+                <DateInputTR value={hDate} onChange={setHDate} />
                 <input type="text" value={hName} onChange={(e) => setHName(e.target.value)} placeholder="Tatil adı (örn. Zafer Bayramı)"
                   className="min-w-[140px] flex-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text" />
                 <select value={hHalf ? 'half' : 'full'} onChange={(e) => setHHalf(e.target.value === 'half')}
@@ -510,11 +568,7 @@ export function AdminWorkCalendarPage() {
                   <option value="full">Tam gün</option>
                   <option value="half">Yarım gün</option>
                 </select>
-                {hHalf && (
-                  <input type="time" value={toHHMM(hHalfEnd)} title="Yarım gün mesai bitişi"
-                    onChange={(e) => { const v = fromHHMM(e.target.value); if (v != null) setHHalfEnd(v); }}
-                    className="rounded-md border border-slate-200 bg-white px-1.5 py-1 text-xs dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text" />
-                )}
+                {hHalf && <TimeSelect value={hHalfEnd} onChange={setHHalfEnd} />}
                 <button type="button" onClick={() => void handleAddHoliday()} disabled={!cal}
                   className="rounded-md bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-40">
                   + Ekle

@@ -68,5 +68,12 @@ ok('11 adminService.workCalendar: get/save/addHoliday/removeHoliday/copyFrom/pre
   ['workCalendar: {', 'async get(companyId', 'async save(companyId', 'async addHoliday(',
     'async removeHoliday(', 'async copyFrom(', 'async preview('].every((t) => svc.includes(t)));
 
+ok('12 yerel-ayar bağımsız format (saha bulgusu): sayfada native time/date/month girdisi YOK — 24s TimeSelect + GG.AA.YYYY DateInputTR',
+  !/<input[^>]*type="(time|date|month)"/.test(page)
+  && page.includes('function TimeSelect(')
+  && page.includes('function DateInputTR(')
+  && page.includes('placeholder="GG.AA.YYYY"')
+  && page.includes('MONTH_NAMES[Number(calMonth.slice(5, 7)) - 1]'));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);
