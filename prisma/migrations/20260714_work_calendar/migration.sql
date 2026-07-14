@@ -28,6 +28,8 @@ CREATE TABLE [dbo].[WorkCalendar] (
   [breakStartMin]   INT NULL,
   [breakEndMin]     INT NULL,
   [isActive]        BIT NOT NULL CONSTRAINT [DF_WorkCalendar_isActive] DEFAULT 1,
+  [pauseOnCustomerWait] BIT NOT NULL CONSTRAINT [DF_WorkCalendar_pauseCW] DEFAULT 0, -- K-F parametrik duraklatma
+  [effectiveFrom]   DATETIME2 NULL, -- kesim tarihi (duyurulu geçiş)
   [createdByUserId] NVARCHAR(450) NULL,
   [updatedByUserId] NVARCHAR(450) NULL,
   [createdAt]       DATETIME2 NOT NULL CONSTRAINT [DF_WorkCalendar_createdAt] DEFAULT sysutcdatetime(),

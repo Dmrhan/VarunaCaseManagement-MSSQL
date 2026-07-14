@@ -1432,6 +1432,15 @@ model WorkCalendar {
   /// false → şirket duvar-saati davranışa döner (acil geri-alma anahtarı).
   isActive Boolean @default(true)
 
+  /// K-F (parametrik duraklatma): müşteri yanıtı beklenirken çözüm SLA'sı
+  /// dursun mu. Default KAPALI (bugünkü davranış). Faz 3'te bağlanır.
+  pauseOnCustomerWait Boolean @default(false)
+
+  /// Kesim tarihi (duyurulu geçiş, karar #3): bu andan sonra AÇILAN vakalar
+  /// iş-saatiyle damgalanır; rapor dipnotu bu tarihi kullanır. null = takvim
+  /// kaydedilmiş ama geçiş başlamamış (Faz 3 damgası devreye girmez).
+  effectiveFrom DateTime?
+
   createdByUserId String?  @db.NVarChar(450)
   updatedByUserId String?  @db.NVarChar(450)
   createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
