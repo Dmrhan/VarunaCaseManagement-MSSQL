@@ -160,5 +160,11 @@ ok('25 denetim: TR gün sınırı + legacy-terminal null + export options incelt
   && page.includes('appliedChips')
   && page.includes('Sayfa boyutu'));
 
+ok('26 Codex #532 P2×3: clearFilters reqIdRef bump + paylaşılan SUPPORT_LEVELS (Expert) reuse + mail groupBy case-scope',
+  page.includes('reqIdRef.current += 1;')
+  && page.includes("import { SUPPORT_LEVELS, SUPPORT_LEVEL_LABELS } from '../cases/types'")
+  && !/const SUPPORT_LEVELS = \['L1'/.test(page)
+  && agg.includes('where: { case: where }'));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

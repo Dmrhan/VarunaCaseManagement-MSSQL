@@ -230,7 +230,11 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
     }),
     prisma.caseEmail.groupBy({
       by: ['caseId', 'direction'],
-      where: { companyId: { in: allowedCompanyIds } },
+      // Codex #532 P2: yalnız tenant yerine PANODAKİ VAKA KÜMESİNE daralt —
+      // relational `case` filtresi (aynı where: tenant+arşiv+yıl/ay) SQL'de
+      // JOIN'e çevrilir, dar bir yıl sorgusunda tüm mail geçmişini taramaz.
+      // caseId:{in:[...]} yerine relational filtre → MSSQL 2100-param tuzağı YOK.
+      where: { case: where },
       _max: { sentAt: true, receivedAt: true },
     }),
     prisma.company.findMany({
