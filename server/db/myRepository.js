@@ -1,4 +1,5 @@
 import { prisma } from './client.js';
+import { getCalendarGateFor, diffMinutes } from '../lib/sla/businessTime.js';
 
 /**
  * /my/* — kişisel ekranlar için repository (Takvim, Hatırlatıcılar).
@@ -440,11 +441,13 @@ function endOfToday() {
 
 // myTopCases için her vakaya tek bir "en acil" AI signal'ı seçer.
 // Spec'teki sıraya göre öncelikli: SLA ihlal/yaklaşma → followup → sentiment(skip).
-function deriveAiSignal(c) {
+// Faz 4 — kalan süre, damganın rejimiyle okunur: cal takvimliyse İŞ-saati
+// (eşik "4 iş-saati" olur — mesai-dışı geceler yanlış alarm üretmez).
+function deriveAiSignal(c, cal) {
   if (c.slaViolation) return '⚡ SLA ihlal edildi';
   if (c.slaResolutionDueAt) {
-    const remainingMs = new Date(c.slaResolutionDueAt).getTime() - Date.now();
-    const remainingHours = remainingMs / (60 * 60 * 1000);
+    const remainingHours =
+      diffMinutes(Date.now(), new Date(c.slaResolutionDueAt).getTime(), cal) / 60;
     if (remainingHours > 0 && remainingHours <= 4) {
       return `⚡ SLA ${Math.round(remainingHours)} saat kaldı`;
     }
@@ -615,6 +618,7 @@ export async function getDashboard({ user }) {
             updatedAt: true,
             createdAt: true,
             snoozeUntil: true,
+            companyId: true,
           },
           orderBy: [{ updatedAt: 'desc' }],
           take: 50,
@@ -736,6 +740,13 @@ export async function getDashboard({ user }) {
   }
   todayCalendar.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
+  // Faz 4 — iş-saati kapıları (şirket başına bir kez; satır kapısı createdAt)
+  const myCalGates = new Map();
+  for (const cid of new Set(myActiveCases.map((c) => c.companyId))) {
+    myCalGates.set(cid, await getCalendarGateFor(cid));
+  }
+  const rowCal = (c) => myCalGates.get(c.companyId)(new Date(c.createdAt).getTime());
+
   // ─── myTopCases — slaViolation desc, priority desc, updatedAt asc → max 5 ───
   const PRIORITY_ORDER = { Critical: 0, High: 1, Medium: 2, Low: 3 };
   const sortedTopCases = [...myActiveCases].sort((a, b) => {
@@ -753,7 +764,7 @@ export async function getDashboard({ user }) {
     priority: c.priority,
     status: c.status,
     slaViolation: c.slaViolation,
-    aiSignal: deriveAiSignal(c),
+    aiSignal: deriveAiSignal(c, rowCal(c)),
   }));
 
   // ─── pendingApprovals: heuristik öneriler ───
@@ -762,8 +773,8 @@ export async function getDashboard({ user }) {
   for (const c of myActiveCases) {
     if (pendingApprovals.length >= 5) break;
     if (!c.slaResolutionDueAt) continue;
-    const remainingMs = new Date(c.slaResolutionDueAt).getTime() - now.getTime();
-    const remainingHours = remainingMs / (60 * 60 * 1000);
+    const remainingHours =
+      diffMinutes(now.getTime(), new Date(c.slaResolutionDueAt).getTime(), rowCal(c)) / 60;
     if (!c.slaViolation && remainingHours > 0 && remainingHours <= 6) {
       pendingApprovals.push({
         caseId: c.id,

@@ -66,7 +66,7 @@ import {
   type CasePriority,
   type CaseStatus,
 } from './types';
-import { formatDateTime, formatRelative } from '@/lib/format';
+import { formatDateTime, formatRelative, formatSlaRemaining } from '@/lib/format';
 import { Modal } from '@/components/ui/Modal';
 import { NewCaseForm } from './NewCaseForm';
 import { QuickCaseModal } from './QuickCaseModal';
@@ -1851,7 +1851,11 @@ export function CasesListPage({
                       <SlaPill
                         slaViolation={c.slaViolation}
                         slaPausedAt={c.slaPausedAt}
+                        slaCustomerWaitStartedAt={c.slaCustomerWaitStartedAt}
                         slaResolutionDueAt={c.slaResolutionDueAt}
+                        slaResolutionRemainingMin={c.slaResolutionRemainingMin}
+                        slaBusinessTime={c.slaBusinessTime}
+                        slaDayMinutes={c.slaDayMinutes}
                       />
                     </Td>
                     <Td className="text-xs text-slate-500 dark:text-ndark-muted">
@@ -2618,11 +2622,19 @@ function KpiTile({
 function SlaPill({
   slaViolation,
   slaPausedAt,
+  slaCustomerWaitStartedAt,
   slaResolutionDueAt,
+  slaResolutionRemainingMin,
+  slaBusinessTime,
+  slaDayMinutes,
 }: {
   slaViolation: boolean;
   slaPausedAt?: string;
+  slaCustomerWaitStartedAt?: string | null;
   slaResolutionDueAt?: string;
+  slaResolutionRemainingMin?: number | null;
+  slaBusinessTime?: boolean;
+  slaDayMinutes?: number;
 }) {
   if (slaViolation) {
     return <Badge tint="rose"><span className="font-bold">İhlal</span></Badge>;
@@ -2630,12 +2642,22 @@ function SlaPill({
   if (slaPausedAt) {
     return <Badge tint="slate">Duraklatıldı</Badge>;
   }
+  if (slaCustomerWaitStartedAt) {
+    // Faz 3b — müşteri-bekleme duraklaması (toggle açık şirketlerde)
+    return <Badge tint="slate">Duraklatıldı · müşteri</Badge>;
+  }
   if (!slaResolutionDueAt) {
     return <span className="text-xs text-slate-400 dark:text-ndark-muted">—</span>;
   }
-  const remainingMs = new Date(slaResolutionDueAt).getTime() - Date.now();
-  if (remainingMs > 0 && remainingMs <= 2 * 60 * 60 * 1000) {
-    return <Badge tint="amber">{formatRelative(slaResolutionDueAt)}</Badge>;
+  // Faz 4 — kalan süre BE-hesaplı (takvimli şirkette İŞ-dk); eski payload'da duvar fallback
+  const remainingMin = slaResolutionRemainingMin
+    ?? Math.round((new Date(slaResolutionDueAt).getTime() - Date.now()) / 60000);
+  if (remainingMin > 0 && remainingMin <= 120) {
+    return (
+      <Badge tint="amber">
+        {formatSlaRemaining(remainingMin, slaBusinessTime, slaDayMinutes) ?? formatRelative(slaResolutionDueAt)}
+      </Badge>
+    );
   }
   // Normal aralık — sade dash, pill yok. Sortable kaldı: BE remaining hesaplıyor.
   return <span className="text-xs text-slate-400 dark:text-ndark-muted">—</span>;

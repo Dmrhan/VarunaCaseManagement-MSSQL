@@ -12,7 +12,7 @@ import { ActorRequiredError } from '../lib/actor.js';
 import { devopsClient, parseWorkItemId } from '../lib/devopsClient.js';
 import crypto from 'node:crypto';
 import { resolveSlaPolicy, resolveTargetMinutes } from '../lib/sla/slaPolicyResolver.js';
-import { getEffectiveCalendar, addBusinessMinutes, businessMinutesBetween } from '../lib/sla/businessTime.js';
+import { getEffectiveCalendar, addBusinessMinutes, businessMinutesBetween, getCalendarGateFor, diffMinutes, netDayMinutes } from '../lib/sla/businessTime.js';
 import { closeCustomerWaitPatch } from '../lib/sla/customerWaitPause.js';
 
 /**
@@ -126,6 +126,35 @@ const CASE_INCLUDE = {
   // sadece display name).
   archivedByUser: { select: { id: true, fullName: true } },
 };
+
+// Faz 4 — SLA görünüm alanları (FE'de takvim kopyası YASAK; BE hesaplar).
+// shape() senkron kalsın diye ayrı, async post-process: yalnız liste + detay
+// dönüşlerinde koşar. Kalan dk, damganın rejimiyle okunur (takvimli şirkette
+// İŞ-dk, kesim öncesi/takvimsiz vakada duvar-dk) — FE alan doluysa onu
+// gösterir, yoksa eski duvar formatına düşer (geriye uyumlu).
+async function enrichSlaView(rows) {
+  const list = Array.isArray(rows) ? rows : [rows];
+  const gates = new Map();
+  for (const r of list) {
+    if (r && !gates.has(r.companyId)) gates.set(r.companyId, await getCalendarGateFor(r.companyId));
+  }
+  const nowMs = Date.now();
+  for (const r of list) {
+    if (!r) continue;
+    const cal = gates.get(r.companyId)(new Date(r.createdAt).getTime());
+    r.slaBusinessTime = !!cal;
+    // dk→gün çevrim katsayısı FE'ye BE'den gider (takvim kopyası yasak):
+    // takvimlide ortalama günlük net mesai, duvar rejiminde 1440.
+    r.slaDayMinutes = Math.round(netDayMinutes(cal));
+    r.slaResponseRemainingMin = r.slaResponseDueAt
+      ? diffMinutes(nowMs, new Date(r.slaResponseDueAt).getTime(), cal)
+      : null;
+    r.slaResolutionRemainingMin = r.slaResolutionDueAt
+      ? diffMinutes(nowMs, new Date(r.slaResolutionDueAt).getTime(), cal)
+      : null;
+  }
+  return rows;
+}
 
 // İzin verilen reaksiyon emojileri — UI + BFF whitelist.
 // Anahtarlar UI'da ikon olarak gösterilir; identifier ile saklanır ki ileride
@@ -1600,7 +1629,7 @@ export const caseRepository = {
       skip,
       take: pagination.pageSize,
     });
-    return { items: items.map(shape), total };
+    return { items: await enrichSlaView(items.map(shape)), total };
   },
 
   async get(id, allowedCompanyIds, actorRole) {
@@ -1612,7 +1641,7 @@ export const caseRepository = {
     // PR-SD — Arşivli vaka direct URL: yalnız SystemAdmin görür. Diğer
     // roller için 404 davranışı (null döner → route 404 yansıtır).
     if (c.isArchived && actorRole !== 'SystemAdmin') return null;
-    return shape(c);
+    return (await enrichSlaView([shape(c)]))[0];
   },
 
   /**

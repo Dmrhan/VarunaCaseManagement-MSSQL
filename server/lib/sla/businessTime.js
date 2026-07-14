@@ -280,3 +280,57 @@ export async function getEffectiveCalendar(companyId, atMs = Date.now()) {
   if (entry.effectiveFromMs == null || atMs < entry.effectiveFromMs) return null;
   return entry.cal;
 }
+
+// ── Görünüm katmanı yardımcıları (Faz 4) ─────────────────────────────
+// Süre-farkı TÜKETİCİLERİ (pano geçen/kalan, AI prompt'ları, rozetler)
+// damgayla AYNI rejimi okumalı: kesimden önce açılan vaka duvar-due taşır,
+// ona iş-dk uygulamak sayıyı bozar. Kapı bu yüzden satır-bazında, vakanın
+// kendi damga anıyla (createdAt) sorulur.
+
+/**
+ * Şirketin cache'li takvim entry'sinden SENKRON kapı üretir — toplu satır
+ * hesaplarında (dashboard map'i) satır başına await gerektirmez.
+ * Dönen fonksiyon: (atMs) => cal | null (getEffectiveCalendar ile aynı kural).
+ */
+export async function getCalendarGateFor(companyId) {
+  const entry = await loadEntry(companyId);
+  if (!entry.cal || entry.effectiveFromMs == null) return () => null;
+  const { cal, effectiveFromMs } = entry;
+  return (atMs) => (atMs >= effectiveFromMs ? cal : null);
+}
+
+/**
+ * İşaretli süre farkı (dk): takvimliyse İŞ-dakikası, takvimsizde duvar-dk.
+ * toMs < fromMs → negatif (gecikme). Motor guard'ı tükenirse (aşırı uzun
+ * aralık) duvar-dk'ya düşer — gösterim katmanı hesapsız kalmasın.
+ */
+export function diffMinutes(fromMs, toMs, cal) {
+  const sign = toMs >= fromMs ? 1 : -1;
+  const a = Math.min(fromMs, toMs);
+  const b = Math.max(fromMs, toMs);
+  const biz = cal ? businessMinutesBetween(a, b, cal) : null;
+  const min = biz != null ? biz : Math.round((b - a) / 60000);
+  return sign * min;
+}
+
+/**
+ * dk→"gün" çevrim katsayısı: takvimliyse ortalama günlük NET mesai
+ * (mola düşülmüş; karar #1 — dakika SSOT, gün yalnız gösterim birimi),
+ * takvimsizde 24 saat (duvar gün). Yarım-gün/tatil ortalamaya katılmaz —
+ * katsayı tipik iş gününü temsil eder.
+ */
+export function netDayMinutes(cal) {
+  if (!cal) return 24 * 60;
+  let total = 0;
+  let count = 0;
+  for (const { startMin, endMin } of cal.byDay.values()) {
+    let net = endMin - startMin;
+    if (cal.breakStartMin != null && cal.breakEndMin != null) {
+      const b0 = Math.max(cal.breakStartMin, startMin);
+      const b1 = Math.min(cal.breakEndMin, endMin);
+      if (b1 > b0) net -= b1 - b0;
+    }
+    if (net > 0) { total += net; count += 1; }
+  }
+  return count > 0 ? total / count : 24 * 60;
+}

@@ -15,7 +15,7 @@
 import { Clock, ShieldAlert } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { StatusPill, PriorityBadge, CaseTypeBadge } from '@/components/ui/StatusPill';
-import { formatRelative } from '@/lib/format';
+import { formatRelative, formatSlaRemaining } from '@/lib/format';
 import type { Case } from '../types';
 
 export function CaseHeaderChips({ item }: { item: Case }) {
@@ -29,9 +29,13 @@ export function CaseHeaderChips({ item }: { item: Case }) {
         </Badge>
       ) : item.slaPausedAt ? (
         <Badge tint="amber">SLA Duraklatıldı</Badge>
+      ) : item.slaCustomerWaitStartedAt ? (
+        <Badge tint="amber">SLA Duraklatıldı · müşteri yanıtı bekleniyor</Badge>
       ) : item.slaResolutionDueAt ? (
         <Badge tint="slate" icon={<Clock size={12} />}>
-          Çözüm SLA {formatRelative(item.slaResolutionDueAt)}
+          Çözüm SLA{' '}
+          {formatSlaRemaining(item.slaResolutionRemainingMin, item.slaBusinessTime, item.slaDayMinutes)
+            ?? formatRelative(item.slaResolutionDueAt)}
         </Badge>
       ) : null}
       <CaseTypeBadge type={item.caseType} />

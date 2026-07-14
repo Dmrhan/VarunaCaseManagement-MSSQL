@@ -479,6 +479,18 @@ export interface Case {
   slaResponseMetAt?: string | null;
   slaResolutionStartedAt?: string | null;
 
+  // Faz 3b/4 — iş-saati SLA görünümü. Kalan dk'lar BE-hesaplıdır (FE'de
+  // takvim kopyası YASAK): slaBusinessTime=true ise İŞ-dakikası, değilse
+  // duvar-dk. slaDayMinutes = dk→gün çevrim katsayısı (takvimlide günlük
+  // net mesai, duvarda 1440). Alanlar yalnız liste + detay dönüşünde dolar;
+  // yoksa FE eski duvar-saat formatına düşer.
+  slaBusinessTime?: boolean;
+  slaResponseRemainingMin?: number | null;
+  slaResolutionRemainingMin?: number | null;
+  slaDayMinutes?: number;
+  slaCustomerWaitStartedAt?: string | null;
+  slaCustomerWaitMin?: number;
+
   // Phase D — Müşteri eşleştirme bekleyen flag.
   // true ise vaka accountId NULL açıldı, Supervisor/Admin eşleştirme kuyruğunda
   // görür ve PATCH /api/cases/:id/link-account ile bağlar.
