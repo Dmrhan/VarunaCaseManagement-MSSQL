@@ -67,6 +67,10 @@ export const thirdPartyRepo = {
         isActive: input.isActive ?? true,
         companyId,
         pausesSla: input.pausesSla !== false, // default true; undefined → true
+        // Uzatılmış SLA v1 (U-B) — iki parçalı tetik; default'lar fail-safe
+        // (uygular=false, DevOps-şartı=true).
+        triggersExtendedSla: input.triggersExtendedSla === true,
+        extendedSlaRequiresDevopsLink: input.extendedSlaRequiresDevopsLink !== false,
       },
     });
   },
@@ -85,6 +89,8 @@ export const thirdPartyRepo = {
         ...(patch.description !== undefined && { description: patch.description?.trim() || null }),
         ...(patch.isActive !== undefined && { isActive: patch.isActive }),
         ...(patch.pausesSla !== undefined && { pausesSla: patch.pausesSla }),
+        ...(patch.triggersExtendedSla !== undefined && { triggersExtendedSla: !!patch.triggersExtendedSla }),
+        ...(patch.extendedSlaRequiresDevopsLink !== undefined && { extendedSlaRequiresDevopsLink: !!patch.extendedSlaRequiresDevopsLink }),
       },
     });
   },
@@ -530,6 +536,12 @@ export const slaPolicyRepo = {
         ...safeInput,
         requestType: toDb({ requestType: safeInput.requestType }).requestType ?? null,
         priority: safeInput.priority ?? null,
+        // Uzatılmış SLA v1 — yalnız pozitif tam dakika; aksi her değer null
+        // (fail-safe: bozuk giriş uzatma tanımlamış SAYILMAZ).
+        extendedResolutionMin:
+          Number.isInteger(safeInput.extendedResolutionMin) && safeInput.extendedResolutionMin > 0
+            ? safeInput.extendedResolutionMin
+            : null,
         createdByUserId: actor.userId,
         updatedByUserId: actor.userId,
       },
@@ -540,6 +552,13 @@ export const slaPolicyRepo = {
     assertActorObject(actor, 'slaPolicyRepo.update');
     // Codex P2 — client body'sinde createdByUserId/updatedByUserId varsa strip
     const dbPatch = stripAuditFields(toDb(patch));
+    // Uzatılmış SLA v1 — normalize: pozitif tam dakika değilse null.
+    if ('extendedResolutionMin' in dbPatch) {
+      dbPatch.extendedResolutionMin =
+        Number.isInteger(dbPatch.extendedResolutionMin) && dbPatch.extendedResolutionMin > 0
+          ? dbPatch.extendedResolutionMin
+          : null;
+    }
     // 5-tuple değişiyorsa duplicate kontrolü
     if (
       patch.companyId || patch.productGroup || patch.categoryName ||

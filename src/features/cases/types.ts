@@ -70,6 +70,9 @@ export interface CaseThirdParty {
   isActive: boolean;
   companyId?: string;
   pausesSla?: boolean;
+  // Uzatılmış SLA v1 — tanım bazlı iki parçalı tetik (U-B)
+  triggersExtendedSla?: boolean;
+  extendedSlaRequiresDevopsLink?: boolean;
 }
 
 export interface CaseDocumentType {
@@ -172,6 +175,9 @@ export interface SlaPolicy {
   priority: CasePriority | null;
   responseHours: number;
   resolutionHours: number;
+  /** Uzatılmış SLA v1 — yazılım geliştirme devrinde geçerli TOPLAM çözüm
+   *  süresi (MESAİ DAKİKASI; null = bu kuralda uzatma yok). */
+  extendedResolutionMin?: number | null;
   description?: string;
   isActive: boolean;
 }
@@ -490,6 +496,10 @@ export interface Case {
   slaDayMinutes?: number;
   slaCustomerWaitStartedAt?: string | null;
   slaCustomerWaitMin?: number;
+  /** Uzatılmış SLA v1 — hangi hedefin uygulandığı: 'standard'|'extended'
+   *  (null=legacy). Rozet + "uygulanan hedef" satırı bu alandan okur. */
+  slaTargetSource?: string | null;
+  slaResolutionTargetMin?: number | null;
 
   // Phase D — Müşteri eşleştirme bekleyen flag.
   // true ise vaka accountId NULL açıldı, Supervisor/Admin eşleştirme kuyruğunda

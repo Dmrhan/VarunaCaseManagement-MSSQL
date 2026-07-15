@@ -26,38 +26,89 @@ export const CATEGORIES_HELP: HelpContent = {
   ],
 };
 
+export const WORK_CALENDAR_HELP: HelpContent = {
+  title: 'Çalışma Takvimi',
+  sections: [
+    {
+      heading: 'Bu ekran ne işe yarar?',
+      content:
+        'SLA sürelerinin MESAİ saatine göre hesaplanmasını sağlar: geceler, hafta sonları, resmî tatiller ve öğle molası sayaca dahil edilmez. Müşteri sözleşmeleri "tüm süreler mesai saatidir" der — bu ekran o taahhüdün karşılığıdır. Takvim şirket bazındadır; her şirket ayrı tanımlanır.',
+      example: `Cuma 17:00'de açılan 6 saatlik vaka:
+Eski düzen : hedef Cuma 23:00 (gece!)
+Takvimli   : Cuma 1 saat + Pazartesi
+             5 saat → Pzt ~14:30`,
+    },
+    {
+      heading: 'Kurulum adımları',
+      content:
+        '(1) Şirketi seçin. (2) Mesai günlerini ve saatlerini ayarlayın (24 saat biçimi, 15 dk adım). (3) Öğle molasını girin — tüm çalışma günlerine uygulanır, haftalık net mesai otomatik görünür. (4) Tatilleri işleyin: "TR tatillerini ekle" seçili yılın resmî tatillerini tek tıkla getirir (arifeler yarım gün); ızgaradan güne tıklayıp elle de ekleyebilirsiniz; başka şirketten kopyalama da vardır. (5) Alttaki örnek hesapla sonucu kaydetmeden deneyin.',
+      tip:
+        'Dinî bayram tarihleri resmî ilana dayalıdır — içe aktarma sonrası listeyi gözden geçirin. Yeni yıl tabloda yoksa o yılın tatillerini elle girin.',
+    },
+    {
+      heading: 'Kesim tarihi — geçiş düğmesi',
+      content:
+        'Takvimi tanımlamak tek başına HİÇBİR hesabı değiştirmez. Değişim, "kesim tarihi" alanı doldurulduğunda başlar: o tarihten sonra açılan vakalar mesai saatiyle hesaplanır; kesimden önce açılmış vakalar eski düzeninde kalır. Kesim tarihi boş kaldığı sürece sistem eski (7/24) davranıştadır.',
+      warning:
+        'Kesim tarihi girmek canlı bir geçiştir — yeni vakaların hedef tarihleri o andan itibaren değişir. Ekip duyurusu ve rapor dipnotuyla birlikte planlayın.',
+    },
+    {
+      heading: 'SLA duraklatma kuralları',
+      content:
+        '"Müşteri yanıtı beklenirken sayaç dursun" anahtarı açılırsa: ajan müşteriye yanıt verdiğinde çözüm sayacı durur, müşteri dönünce hedef beklenen süre kadar ötelenerek devam eder. Varsayılan KAPALIDIR. (3. parti beklemelerindeki duraklatma bundan bağımsızdır ve 3. Parti Tanımları ekranından tanım bazında yönetilir.)',
+    },
+    {
+      heading: 'Ekranlarda ne değişir?',
+      content:
+        'Kalan süre etiketleri mesai temelli olur: "3 iş-sa kaldı", "2 iş günü kaldı" — "iş" ibaresi duvar-saatiyle karışmaması içindir. SLA İzleme panosundaki Hedef/Geçen/Kalan kolonları iş-saati sayar; "gün" birimi net iş günüdür (8,5 saat). Sistemin tek doğruluk kaynağı dakikadır; "gün" yalnız gösterim birimidir.',
+    },
+  ],
+};
+
 export const SLA_HELP: HelpContent = {
   title: 'SLA Kuralları',
   sections: [
     {
       heading: 'Bu ekran ne işe yarar?',
       content:
-        'Her vaka açıldığında sistem, vakanın Şirket + Ürün Grubu + Kategori + Alt Kategori + Talep Türü kombinasyonuna bakarak bu tablodan SLA sürelerini otomatik hesaplar.',
+        'Her vaka açıldığında sistem, vakanın Şirket + Ürün Grubu + Kategori + Alt Kategori + Talep Türü + Öncelik kombinasyonuna bakarak bu tablodan SLA sürelerini otomatik hesaplar.',
     },
     {
-      heading: '5\'li kombinasyon mantığı',
+      heading: '6 boyutlu eşleşme — en özgül kural kazanır',
       content:
-        'Bir kural beş boyutun kesişim noktasında çalışır. Aynı kombinasyon için iki kural tanımlanamaz.',
-      example: `Şirket      : PARAM
-Ürün Grubu  : Fiziki POS
-Kategori    : Ödeme Sistemleri
-Alt Kategori: 3D Secure Hatası
-Talep Türü  : Şikayet
+        'Şirket zorunludur; diğer beş boyut "Tümü" bırakılabilir. Bir vakaya birden çok kural uyarsa, en çok boyutu dolu olan (en özgül) kural uygulanır. Aynı kombinasyon için ikinci kural tanımlanamaz.',
+      example: `Şirket      : UNIVERA
+Ürün Grubu  : Tümü
+Kategori    : Tümü
+Alt Kategori: Tümü
+Talep Türü  : Hata
+Öncelik     : Kritik
 ─────────────────────────────
-Yanıt Süresi  : 4 saat
-Çözüm Süresi  : 24 saat`,
-    },
-    {
-      heading: 'SLA duraklatma',
-      content:
-        '3rd Party Bekleniyor statüsüne geçildiğinde SLA sayacı otomatik duraksatılır. Statüden çıkılınca kaldığı yerden devam eder ve duraklatılan süre çözüm tarihine eklenir.',
-      tip:
-        'Kurala uymayan kombinasyonlar için sistem Priority bazlı varsayılan SLA kullanır. Bu nedenle tüm önemli kombinasyonlar için kural tanımlamanız önerilir.',
+Yanıt Süresi     : 1 saat
+Çözüm Süresi     : 6 saat
+Uzatılmış Çözüm  : 1.830 dk`,
+      warning:
+        'Hiçbir kural eşleşmezse vakaya SLA hedefi atanmaz (varsayılan süre YOKTUR) — vaka SLA takibi dışında kalır. Bu yüzden her şirket için en azından öncelik-bazlı genel kurallar tanımlı olmalıdır.',
     },
     {
       heading: 'Yanıt vs Çözüm süresi',
       content:
-        'Yanıt Süresi: Vakanın ilk kez incelemeye alınması gereken süre. Çözüm Süresi: Vakanın tamamen çözülerek kapatılması gereken toplam süre. Çözüm süresi her zaman yanıt süresinden büyük olmalıdır.',
+        'Yanıt Süresi: vakanın ilk kez incelemeye alınması gereken süre. Çözüm Süresi: vakanın tamamen çözülmesi gereken toplam süre. Çalışma Takvimi devredeyse her ikisi de MESAİ saati olarak sayılır (geceler, hafta sonu ve tatiller sayaca girmez).',
+    },
+    {
+      heading: 'Uzatılmış Çözüm (yazılım geliştirme devri)',
+      content:
+        'Opsiyonel üçüncü süredir ve DAKİKA cinsindendir. Vaka, "uzatılmış çözüm süresi uygular" anahtarı açık bir 3. parti tanımına devredilirse (gerekiyorsa DevOps kaydı şartıyla), çözüm hedefi bu TOPLAM süreye çıkar — vaka açılışından itibaren sayılır, standart sürenin üstüne eklenmez. Boş bırakılan satırda uzatma yoktur.',
+      example: `Kritik      : 1.830 dk (≈ 3,6 iş günü)
+Yüksek      : 3.480 dk (≈ 6,8 iş günü)
+Orta/Düşük  : 12.480 dk (≈ 24,5 iş günü)`,
+      tip:
+        'Uzatma tek yönlüdür: vaka geliştirmeden geri dönse bile hedef uzatılmış kalır; kim/ne zaman uzattığı vaka geçmişindedir. Müdahale (yanıt) süresi uzatmadan etkilenmez.',
+    },
+    {
+      heading: 'SLA duraklatma',
+      content:
+        '3. Parti Bekleniyor statüsünde sayacın durup durmayacağı, seçilen 3. parti TANIMINA bağlıdır ("Beklenirken SLA dursun" anahtarı). Duran sayaç, statüden çıkılınca kaldığı yerden devam eder ve beklenen süre çözüm hedefine eklenir. Ayrıca Çalışma Takvimi ekranından "müşteri yanıtı beklenirken sayaç dursun" kuralı şirket bazında açılabilir.',
     },
   ],
 };
@@ -73,11 +124,21 @@ export const THIRD_PARTY_HELP: HelpContent = {
     {
       heading: 'Ne zaman kullanılır?',
       content:
-        'Vaka çözümü için ekip dışında bir tarafın aksiyonu gerektiğinde 3rdPartyBekleniyor statüsüne geçilir ve buradan ilgili 3. parti seçilir. Bu süre boyunca SLA sayacı durur.',
+        'Vaka çözümü için ekip dışında bir tarafın aksiyonu gerektiğinde 3rdPartyBekleniyor statüsüne geçilir ve buradan ilgili 3. parti seçilir. SLA sayacının bu beklemede durup durmayacağını tanımdaki "Beklenirken SLA dursun" anahtarı belirler — her tanım için ayrı ayarlanır.',
       example: `Vaka: POS cihazı arızası
 3. Parti: Teknik Servis Ekibi
-→ SLA duraklatılır, servis ekibi
-  müdahale edene kadar süre işlemez`,
+(SLA dursun: AÇIK)
+→ Servis müdahale edene kadar
+  çözüm sayacı işlemez`,
+    },
+    {
+      heading: 'Uzatılmış çözüm süresi (yazılım geliştirme devri)',
+      content:
+        '"Uzatılmış çözüm süresi uygular" anahtarı açık bir tanıma devredilen vakanın çözüm hedefi, SLA kuralındaki "Uzatılmış Çözüm" değerine çıkar. "Ek şart: vakada DevOps kaydı bulunmalı" seçeneği açıksa uzatma yalnız DevOps iş kaydı bağlı vakalarda uygulanır.',
+      tip:
+        'Kural tanımın ADINA değil kaydına bağlıdır — tanımın adını değiştirmek davranışı bozmaz. Uzatma tek yönlüdür ve vaka geçmişine iz düşer.',
+      warning:
+        'Uzatmanın çalışması için ilgili SLA kural satırında "Uzatılmış Çözüm (dk)" değeri dolu olmalıdır; boşsa devir hiçbir şeyi değiştirmez.',
     },
     {
       heading: 'Pasifleştirme',

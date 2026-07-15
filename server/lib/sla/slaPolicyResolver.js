@@ -45,7 +45,13 @@ export async function resolveSlaPolicy(ctx) {
   });
 
   const best = candidates[0].policy;
-  return { responseHours: best.responseHours, resolutionHours: best.resolutionHours };
+  return {
+    responseHours: best.responseHours,
+    resolutionHours: best.resolutionHours,
+    // Uzatılmış SLA v1 — eşleşen satırın uzatılmış TOPLAM süresi (mesai dk,
+    // null=tanımsız). Okuma tek noktadan: resolveExtendedTargetMinutes.
+    extendedResolutionMin: best.extendedResolutionMin ?? null,
+  };
 }
 
 /**
