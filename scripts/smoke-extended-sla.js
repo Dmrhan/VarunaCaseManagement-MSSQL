@@ -145,5 +145,21 @@ ok('25 BE CRUD fail-safe: 3.Parti bayrak default\'ları + SLAPolicy dk normalize
   && adminRepo.split('Number.isInteger(safeInput.extendedResolutionMin)').length >= 2
   && adminRepo.includes("if ('extendedResolutionMin' in dbPatch)"));
 
+// ── 9 · Uygulama içi Yardım içerikleri güncel ──
+const help = rd('src/features/admin/helpContents.ts');
+ok('26 SLA yardımı: 6 boyut + en-özgül-kazanır + Uzatılmış Çözüm bölümü; bayat "5\'li" ve YANLIŞ "varsayılan SLA" ipucu temizlendi',
+  help.includes('6 boyutlu eşleşme — en özgül kural kazanır')
+  && help.includes("heading: 'Uzatılmış Çözüm (yazılım geliştirme devri)'")
+  && help.includes('varsayılan süre YOKTUR')
+  && !help.includes("5'li kombinasyon")
+  && !help.includes('Priority bazlı varsayılan SLA'));
+ok('27 3.Parti yardımı: duraklatma tanım-bazlı anlatılıyor + uzatılmış anahtarlar bölümü var',
+  help.includes('"Beklenirken SLA dursun" anahtarı belirler')
+  && help.includes("heading: 'Uzatılmış çözüm süresi (yazılım geliştirme devri)'"));
+ok('28 Çalışma Takvimi yardımı: WORK_CALENDAR_HELP tanımlı + sayfaya HelpDrawer bağlı (overlayOnly)',
+  help.includes('export const WORK_CALENDAR_HELP')
+  && rd('src/features/admin/AdminWorkCalendarPage.tsx').includes('WORK_CALENDAR_HELP')
+  && rd('src/features/admin/AdminWorkCalendarPage.tsx').includes('overlayOnly'));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);
