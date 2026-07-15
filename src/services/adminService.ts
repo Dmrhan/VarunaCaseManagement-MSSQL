@@ -37,6 +37,9 @@ export interface ThirdPartyInput {
   isActive: boolean;
   companyId?: string;
   pausesSla?: boolean;
+  // Uzatılmış SLA v1 — tanım bazlı iki parçalı tetik (U-B)
+  triggersExtendedSla?: boolean;
+  extendedSlaRequiresDevopsLink?: boolean;
 }
 
 export interface DocumentTypeInput {
@@ -98,6 +101,8 @@ export interface SlaPolicyInput {
   priority: CasePriority | null;
   responseHours: number;
   resolutionHours: number;
+  /** Uzatılmış SLA v1 — mesai dk; null = uzatma yok */
+  extendedResolutionMin?: number | null;
   description?: string;
   isActive: boolean;
 }

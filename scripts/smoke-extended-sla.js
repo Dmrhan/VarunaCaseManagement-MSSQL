@@ -122,5 +122,28 @@ ok('20 U-E: unlinkDevops + 3P çıkışı NO-OP — geri daraltma çağrısı YO
 ok('21 hedef güncel politikadan (tek kaynak): re-eval resolveSlaPolicy ile açılış boyutlarını yeniden çözer',
   (repo.match(/const extMatch = await resolveSlaPolicy\(/g) ?? []).length === 2);
 
+// ── 8 · Faz 3: UI (yapısal — mevcut ekran diline sadakat) ──
+const tpPage = rd('src/features/admin/AdminThirdPartyPage.tsx');
+ok('22 3.Parti modalı: iki anahtar mevcut checkbox desenleriyle; ikincisi birinciye bağlı (disabled+soluk)',
+  tpPage.includes('Uzatılmış çözüm süresi uygular')
+  && tpPage.includes('Ek şart: vakada DevOps kaydı bulunmalı')
+  && tpPage.includes('disabled={!form.triggersExtendedSla}'));
+const slaPage = rd('src/features/admin/AdminSlaPage.tsx');
+ok('23 SLA Kuralları: dk alanı + iş-günü karşılığı + liste kolonu + bayat "5-tuple" metni düzeltildi',
+  slaPage.includes('label="Uzatılmış Çözüm (dk)"')
+  && slaPage.includes('iş günü (8,5 sa/gün)')
+  && slaPage.includes('<Th align="right">Uzatılmış</Th>')
+  && !slaPage.includes('5-tuple'));
+const detail = rd('src/features/cases/CaseDetailPage.tsx');
+ok('24 vaka detayı: uzatılmış rozet + uygulanan hedef yalnız slaTargetSource=extended iken',
+  detail.includes("item.slaTargetSource === 'extended'")
+  && detail.includes('Uzatılmış SLA — Yazılım Geliştirme devri'));
+const adminRepo = rd('server/db/adminRepository.js');
+ok('25 BE CRUD fail-safe: 3.Parti bayrak default\'ları + SLAPolicy dk normalize (pozitif Int | null)',
+  adminRepo.includes('triggersExtendedSla: input.triggersExtendedSla === true')
+  && adminRepo.includes('extendedSlaRequiresDevopsLink: input.extendedSlaRequiresDevopsLink !== false')
+  && adminRepo.split('Number.isInteger(safeInput.extendedResolutionMin)').length >= 2
+  && adminRepo.includes("if ('extendedResolutionMin' in dbPatch)"));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);
