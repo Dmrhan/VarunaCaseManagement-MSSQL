@@ -1975,6 +1975,14 @@ function LeftPanel({
 
           {/* Çözüm SLA */}
           <div className="space-y-1">
+            {/* Uzatılmış SLA v1 — kaynak rozeti + uygulanan hedef (ajan,
+                hedefin neden değiştiğini yardım almadan görür) */}
+            {item.slaTargetSource === 'extended' && (
+              <div className="rounded-md bg-violet-50 px-2 py-1 text-[11px] font-medium text-violet-800 ring-1 ring-violet-200">
+                ⏱ Uzatılmış SLA — Yazılım Geliştirme devri
+                {item.slaResolutionTargetMin ? ` · hedef ${item.slaResolutionTargetMin} dk` : ''}
+              </div>
+            )}
             <SlaRow label="Çözüm SLA" value={item.slaResolutionDueAt ? formatDateTime(item.slaResolutionDueAt) : '—'} />
             {item.slaResolutionDueAt && (
               item.slaViolation ? (

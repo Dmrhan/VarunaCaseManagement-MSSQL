@@ -13,6 +13,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarDays, Copy, Loader2, Lock, Trash2 } from 'lucide-react';
 import { useToast } from '@/components/ui/Toast';
+import { HelpDrawer, HelpButton } from '@/components/ui/HelpDrawer';
+import { WORK_CALENDAR_HELP } from './helpContents';
 import { useAuth } from '@/services/AuthContext';
 import { lookupService } from '@/services/caseService';
 import {
@@ -156,6 +158,7 @@ export function AdminWorkCalendarPage() {
   const { toast } = useToast();
   const companies = useMemo(() => lookupService.companies(), []);
   const [companyId, setCompanyId] = useState<string>('');
+  const [helpOpen, setHelpOpen] = useState(false);
   const [cal, setCal] = useState<WorkCalendar | null>(null);
   const [draft, setDraft] = useState<Draft>(draftFromCalendar(null));
   const [loading, setLoading] = useState(false);
@@ -366,7 +369,17 @@ export function AdminWorkCalendarPage() {
         <span className="rounded-full bg-purple-50 px-2 py-0.5 text-[10px] font-bold text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
           🔒 Yalnız SystemAdmin
         </span>
+        <div className="ml-auto">
+          <HelpButton onClick={() => setHelpOpen((v) => !v)} active={helpOpen} />
+        </div>
       </div>
+      <HelpDrawer
+        open={helpOpen}
+        title={WORK_CALENDAR_HELP.title}
+        sections={WORK_CALENDAR_HELP.sections}
+        onClose={() => setHelpOpen(false)}
+        overlayOnly
+      />
       <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-500 dark:text-ndark-muted">
         SLA süreleri bu takvime göre hesaplanır: mesai dışı saatler, hafta sonu ve tatiller sayaca
         dahil edilmez. Her şirketin takvimi ayrıdır; takvim tanımlanmayan şirket eski (7/24) davranışta
