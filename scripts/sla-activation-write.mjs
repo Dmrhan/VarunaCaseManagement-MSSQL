@@ -33,6 +33,17 @@ const COMPANY = 'COMP-UNIVERA';
 const MIN = 60000;
 const EXPECTED_EXT_CANDIDATES = 37;
 const stepArg = process.argv.find((a) => a.startsWith('--step='))?.slice(7) ?? 'all';
+// Codex #551 P1 (drift) — --from-backup=path: hedef dakika, önceki koşumun
+// yedeğindeki ORİJİNAL (duvar) due'lardan türetilir. Kaynak sabit olduğundan
+// script kaç kez koşarsa koşsun aynı hedefe yazar; yarıda kesilen ilk
+// koşumun işlediği damgasız satırlar da güvenle yeniden hesaplanır.
+const backupArg = process.argv.find((a) => a.startsWith('--from-backup='))?.slice(14) ?? null;
+const original = new Map();
+if (backupArg) {
+  const { readFileSync } = await import('node:fs');
+  for (const r of JSON.parse(readFileSync(backupArg, 'utf8'))) original.set(r.id, r);
+  console.log(`[kaynak] --from-backup: ${original.size} vakanın orijinal değerleri yüklendi`);
+}
 
 const cal = await loadWorkCalendar(COMPANY);
 if (!cal) { console.error('Univera takvimi yüklenemedi — durduruldu.'); process.exit(1); }
@@ -62,26 +73,48 @@ if (stepArg === 'all' || stepArg === 'restamp') {
   let written = 0, skippedRecent = 0, skippedGuard = 0, retracted = 0, unchanged = 0;
   for (const c of affected) {
     if (nowMs - new Date(c.updatedAt).getTime() < SKIP_RECENT_MS) { skippedRecent += 1; continue; }
+    // Codex #551 P1 — DRIFT KORUMASI: hedef, iş-saatiyle YAZILMIŞ due'dan
+    // geri türetilirse geceler/hafta sonları hedefe dönüşür ve her koşumda
+    // ileri kayar. Kural: slaResolutionTargetMin damgası VARSA satır zaten
+    // işlenmiş sayılır (atla); yoksa hedef duvar-due'dan türetilir ve
+    // damgayla birlikte yazılır — ikinci koşum aynı satıra dokunAMAZ.
+    if (c.slaTargetSource === 'restamped' || c.slaTargetSource === 'extended') { unchanged += 1; continue; }
     const created = new Date(c.createdAt).getTime();
-    const pausedMin = c.slaPausedDurationMin ?? 0;
-    const respDue = c.slaResponseDueAt ? new Date(c.slaResponseDueAt).getTime() : null;
-    const resoDue = new Date(c.slaResolutionDueAt).getTime();
+    // Türetim kaynağı: yedek verildiyse ORİJİNAL değerler (drift koruması),
+    // yoksa canlı satır (yalnız ilk/temiz koşumda güvenli).
+    const src = original.get(c.id) ?? c;
+    const pausedMin = src.slaPausedDurationMin ?? 0;
+    const respDue = src.slaResponseDueAt ? new Date(src.slaResponseDueAt).getTime() : null;
+    const resoDue = new Date(src.slaResolutionDueAt).getTime();
     const respTarget = respDue != null ? Math.max(0, Math.round((respDue - created) / MIN)) : null;
     const resoTarget = Math.max(0, Math.round((resoDue - created) / MIN) - pausedMin);
     const newResp = respTarget != null ? addBusinessMinutes(created, respTarget, cal) : null;
     const newReso = addBusinessMinutes(created, resoTarget + pausedMin, cal);
     if (newReso == null || (respTarget != null && newResp == null)) { skippedGuard += 1; continue; }
 
-    const data = {};
-    if (Math.abs(newReso - resoDue) >= MIN) data.slaResolutionDueAt = new Date(newReso);
-    if (newResp != null && respDue != null && Math.abs(newResp - respDue) >= MIN) data.slaResponseDueAt = new Date(newResp);
+    const liveReso = new Date(c.slaResolutionDueAt).getTime();
+    const liveResp = c.slaResponseDueAt ? new Date(c.slaResponseDueAt).getTime() : null;
+    const data = {
+      // İşlenmiş-damgası (drift koruması + audit): uygulanan hedef dakika
+      // + kaynak işareti. 'restamped' → sonraki koşumda atlanır.
+      slaResolutionTargetMin: resoTarget,
+      slaTargetSource: 'restamped',
+    };
+    if (Math.abs(newReso - liveReso) >= MIN) data.slaResolutionDueAt = new Date(newReso);
+    if (newResp != null && liveResp != null && Math.abs(newResp - liveResp) >= MIN) data.slaResponseDueAt = new Date(newResp);
     // K-E — ihlal yalnız GERİ çekilir: yeni hedefe göre gecikmemişse false.
     if (c.slaViolation) {
       const ref = c.resolvedAt ? new Date(c.resolvedAt).getTime() : nowMs;
       if (ref <= newReso) { data.slaViolation = false; retracted += 1; }
     }
-    if (Object.keys(data).length === 0) { unchanged += 1; continue; }
-    await prisma.case.update({ where: { id: c.id }, data });
+    // Codex #551 P2 — STALE-SNAPSHOT GUARD: snapshot'tan sonra vakaya
+    // dokunulduysa yazma (updateMany + updatedAt şartı; count=0 → atla,
+    // sonraki koşum güncel haliyle alır).
+    const res = await prisma.case.updateMany({
+      where: { id: c.id, updatedAt: c.updatedAt },
+      data,
+    });
+    if (res.count === 0) { skippedRecent += 1; continue; }
     written += 1;
   }
   console.log(`[2/3] RE-STAMP: yazılan=${written}, değişmeyen=${unchanged}, ihlal-geri-çekilen=${retracted}, son-10dk-atlanan=${skippedRecent}, guard-atlanan=${skippedGuard}`);
@@ -126,7 +159,12 @@ if (stepArg === 'all' || stepArg === 'extended') {
     // Re-stamp adım 2'de due değişmiş olabilir — güncel satırı çek (patch
     // güncel duraklama/due üzerinden sıfırdan türetir; idempotent).
     const fresh = await prisma.case.findUnique({ where: { id: c.id } });
-    const patch = await buildExtendedSlaPatch(fresh, extMin, `${ybe.name} (retroaktif aktivasyon)`);
+    // Codex #551 P1 — takvim OVERRIDE: buildExtendedSlaPatch'in kapısı
+    // createdAt'e bakar; kesim tarihi ileride olsaydı pre-cutover adaylar
+    // duvar hesabı alırdı. Aktivasyon scripti niyeti gereği İŞ-saati ister
+    // → yüklü takvim açıkça geçirilir. (Bu koşumda kesim=01.01.2026
+    // olduğundan davranış farkı yok; genel doğruluk düzeltmesi.)
+    const patch = await buildExtendedSlaPatch(fresh, extMin, `${ybe.name} (retroaktif aktivasyon)`, Date.now(), { calOverride: cal });
     if (!patch) { extSkipped += 1; continue; }
     await prisma.case.update({
       where: { id: c.id },
