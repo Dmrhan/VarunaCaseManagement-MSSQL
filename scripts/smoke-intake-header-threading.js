@@ -49,21 +49,25 @@ expect('1.5 Set ile dedupe',
 console.log('\n── 2) Header threading branch — intake flow ────');
 expect('2.1 A2 branch başlığı (2026-07-03 fix)',
   /A2\) HEADER THREADING \(2026-07-03 fix\)/.test(intake), true);
-// Codex P2 R1 fix (2026-07-03): Guard artık !token DEĞİL.
-// tokens[0] her zaman set edildiği için (candidate resolve olmasa bile),
-// dış referans + gerçek In-Reply-To senaryosunda !token=false çıkıyordu.
-expect('2.2 Guard: subjectTokenResolvedCase FALSE ise devrede (token flow gerçek eşleşme buldu mu?)',
-  /if \(!subjectTokenResolvedCase\) \{[\s\S]{0,300}collectHeaderMessageIds\(parsed\)/.test(intakeCode), true);
+// 2026-07-16 fix (mükerrer zincir): eski subjectTokenResolvedCase gate'i
+// KALDIRILDI — token TERMINAL vakaya çıktığında da header threading koşar
+// (token AÇIK vakaya append eden yol zaten erken return ediyor).
+expect('2.2 Gate kaldırıldı: header threading token-terminal K3 yolunda da devrede',
+  !/subjectTokenResolvedCase/.test(intake)
+  && /token terminal[\s\S]{0,900}collectHeaderMessageIds\(parsed\)/.test(intake), true);
 expect('2.2b Regresyon — `if (!token)` guard\'ı A2 branch\'inden KALDIRILDI',
   !/A2\) HEADER THREADING[\s\S]{0,600}if \(!token\)/.test(intake), true);
-expect('2.3 companyId scoped lookup (cross-tenant guard)',
-  /prisma\.caseEmail\.findFirst\(\{[\s\S]{0,400}where: \{ companyId, messageId: \{ in: headerIds \} \}/.test(intakeCode), true);
+expect('2.3 companyId scoped lookup (cross-tenant guard) — findMany (2026-07-16: açık-öncelikli seçim)',
+  /prisma\.caseEmail\.findMany\(\{[\s\S]{0,400}where: \{ companyId, messageId: \{ in: headerIds \} \}/.test(intakeCode), true);
 expect('2.4 inbound + outbound satırlar — direction filter YOK (guard: müşteri bizim ACK\'e de cevap verir)',
   !/direction:\s*'inbound'/.test(intake.substring(intake.indexOf('A2) HEADER THREADING'), intake.indexOf('YENİ VAKA'))), true);
 expect('2.5 En yeni eşleşme (deterministic) — orderBy createdAt desc',
   /messageId: \{ in: headerIds \}[\s\S]{0,400}orderBy: \{ createdAt: 'desc' \}/.test(intakeCode), true);
-expect('2.6 Case scope check — companyId ile findFirst',
-  /prisma\.case\.findFirst\(\{[\s\S]{0,300}where: \{ id: matchedEmail\.caseId, companyId \}/.test(intakeCode), true);
+expect('2.6 Case scope — vaka durumu tenant-kapsamlı sorgunun relation select\'inden gelir (2026-07-16)',
+  /case: \{ select: \{ id: true, status: true, caseNumber: true, isArchived: true \} \}/.test(intakeCode), true);
+expect('2.7 Açık-öncelikli seçim (2026-07-16): terminal olmayan + arşivsiz eşleşme önce; yoksa en yeni',
+  /!TERMINAL_FOR_PICK\.has\(m\.case\.status\) && !m\.case\.isArchived/.test(intakeCode)
+  && /\?\? matchedEmails\[0\] \?\? null/.test(intakeCode), true);
 
 console.log('\n── 3) K3 terminal kuralı — header branch ───────');
 expect('3.1 TERMINAL_STATUSES_DB Set (\'Cozuldu\',\'IptalEdildi\') reuse',
@@ -103,13 +107,13 @@ expect('6.3 token flow K3 kontrolü korundu',
 expect('6.4 token flow appendInbound korundu',
   /A\) THREAD eşleşmesi[\s\S]{0,4000}caseEmailRepository\.appendInbound/.test(intake), true);
 
-console.log('\n── 6b) Codex P2 R1 — subjectTokenResolvedCase flag ───');
-expect('6b.1 flag declare false (default)',
-  /let subjectTokenResolvedCase = false;/.test(intake), true);
-expect('6b.2 flag TRUE set edilir — token flow existing bulunduysa (K3 dahil)',
-  /if \(existing\) \{\s*subjectTokenResolvedCase = true;/.test(intake), true);
-expect('6b.3 header threading gate — flag üzerinden',
-  /if \(!subjectTokenResolvedCase\)/.test(intake), true);
+console.log('\n── 6b) 2026-07-16 zincir-devamlılığı — flag/gate kaldırıldı ───');
+expect('6b.1 subjectTokenResolvedCase flag\'i tamamen kaldırıldı (ölü değer yok)',
+  !/subjectTokenResolvedCase/.test(intake), true);
+expect('6b.2 fix niyeti belgeli: zincirde açık vaka varsa cevap oraya eklenir',
+  /zincirde açık vaka varsa/.test(intake), true);
+expect('6b.3 K3 davranışı korunuyor: terminal + k3Enabled fall-through hâlâ mevcut',
+  /TERMINAL_STATUSES_DB\.has\(existing\.status\) && k3Enabled/.test(intake), true);
 
 console.log('\n── 7) Davranış — collectHeaderMessageIds sim ──');
 

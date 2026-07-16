@@ -681,7 +681,6 @@ export async function intakeInboundEmail({
   // (ör. [ABC-1234567] Varuna'da YOK + In-Reply-To gerçek) senaryosunda
   // header threading atlanıp mükerrer vaka açılırdı. Gate artık gerçek
   // resolve durumuna bağlı.
-  let subjectTokenResolvedCase = false;
   if (tokens.length > 0) {
     // Mevcut vakaya CaseEmail olarak ekle — caseNumber ile lookup.
     try {
@@ -700,7 +699,6 @@ export async function intakeInboundEmail({
         }
       }
       if (existing) {
-        subjectTokenResolvedCase = true;
         // ─── K3 OVERRIDE (M6.1) ──────────────────────────────────
         // Plan: kapalı/terminal vakaya gelen yanıt → YENİ vaka aç
         // (otomatik link YOK; ilişkilendirme mevcut LinksTab ile manuel).
@@ -833,30 +831,49 @@ export async function intakeInboundEmail({
   // - Terminal + k3Enabled → yeni vaka (mevcut K3 davranışı korunur)
   // - En yeni CaseEmail eşleşmesi (birden çok match olursa) — receivedAt/sentAt desc
   let headerMatchedMessageId = null;
-  // Codex P2 R1 fix (2026-07-03): Guard artık `!token` DEĞİL — çünkü
-  // token = tokens[0] ?? null; ilk candidate resolve olmasa bile set
-  // edilir. Dış referanslı Re: ([ABC-1234567] Varuna'da YOK + gerçek
-  // In-Reply-To) senaryosunda önceki guard header threading'i
-  // atlayıp mükerrer vaka açardı. Artık gate gerçek resolve flag'ine
-  // bağlı (token flow eşleşme buldu mu?). Terminal K3 durumunda
-  // subjectTokenResolvedCase = true olduğu için header threading
-  // tekrar çalışmaz (aynı case'e ikinci lookup gereksiz).
-  if (!subjectTokenResolvedCase) {
+  // Codex P2 R1 fix (2026-07-03): gate gerçek resolve flag'ine bağlı.
+  //
+  // 2026-07-16 fix (mükerrer vaka zinciri — UNV-1003100 / UNV-1002191
+  // aileleri): önceki gate, token TERMINAL vakaya çıktığında da header
+  // threading'i atlıyordu ("aynı case'e ikinci lookup gereksiz"
+  // varsayımıyla). Varsayım YANLIŞ: müşteri konudaki eski [token]'la
+  // yazmaya devam ederken In-Reply-To/References zinciri, K3'ün daha
+  // önce açtığı AÇIK devam vakasını gösterebilir. Header atlandığı için
+  // her cevap yeni K3 vakası doğuruyordu (bir thread → 5 vakaya kadar
+  // gözlendi). Yeni kural: header threading yalnız token AÇIK vakaya
+  // append ETTİĞİNDE atlanır (o yol zaten return etti); token terminal
+  // K3 yoluna düştüyse header'a DA bakılır — zincirde açık vaka varsa
+  // cevap oraya eklenir, yoksa K3 davranışı aynen sürer.
+  {
     const headerIds = collectHeaderMessageIds(parsed);
     if (headerIds.length > 0) {
       try {
         const { prisma } = await import('../db/client.js');
-        const matchedEmail = await prisma.caseEmail.findFirst({
+        // 2026-07-16 fix — SEÇİM KURALI: References tipik olarak TÜM
+        // zinciri taşır; eşleşmeler birden çok vakaya dağılabilir (orijinal
+        // terminal + K3 devam vakaları). Eski "en yeni kayıt" kuralı
+        // terminal vakayı seçip K3'ü yeniden tetikleyebiliyordu. Yeni kural:
+        // AÇIK (terminal olmayan, arşivsiz) vakadaki eşleşme ÖNCELİKLİ —
+        // açıklar içinde en yeni; hiç açık yoksa en yeni eşleşme (terminal
+        // → K3 davranışı aynen korunur).
+        const TERMINAL_FOR_PICK = new Set(['Cozuldu', 'IptalEdildi']);
+        const matchedEmails = await prisma.caseEmail.findMany({
           where: { companyId, messageId: { in: headerIds } },
-          select: { caseId: true, messageId: true },
-          // En yeni eşleşen — birden fazla ID match olursa deterministic
+          select: {
+            caseId: true,
+            messageId: true,
+            case: { select: { id: true, status: true, caseNumber: true, isArchived: true } },
+          },
           orderBy: { createdAt: 'desc' },
         });
+        const matchedEmail =
+          matchedEmails.find(
+            (m) => m.case && !TERMINAL_FOR_PICK.has(m.case.status) && !m.case.isArchived,
+          ) ?? matchedEmails[0] ?? null;
         if (matchedEmail) {
-          const existing = await prisma.case.findFirst({
-            where: { id: matchedEmail.caseId, companyId },
-            select: { id: true, status: true, caseNumber: true },
-          });
+          const existing = matchedEmail.case && matchedEmail.case.id
+            ? { id: matchedEmail.case.id, status: matchedEmail.case.status, caseNumber: matchedEmail.case.caseNumber }
+            : null;
           if (existing) {
             const TERMINAL_STATUSES_DB = new Set(['Cozuldu', 'IptalEdildi']);
             const k3Enabled = (process.env.M6_K3_NEW_TICKET_ON_TERMINAL ?? 'true') !== 'false';
