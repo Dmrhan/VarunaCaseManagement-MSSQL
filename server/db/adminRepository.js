@@ -2182,7 +2182,11 @@ export const taxonomyDefRepo = {
     return prisma.taxonomyDef.findMany({
       where,
       select: TAXONOMY_DEF_SELECT,
-      orderBy: [{ taxonomyType: 'asc' }, { sortOrder: 'asc' }, { label: 'asc' }],
+      // 2026-07-16 — kullanıcı kararı: açılış/kapanış etiket içerikleri
+      // alfabetik gelsin (admin ekranı da agent'ların gördüğü sırayla
+      // tutarlı olsun). sortOrder kolonu veri modelinde/formda durur,
+      // sıralama için artık kullanılmıyor.
+      orderBy: [{ taxonomyType: 'asc' }, { label: 'asc' }],
     });
   },
 

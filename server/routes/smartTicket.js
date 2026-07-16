@@ -53,7 +53,12 @@ async function loadActiveTaxonomies(companyId) {
       sortOrder: true,
       metadata: true,
     },
-    orderBy: [{ taxonomyType: 'asc' }, { sortOrder: 'asc' }, { label: 'asc' }],
+    // 2026-07-16 — kullanıcı kararı: açılış/kapanış etiket içerikleri
+    // alfabetik gelsin (sortOrder admin'in elle küratörlüğü artık sıralama
+    // için kullanılmıyor; kolon veri modelinde durur, gelecekte başka amaçla
+    // kullanılabilir). Türkçe collation (Turkish_100_CI_AS_SC_UTF8) DB'de
+    // doğrulandı.
+    orderBy: [{ taxonomyType: 'asc' }, { label: 'asc' }],
   });
   const out = {};
   for (const t of TAXONOMY_TYPES_FOR_CLASSIFICATION) out[t] = [];
@@ -256,7 +261,8 @@ async function loadActiveClosureTaxonomies(companyId) {
     // filtresine dayanır (aşağıda). id seçilmezse rcgMatch.id=undefined olur,
     // aday liste boş kalır ve Kök Neden Detayı asla eşleşmez.
     select: { id: true, taxonomyType: true, code: true, label: true, parentId: true, metadata: true },
-    orderBy: [{ taxonomyType: 'asc' }, { sortOrder: 'asc' }],
+    // 2026-07-16 — kullanıcı kararı: kapanış etiket içerikleri alfabetik.
+    orderBy: [{ taxonomyType: 'asc' }, { label: 'asc' }],
   });
   const out = { rootCauseGroup: [], rootCauseDetail: [], resolutionType: [], permanentPrevention: [] };
   for (const r of rows) out[r.taxonomyType].push(r);

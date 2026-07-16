@@ -176,7 +176,9 @@ router.get('/taxonomies', async (req, res) => {
         isActive: includeInactive,
         metadata: true,
       },
-      orderBy: [{ taxonomyType: 'asc' }, { sortOrder: 'asc' }, { label: 'asc' }],
+      // 2026-07-16 — kullanıcı kararı: açılış/kapanış etiket içerikleri
+      // alfabetik gelsin (sortOrder artık sıralama için kullanılmıyor).
+      orderBy: [{ taxonomyType: 'asc' }, { label: 'asc' }],
     });
 
     const byType = {};
