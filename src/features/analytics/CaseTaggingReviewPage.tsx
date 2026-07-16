@@ -604,9 +604,17 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           const key      = tagKey(def);
           const prefix   = def.prefix === 'opening' ? 'Ac' : 'Ka';
           const verdictRaw = r?.[verdictField(def)] as string | null;
-          const labelRaw   = r?.[`${key}CorrectedLabel` as keyof CaseTaggingReview] as string | null;
+          const correctedLabel = r?.[`${key}CorrectedLabel` as keyof CaseTaggingReview] as string | null;
+          const originalLabel  = r?.[`${key}OriginalLabel` as keyof CaseTaggingReview] as string | null;
+          // Kullanıcı kararı — "Doğru" işaretlenmiş alanlarda CorrectedLabel
+          // hiç yazılmaz (bkz. saveRow: verdict==='Dogru' → correctedCode
+          // null gönderilir, backend correctedLabel'ı da null yazar). Export'ta
+          // "Doğru Etiket" kolonu tek bakışta "olması gereken değer" göstersin
+          // diye Doğru'da OriginalLabel'a düşülür; Yanlış'ta CorrectedLabel
+          // aynen kalır.
+          const displayLabel = verdictRaw === 'Dogru' ? originalLabel : correctedLabel;
           row[`${prefix}:${def.label} Kontrol`]      = verdictRaw ? (VERDICT_TR[verdictRaw] ?? verdictRaw) : '';
-          row[`${prefix}:${def.label} Doğru Etiket`] = labelRaw ?? '';
+          row[`${prefix}:${def.label} Doğru Etiket`] = displayLabel ?? '';
         }
         row['Son Güncelleme'] = formatUtcDateTime(r?.reviewedAt);
         return row;
