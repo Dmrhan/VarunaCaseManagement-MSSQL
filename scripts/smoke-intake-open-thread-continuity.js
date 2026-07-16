@@ -24,12 +24,15 @@ ok('2 fix niyeti belgeli: token terminal K3 yoluna düştüğünde header\'a DA 
   && src.includes('UNV-1003100'));
 
 // ── 2 · Seçim kuralı: AÇIK vaka öncelikli ──
-ok('3 findFirst→findMany: eşleşmeler vaka durumuyla birlikte çekilir',
+ok('3 findFirst→findMany: eşleşmeler vaka durumu + vaka tenant\'ıyla birlikte çekilir',
   src.includes('const matchedEmails = await prisma.caseEmail.findMany({')
-  && src.includes("case: { select: { id: true, status: true, caseNumber: true, isArchived: true } }"));
+  && src.includes("case: { select: { id: true, status: true, caseNumber: true, isArchived: true, companyId: true } }"));
 ok('4 açık-öncelikli seçim: terminal olmayan + arşivsiz vaka önce; yoksa en yeni (K3 korunur)',
   src.includes('!TERMINAL_FOR_PICK.has(m.case.status) && !m.case.isArchived')
-  && src.includes('?? matchedEmails[0] ?? null'));
+  && src.includes('?? tenantScoped[0] ?? null'));
+ok('4b tenant guard (Codex #542 P2): vakası bu tenant\'ta olmayan eşleşme SEÇİMDEN ÖNCE elenir (fail-closed)',
+  src.includes('m.case.companyId === companyId')
+  && src.includes('const tenantScoped = matchedEmails.filter('));
 ok('5 K3 davranışı DEĞİŞMEDİ: terminal + k3Enabled → yeni vaka yolu duruyor',
   src.includes("const k3Enabled = (process.env.M6_K3_NEW_TICKET_ON_TERMINAL ?? 'true') !== 'false'")
   && src.split('TERMINAL_STATUSES_DB').length >= 3);

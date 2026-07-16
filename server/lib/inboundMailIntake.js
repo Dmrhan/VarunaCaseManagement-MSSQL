@@ -862,19 +862,30 @@ export async function intakeInboundEmail({
           select: {
             caseId: true,
             messageId: true,
-            case: { select: { id: true, status: true, caseNumber: true, isArchived: true } },
+            case: { select: { id: true, status: true, caseNumber: true, isArchived: true, companyId: true } },
           },
           orderBy: { createdAt: 'desc' },
         });
+        // Codex #542 P2 — CaseEmail.companyId DENORMALİZE; tutarsız veride
+        // (satır bu tenant'ta ama caseId başka tenant'ın vakasında) relation
+        // yabancı vakayı getirebilir. Eski ikinci scoped lookup bunu
+        // reddediyordu — aynı guard burada: vakası bu tenant'ta olmayan
+        // eşleşmeler DAHA SEÇİMDEN ÖNCE elenir (fail-closed; ne append
+        // hedefi ne K3 'existing'i olabilirler).
+        const tenantScoped = matchedEmails.filter(
+          (m) => m.case && m.case.id && m.case.companyId === companyId,
+        );
         const matchedEmail =
-          matchedEmails.find(
-            (m) => m.case && !TERMINAL_FOR_PICK.has(m.case.status) && !m.case.isArchived,
-          ) ?? matchedEmails[0] ?? null;
+          tenantScoped.find(
+            (m) => !TERMINAL_FOR_PICK.has(m.case.status) && !m.case.isArchived,
+          ) ?? tenantScoped[0] ?? null;
         if (matchedEmail) {
-          const existing = matchedEmail.case && matchedEmail.case.id
-            ? { id: matchedEmail.case.id, status: matchedEmail.case.status, caseNumber: matchedEmail.case.caseNumber }
-            : null;
-          if (existing) {
+          const existing = {
+            id: matchedEmail.case.id,
+            status: matchedEmail.case.status,
+            caseNumber: matchedEmail.case.caseNumber,
+          };
+          {
             const TERMINAL_STATUSES_DB = new Set(['Cozuldu', 'IptalEdildi']);
             const k3Enabled = (process.env.M6_K3_NEW_TICKET_ON_TERMINAL ?? 'true') !== 'false';
 

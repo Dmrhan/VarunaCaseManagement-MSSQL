@@ -63,11 +63,14 @@ expect('2.4 inbound + outbound satırlar — direction filter YOK (guard: müşt
   !/direction:\s*'inbound'/.test(intake.substring(intake.indexOf('A2) HEADER THREADING'), intake.indexOf('YENİ VAKA'))), true);
 expect('2.5 En yeni eşleşme (deterministic) — orderBy createdAt desc',
   /messageId: \{ in: headerIds \}[\s\S]{0,400}orderBy: \{ createdAt: 'desc' \}/.test(intakeCode), true);
-expect('2.6 Case scope — vaka durumu tenant-kapsamlı sorgunun relation select\'inden gelir (2026-07-16)',
-  /case: \{ select: \{ id: true, status: true, caseNumber: true, isArchived: true \} \}/.test(intakeCode), true);
-expect('2.7 Açık-öncelikli seçim (2026-07-16): terminal olmayan + arşivsiz eşleşme önce; yoksa en yeni',
+expect('2.6 Case scope — relation select vaka tenant\'ını da taşır (Codex #542 P2)',
+  /case: \{ select: \{ id: true, status: true, caseNumber: true, isArchived: true, companyId: true \} \}/.test(intakeCode), true);
+expect('2.7 Açık-öncelikli seçim: tenant-elemeli liste üzerinde; yoksa en yeni',
   /!TERMINAL_FOR_PICK\.has\(m\.case\.status\) && !m\.case\.isArchived/.test(intakeCode)
-  && /\?\? matchedEmails\[0\] \?\? null/.test(intakeCode), true);
+  && /\?\? tenantScoped\[0\] \?\? null/.test(intakeCode), true);
+expect('2.8 Tenant guard (Codex #542 P2): m.case.companyId === companyId ön-elemesi (fail-closed)',
+  /const tenantScoped = matchedEmails\.filter\(/.test(intakeCode)
+  && /m\.case\.companyId === companyId/.test(intakeCode), true);
 
 console.log('\n── 3) K3 terminal kuralı — header branch ───────');
 expect('3.1 TERMINAL_STATUSES_DB Set (\'Cozuldu\',\'IptalEdildi\') reuse',
