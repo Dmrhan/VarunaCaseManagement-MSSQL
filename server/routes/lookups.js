@@ -3,6 +3,7 @@ import { prisma } from '../db/client.js';
 import { lookupRepository } from '../db/lookupRepository.js';
 import { verifyJwt } from '../db/auth.js';
 import { validateVkn, validateTckn } from '../utils/accountValidation.js';
+import { sortTaxonomyDefs } from '../lib/taxonomySort.js';
 
 const router = Router();
 
@@ -176,8 +177,12 @@ router.get('/taxonomies', async (req, res) => {
         isActive: includeInactive,
         metadata: true,
       },
-      orderBy: [{ taxonomyType: 'asc' }, { sortOrder: 'asc' }, { label: 'asc' }],
+      orderBy: [{ taxonomyType: 'asc' }, { id: 'asc' }],
     });
+    // 2026-07-16 — kullanıcı kararı: açılış/kapanış etiket içerikleri
+    // alfabetik gelsin, TEK istisna "impact" (Etki) — eski şiddet sırasına
+    // (sortOrder ASC) geri döndürüldü (bkz. sortTaxonomyDefs).
+    const sortedRows = sortTaxonomyDefs(rows);
 
     const byType = {};
     for (const type of SMART_TICKET_TAXONOMY_TYPES) {
@@ -189,7 +194,7 @@ router.get('/taxonomies', async (req, res) => {
     // detay.metadata.allowedResolutionTypes[] içinde (metadata JSON string olarak
     // döner; tüketici parse eder). Alanlar ADDITIVE — eski düz-liste tüketiciler
     // id/parentId'yi yok sayabilir.
-    for (const r of rows) {
+    for (const r of sortedRows) {
       const list = byType[r.taxonomyType];
       if (!list) continue; // type filter excluded
       list.push({

@@ -33,6 +33,7 @@ import {
   SMART_TICKET_CLASSIFICATION_FIELDS,
 } from '../lib/smartTicketClassification.js';
 import { composeTransferBriefFromSteps } from '../db/solutionStepRepository.js';
+import { sortTaxonomyDefs } from '../lib/taxonomySort.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -53,11 +54,15 @@ async function loadActiveTaxonomies(companyId) {
       sortOrder: true,
       metadata: true,
     },
-    orderBy: [{ taxonomyType: 'asc' }, { sortOrder: 'asc' }, { label: 'asc' }],
+    orderBy: [{ taxonomyType: 'asc' }, { id: 'asc' }],
   });
+  // 2026-07-16 — kullanıcı kararı: açılış etiket içerikleri alfabetik,
+  // TEK istisna "impact" (Etki) — eski şiddet sırasına (sortOrder ASC)
+  // geri döndürüldü (bkz. sortTaxonomyDefs).
+  const sorted = sortTaxonomyDefs(rows);
   const out = {};
   for (const t of TAXONOMY_TYPES_FOR_CLASSIFICATION) out[t] = [];
-  for (const r of rows) out[r.taxonomyType].push(r);
+  for (const r of sorted) out[r.taxonomyType].push(r);
   return out;
 }
 
@@ -256,7 +261,8 @@ async function loadActiveClosureTaxonomies(companyId) {
     // filtresine dayanır (aşağıda). id seçilmezse rcgMatch.id=undefined olur,
     // aday liste boş kalır ve Kök Neden Detayı asla eşleşmez.
     select: { id: true, taxonomyType: true, code: true, label: true, parentId: true, metadata: true },
-    orderBy: [{ taxonomyType: 'asc' }, { sortOrder: 'asc' }],
+    // 2026-07-16 — kullanıcı kararı: kapanış etiket içerikleri alfabetik.
+    orderBy: [{ taxonomyType: 'asc' }, { label: 'asc' }],
   });
   const out = { rootCauseGroup: [], rootCauseDetail: [], resolutionType: [], permanentPrevention: [] };
   for (const r of rows) out[r.taxonomyType].push(r);
