@@ -8,7 +8,7 @@ import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { caseService, lookupService, parseAllowedResolutionCodes, type SmartTicketTaxonomyItem, type SmartTicketTaxonomyResponse } from '@/services/caseService';
 import { CASE_STATUSES, type Case, type CaseStatus, type CaseTaggingReview, type TaggingVerdict } from '@/features/cases/types';
-import { formatDateTime } from '@/lib/format';
+import { formatOpeningDateTime } from '@/lib/format';
 
 /**
  * Vaka Etiket Doğrulama Ekranı — Supervisor / Admin / SystemAdmin.
@@ -852,7 +852,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
               </div>
               {/* Vaka Açılış */}
               <div className="px-3 py-2 text-xs text-slate-600 dark:text-ndark-muted">
-                {formatDateTime(c.createdAt)}
+                {formatOpeningDateTime(c.createdAt)}
               </div>
               {/* Müşteri */}
               <div className="truncate px-3 py-2 text-xs text-slate-700 dark:text-ndark-text" title={c.accountName ?? undefined}>

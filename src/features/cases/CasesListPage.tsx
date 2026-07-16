@@ -66,7 +66,7 @@ import {
   type CasePriority,
   type CaseStatus,
 } from './types';
-import { formatDateTime, formatRelative, formatSlaRemaining } from '@/lib/format';
+import { formatDateTime, formatOpeningDateTime, formatRelative, formatSlaRemaining } from '@/lib/format';
 import { Modal } from '@/components/ui/Modal';
 import { NewCaseForm } from './NewCaseForm';
 import { QuickCaseModal } from './QuickCaseModal';
@@ -1845,7 +1845,7 @@ export function CasesListPage({
                       {c.assignedTeamName ?? <span className="text-slate-400 dark:text-ndark-muted">—</span>}
                     </Td>
                     <Td className="text-xs text-slate-500 dark:text-ndark-muted">
-                      <span title={formatDateTime(c.createdAt)}>{formatRelative(c.createdAt)}</span>
+                      <span title={formatRelative(c.createdAt)}>{formatOpeningDateTime(c.createdAt)}</span>
                     </Td>
                     <Td>
                       <SlaPill
