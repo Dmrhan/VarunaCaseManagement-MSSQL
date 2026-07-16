@@ -1025,6 +1025,15 @@ export function CasesListPage({
           setQuickFilter(null);
           setQuickQueueFilter('all');
         }),
+        // Supervisor "Yönlendirdiklerim" — Agent'taki aynı kartın rol karşılığı
+        // (bkz. personal.transferredByMe). Aynı /transferred-by-me endpoint'i
+        // ve inboxTab kullanılır; backend rol bağımsız çalışıyor.
+        tile('team.transferredByMe', 'Yönlendirdiklerim', s.transferredByMeCount, 'amber', <Send size={16} />, () => {
+          setFilters(initialFilters);
+          setQuickQueueFilter('all');
+          setInboxTab('transferredByMe');
+          setQuickFilter(null);
+        }),
       ];
     }
 

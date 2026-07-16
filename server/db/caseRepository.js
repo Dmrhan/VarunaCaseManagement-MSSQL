@@ -1535,7 +1535,7 @@ export const caseRepository = {
         }
       }
       const notSnoozed = notSnoozedClause();
-      const [teamOpenCount, teamSlaRisk, teamEscalation, teamResolvedToday, unassigned, critical] = await Promise.all([
+      const [teamOpenCount, teamSlaRisk, teamEscalation, teamResolvedToday, transferredByMeCount, unassigned, critical] = await Promise.all([
         prisma.case.count({
           where: scoped({ ...scope, ...teamFilter, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }),
         }),
@@ -1549,6 +1549,25 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, ...teamFilter, resolvedAt: todayRange, status: 'Cozuldu' }),
         }),
+        // transferredByMeCount — Supervisor "Yönlendirdiklerim" kartı (Agent'taki
+        // aynı kartın rol karşılığı). Aynı görünürlük kontratı: distinct caseId'leri
+        // topla, sonra securityWhere ile görünür Case sayısını say (bkz. yukarıdaki
+        // personal mode yorumu — kart sayısı ≠ liste sayısı sızıntısı önlenir).
+        (async () => {
+          const transferredCaseIds = (
+            await prisma.caseTransfer.groupBy({
+              by: ['caseId'],
+              where: { transferredBy: user.id, companyId: { in: allowedCompanyIds } },
+            })
+          ).map((r) => r.caseId);
+          if (transferredCaseIds.length === 0) return 0;
+          return prisma.case.count({
+            where: mergeSecurityWhere(
+              { id: { in: transferredCaseIds }, companyId: { in: allowedCompanyIds } },
+              securityWhere,
+            ),
+          });
+        })(),
         // chip sayıları — scope'taki tüm atanmamış/kritik açık + snooze-dışı vakalar
         prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
         prisma.case.count({ where: scoped({ ...scope, priority: 'Critical', status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
@@ -1559,6 +1578,7 @@ export const caseRepository = {
         teamSlaRisk,
         teamEscalation,
         teamResolvedToday,
+        transferredByMeCount,
         unassigned,
         critical,
         // Echo back resolved teamId for client filter (so click can apply same scope).
