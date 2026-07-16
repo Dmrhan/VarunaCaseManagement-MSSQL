@@ -78,6 +78,7 @@ const SNOOZE_REASON_LABEL = {
 
 // FAZ 2 §20.2 — aktarım gerekçe kodu → activity log etiketi (TR).
 const TRANSFER_REASON_LABEL = {
+  followed_case: 'Takipli Vaka',
   wrong_team: 'Yanlış Takım',
   expertise: 'Uzmanlık',
   workload: 'İş Yükü',

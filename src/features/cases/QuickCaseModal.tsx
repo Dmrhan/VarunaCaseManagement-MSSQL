@@ -137,6 +137,7 @@ interface TransferReasonChip {
   label: string;
 }
 const TRANSFER_REASON_CHIPS: TransferReasonChip[] = [
+  { code: 'followed_case', label: 'Takipli Vaka' },
   { code: 'wrong_team', label: 'Yanlış Takım' },
   { code: 'expertise', label: 'Uzmanlık' },
   { code: 'workload', label: 'İş Yükü' },
