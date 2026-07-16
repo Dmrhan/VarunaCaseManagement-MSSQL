@@ -4,6 +4,7 @@ import { fromDb, toDb } from './enumMap.js';
 import { assertActorObject } from '../lib/actor.js';
 import { invalidateWorkCalendarCache } from '../lib/sla/businessTime.js';
 import { getTrHolidays } from '../lib/sla/trHolidays.js';
+import { sortTaxonomyDefs } from '../lib/taxonomySort.js';
 
 /**
  * PR-3 follow-up (Codex P2) — Audit field corruption guard.
@@ -2179,15 +2180,16 @@ export const taxonomyDefRepo = {
     if (parentId !== undefined) {
       where.parentId = parentId === null || parentId === '' ? null : parentId;
     }
-    return prisma.taxonomyDef.findMany({
+    const rows = await prisma.taxonomyDef.findMany({
       where,
       select: TAXONOMY_DEF_SELECT,
-      // 2026-07-16 — kullanıcı kararı: açılış/kapanış etiket içerikleri
-      // alfabetik gelsin (admin ekranı da agent'ların gördüğü sırayla
-      // tutarlı olsun). sortOrder kolonu veri modelinde/formda durur,
-      // sıralama için artık kullanılmıyor.
-      orderBy: [{ taxonomyType: 'asc' }, { label: 'asc' }],
+      orderBy: [{ taxonomyType: 'asc' }, { id: 'asc' }],
     });
+    // 2026-07-16 — kullanıcı kararı: açılış/kapanış etiket içerikleri
+    // alfabetik gelsin (admin ekranı da agent'ların gördüğü sırayla tutarlı
+    // olsun), TEK istisna "impact" (Etki) — eski şiddet sırasına (sortOrder
+    // ASC) geri döndürüldü (bkz. sortTaxonomyDefs).
+    return sortTaxonomyDefs(rows);
   },
 
   async create(input, allowedCompanyIds, actor) {

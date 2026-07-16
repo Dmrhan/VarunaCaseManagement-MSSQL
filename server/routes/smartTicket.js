@@ -33,6 +33,7 @@ import {
   SMART_TICKET_CLASSIFICATION_FIELDS,
 } from '../lib/smartTicketClassification.js';
 import { composeTransferBriefFromSteps } from '../db/solutionStepRepository.js';
+import { sortTaxonomyDefs } from '../lib/taxonomySort.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -53,16 +54,15 @@ async function loadActiveTaxonomies(companyId) {
       sortOrder: true,
       metadata: true,
     },
-    // 2026-07-16 — kullanıcı kararı: açılış/kapanış etiket içerikleri
-    // alfabetik gelsin (sortOrder admin'in elle küratörlüğü artık sıralama
-    // için kullanılmıyor; kolon veri modelinde durur, gelecekte başka amaçla
-    // kullanılabilir). Türkçe collation (Turkish_100_CI_AS_SC_UTF8) DB'de
-    // doğrulandı.
-    orderBy: [{ taxonomyType: 'asc' }, { label: 'asc' }],
+    orderBy: [{ taxonomyType: 'asc' }, { id: 'asc' }],
   });
+  // 2026-07-16 — kullanıcı kararı: açılış etiket içerikleri alfabetik,
+  // TEK istisna "impact" (Etki) — eski şiddet sırasına (sortOrder ASC)
+  // geri döndürüldü (bkz. sortTaxonomyDefs).
+  const sorted = sortTaxonomyDefs(rows);
   const out = {};
   for (const t of TAXONOMY_TYPES_FOR_CLASSIFICATION) out[t] = [];
-  for (const r of rows) out[r.taxonomyType].push(r);
+  for (const r of sorted) out[r.taxonomyType].push(r);
   return out;
 }
 
