@@ -8,7 +8,7 @@ import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { caseService, lookupService, parseAllowedResolutionCodes, type SmartTicketTaxonomyItem, type SmartTicketTaxonomyResponse } from '@/services/caseService';
 import { CASE_STATUSES, type Case, type CaseStatus, type CaseTaggingReview, type TaggingVerdict } from '@/features/cases/types';
-import { formatDateTime } from '@/lib/format';
+import { formatOpeningDateTime } from '@/lib/format';
 
 /**
  * Vaka Etiket Doğrulama Ekranı — Supervisor / Admin / SystemAdmin.
@@ -604,9 +604,17 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           const key      = tagKey(def);
           const prefix   = def.prefix === 'opening' ? 'Ac' : 'Ka';
           const verdictRaw = r?.[verdictField(def)] as string | null;
-          const labelRaw   = r?.[`${key}CorrectedLabel` as keyof CaseTaggingReview] as string | null;
+          const correctedLabel = r?.[`${key}CorrectedLabel` as keyof CaseTaggingReview] as string | null;
+          const originalLabel  = r?.[`${key}OriginalLabel` as keyof CaseTaggingReview] as string | null;
+          // Kullanıcı kararı — "Doğru" işaretlenmiş alanlarda CorrectedLabel
+          // hiç yazılmaz (bkz. saveRow: verdict==='Dogru' → correctedCode
+          // null gönderilir, backend correctedLabel'ı da null yazar). Export'ta
+          // "Doğru Etiket" kolonu tek bakışta "olması gereken değer" göstersin
+          // diye Doğru'da OriginalLabel'a düşülür; Yanlış'ta CorrectedLabel
+          // aynen kalır.
+          const displayLabel = verdictRaw === 'Dogru' ? originalLabel : correctedLabel;
           row[`${prefix}:${def.label} Kontrol`]      = verdictRaw ? (VERDICT_TR[verdictRaw] ?? verdictRaw) : '';
-          row[`${prefix}:${def.label} Doğru Etiket`] = labelRaw ?? '';
+          row[`${prefix}:${def.label} Doğru Etiket`] = displayLabel ?? '';
         }
         row['Son Güncelleme'] = formatUtcDateTime(r?.reviewedAt);
         return row;
@@ -852,7 +860,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
               </div>
               {/* Vaka Açılış */}
               <div className="px-3 py-2 text-xs text-slate-600 dark:text-ndark-muted">
-                {formatDateTime(c.createdAt)}
+                {formatOpeningDateTime(c.createdAt)}
               </div>
               {/* Müşteri */}
               <div className="truncate px-3 py-2 text-xs text-slate-700 dark:text-ndark-text" title={c.accountName ?? undefined}>

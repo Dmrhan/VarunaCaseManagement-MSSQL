@@ -14,6 +14,27 @@ export function formatDateTime(iso?: string): string {
   }
 }
 
+/**
+ * Vaka listelerindeki "Açılış Tarihi" kolonu için — kullanıcı kararı:
+ * gün/ay başında sıfır olmadan (D/M/YYYY HH:mm), örn. "16/7/2026 15:56".
+ * formatDateTime'dan (day/month 2-digit, tr-TR toLocaleString → nokta
+ * ayraçlı "16.07.2026") FARKLI — bu yüzden elle inşa edilir; toLocaleDateString
+ * tr-TR'de gün/ay 'numeric' verilse bile ayraç olarak nokta kullanıyor.
+ * Saat/dakika sıfırla dolduruluyor (2-digit) — yalnız gün/ay dolgusuz.
+ */
+export function formatOpeningDateTime(iso?: string): string {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${hh}:${mm}`;
+  } catch {
+    return iso;
+  }
+}
+
 /** Gelecekteki bir deadline için "N gün kaldı" / "N sa kaldı" / "N dk kaldı" döner. */
 export function formatRemaining(iso?: string): string {
   if (!iso) return '—';
