@@ -916,7 +916,7 @@ export function CasesListPage({
       return [0, 1, 2, 3].map((i) => (
         <div
           key={`skel-${i}`}
-          className="h-[64px] animate-pulse rounded-xl bg-slate-100 dark:bg-ndark-card"
+          className="h-[56px] animate-pulse rounded-xl bg-slate-100 dark:bg-ndark-card"
         />
       ));
     }
@@ -1072,7 +1072,7 @@ export function CasesListPage({
     return [0, 1, 2, 3].map((i) => (
       <div
         key={`empty-${i}`}
-        className="flex h-[64px] items-center justify-center rounded-xl bg-white text-sm text-slate-400 ring-1 ring-slate-200 dark:bg-ndark-card dark:text-ndark-muted dark:ring-ndark-border"
+        className="flex h-[56px] items-center justify-center rounded-xl bg-white text-sm text-slate-400 ring-1 ring-slate-200 dark:bg-ndark-card dark:text-ndark-muted dark:ring-ndark-border"
       >
         —
       </div>
@@ -1163,11 +1163,17 @@ export function CasesListPage({
 
       {/*
         Role-aware KPI cards — backend tek truth source (GET /api/cases/stats).
-        Havuz kartı dahilse (personal L2/L3 veya team/Supervisor) 5 kart olur;
-        grid kolon sayısı buna göre genişler (kpiTiles component'in üstünde
-        hesaplanır, bkz. yukarı).
+        Havuz kartı dahilse (personal L2/L3 veya team/Supervisor) 5-6 kart
+        olur; grid kolon sayısı buna göre genişler (kpiTiles component'in
+        üstünde hesaplanır, bkz. yukarı). Kart boyutu (KpiTile) küçültüldü
+        ki 6 kart da tek satırda yan yana sığsın.
       */}
-      <div className={cn('grid grid-cols-2 gap-3', kpiTiles.length >= 5 ? 'sm:grid-cols-5' : 'sm:grid-cols-4')}>
+      <div
+        className={cn(
+          'grid grid-cols-2 gap-2',
+          kpiTiles.length >= 6 ? 'sm:grid-cols-6' : kpiTiles.length === 5 ? 'sm:grid-cols-5' : 'sm:grid-cols-4',
+        )}
+      >
         {kpiTiles}
       </div>
 
@@ -2575,7 +2581,7 @@ function KpiTile({
 }) {
   const t = KPI_TONE[tone];
   const baseClass = cn(
-    'flex items-center gap-3 rounded-xl bg-white p-3 text-left ring-1 ring-slate-200 shadow-card',
+    'flex items-center gap-2 rounded-xl bg-white p-2.5 text-left ring-1 ring-slate-200 shadow-card',
     'dark:bg-ndark-card dark:ring-ndark-border',
     extraClassName,
   );
@@ -2587,17 +2593,17 @@ function KpiTile({
     : '';
   const inner = (
     <>
-      <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', t.iconBg)}>
+      <div className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-lg', t.iconBg)}>
         {icon}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+        <div className="truncate text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
           {label}
         </div>
         <div className="flex items-baseline gap-1.5">
           <span
             className={cn(
-              'text-xl font-semibold tabular-nums',
+              'text-lg font-semibold tabular-nums',
               value === 0 ? 'text-slate-400 dark:text-ndark-muted' : t.valueColor,
             )}
           >
