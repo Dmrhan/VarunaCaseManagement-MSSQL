@@ -610,6 +610,13 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
             </span>
           </div>
         </div>
+        {/* Karar #3 dipnotu (2026-07-16 aktivasyonu) — duyurulu geçiş:
+            rakamların rejimi raporun üstünde açıkça yazar. */}
+        <div className="border-b border-slate-100 px-4 py-1 text-[10px] leading-relaxed text-slate-400 dark:border-ndark-border/50 dark:text-ndark-dim">
+          SLA süreleri, Çalışma Takvimi devrede olan şirketlerde mesai saati bazlıdır (sözleşme
+          tanımıyla uyumlu); gün birimi net iş günüdür. Yazılım geliştirmeye devredilen vakalarda
+          sözleşmedeki uzatılmış çözüm süreleri uygulanır.
+        </div>
         {data && appliedChips.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-100 px-4 py-1.5 dark:border-ndark-border/50">
             <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 dark:text-ndark-dim">

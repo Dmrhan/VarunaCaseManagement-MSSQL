@@ -63,14 +63,17 @@ const TERMINAL = new Set(['Cozuldu', 'IptalEdildi']);
  * extendedMin: resolveExtendedTargetMinutes çıktısı.
  * reason: geçmiş kaydına girecek tetik bağlamı (tanım adı + DevOps no).
  */
-export async function buildExtendedSlaPatch(row, extendedMin, reason, nowMs = Date.now()) {
+export async function buildExtendedSlaPatch(row, extendedMin, reason, nowMs = Date.now(), { calOverride } = {}) {
   if (!row || extendedMin == null) return null;
   if (row.slaTargetSource === 'extended') return null; // idempotent — tek yön
   if (TERMINAL.has(row.status)) return null;
 
   const createdMs = new Date(row.createdAt).getTime();
   const pausedMin = row.slaPausedDurationMin ?? 0;
-  const cal = await getEffectiveCalendar(row.companyId, createdMs);
+  // Codex #551 P1 — calOverride: aktivasyon/retroaktif scriptleri kesim
+  // kapısını bilinçli aşar (niyet: mevcut vakaya İŞ-saati uygulamak).
+  // Runtime çağıranlar override GEÇMEZ → kapı davranışı aynen.
+  const cal = calOverride ?? await getEffectiveCalendar(row.companyId, createdMs);
   const totalMin = extendedMin + pausedMin;
   const biz = cal ? addBusinessMinutes(createdMs, totalMin, cal) : null;
   const newDueMs = biz != null ? biz : createdMs + totalMin * 60000;
