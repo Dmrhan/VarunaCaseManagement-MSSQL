@@ -141,7 +141,15 @@ if (stepArg === 'all' || stepArg === 'extended') {
     && (!ybe.extendedSlaRequiresDevopsLink || hasDevops(c.customFields)),
   );
   console.log(`[3/3] UZATILMIŞ adaylar: ${candidates.length} (beklenti ~${EXPECTED_EXT_CANDIDATES})`);
-  if (Math.abs(candidates.length - EXPECTED_EXT_CANDIDATES) > 10) {
+  // Bitmiş-durum tanıma: aday 0 ama DB'de 'extended' damgalılar varsa iş
+  // önceki koşumda tamamlanmıştır — sapma alarmı YANLIŞ olur (2. koşum
+  // saha gözlemi, 2026-07-16).
+  const alreadyExtended = await prisma.case.count({
+    where: { companyId: COMPANY, isArchived: false, slaTargetSource: 'extended' },
+  });
+  if (candidates.length === 0 && alreadyExtended > 0) {
+    console.log(`      ✓ tamamlanmış: ${alreadyExtended} vaka zaten 'extended' damgalı — yazılacak aday yok.`);
+  } else if (Math.abs(candidates.length - EXPECTED_EXT_CANDIDATES) > 10) {
     console.error('      ⛔ SAPMA BÜYÜK — yazım durduruldu (kabul şartı 4). Listeyi inceleyin.');
     process.exit(2);
   }
