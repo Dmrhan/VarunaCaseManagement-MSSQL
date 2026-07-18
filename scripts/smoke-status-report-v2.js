@@ -88,5 +88,18 @@ ok('15 modal: mode toggle (İç Yönetici/Müşteri) + değişince yeniden üret
   && rd('src/features/cases/CaseDetailPage.tsx').includes('[open, caseId, reportMode]')
   && rd('src/features/cases/CaseDetailPage.tsx').includes('Göndermeden önce içeriği kontrol edin'));
 
+// ── 9 · Codex #553 P2×3 fix'leri ──
+ok('16 #553-1 accountName null: müşteri hitabı "Sayın null Ekibi" üretmez (fallback)',
+  src.includes('c.accountName ? `Sayın ${c.accountName} Ekibi,` : \'Sayın İlgili,\''));
+ok('17 #553-2 nextStep mode-aware: müşteri modunda "belirtilmemiştir" YAZMAZ (boş bölüm atlanır)',
+  src.includes('isCustomer\n      ? \'- nextStep')
+  && src.includes('else if (!isCustomer) parts.push(...sec(\'SONRAKİ ADIM\', \'Loglarda belirtilmemiştir.\'))')
+  && src.includes("const emptyFill = isCustomer ? '' : 'loglarda görünmüyor'"));
+ok('18 #553-3 kısa duraklama dk dalı: formatBusinessSpan 60dk altı "N dk" (0 sa değil)',
+  src.includes('function formatBusinessSpan(minutes, cal)')
+  && src.includes('if (abs < 60) return `${abs} dk`')
+  && src.includes('formatBusinessSpan(pausedMin, cal)')
+  && src.includes('formatBusinessSpan(min, cal)')); // formatSlaRemaining de reuse eder
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

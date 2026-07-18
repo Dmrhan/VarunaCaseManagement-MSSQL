@@ -114,19 +114,24 @@ function readDevopsEntries(customFieldsRaw) {
   return Array.isArray(obj?.devops) ? obj.devops : [];
 }
 
-// Durum Raporu v2 — "X iş-sa / Y iş günü kaldı|gecikme". cal takvimliyse
-// İŞ-dakikası (Faz 4 diffMinutes deseni), takvimsizde duvar-dk. dayMin =
-// netDayMinutes (molalı net gün; duvarda 1440).
+// Durum Raporu v2 — dakikayı "N dk / N iş-sa / N iş günü" biçimine çevirir.
+// Codex #553 P2: 60 dk altı DAKİKA olarak yazılır — yoksa "0 sa" gibi
+// yanıltıcı çıktı olur (kısa duraklama "hiç beklenmedi" görünürdü).
+// cal takvimliyse "iş-" öneki + net-gün katsayısı; takvimsizde düz sa/gün.
+function formatBusinessSpan(minutes, cal) {
+  const abs = Math.abs(Math.round(minutes));
+  const dayMin = netDayMinutes(cal);
+  if (abs < 60) return `${abs} dk`;
+  if (abs < dayMin) return `${Math.round(abs / 60)} ${cal ? 'iş-sa' : 'sa'}`;
+  return `${Math.round(abs / dayMin)} ${cal ? 'iş günü' : 'gün'}`;
+}
+
+// Durum Raporu v2 — "X iş-sa/iş günü kaldı|gecikme". cal takvimliyse İŞ-dk
+// (Faz 4 diffMinutes deseni), takvimsizde duvar-dk.
 function formatSlaRemaining(fromMs, dueMs, cal) {
   const min = diffMinutes(fromMs, dueMs, cal); // + kaldı / − gecikme
-  const overdue = min < 0;
-  const abs = Math.abs(min);
-  const dayMin = netDayMinutes(cal);
-  let span;
-  if (abs < 60) span = `${abs} dk`;
-  else if (abs < dayMin) span = `${Math.round(abs / 60)} ${cal ? 'iş-sa' : 'sa'}`;
-  else span = `${Math.round(abs / dayMin)} ${cal ? 'iş günü' : 'gün'}`;
-  return overdue ? `${span} gecikme` : `${span} kaldı`;
+  const span = formatBusinessSpan(min, cal);
+  return min < 0 ? `${span} gecikme` : `${span} kaldı`;
 }
 
 // Süreç özetinde gösterilmemesi gereken AI metadata field'ları.
@@ -293,7 +298,11 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
     : 'Atanmamış';
   const dateTr = formatDateTr(c.createdAt);
   const ownerTitle = c.assignedPerson?.title ?? null;
-  const greeting = isCustomer ? `Sayın ${c.accountName} Ekibi,` : 'Sayın İlgili,';
+  // Codex #553 P2 — accountName nullable (müşteri eşleşmesi öncesi açılan
+  // vaka); "Sayın null Ekibi" üretmesin → müşteri modunda ad yoksa nötr hitap.
+  const greeting = isCustomer
+    ? (c.accountName ? `Sayın ${c.accountName} Ekibi,` : 'Sayın İlgili,')
+    : 'Sayın İlgili,';
   // Müşteri modunda imza KURUMSAL: sorumlu + unvan + şirket adı (Univera vb.).
   // İç modda mevcut davranış korunur (sorumlu + Varuna sistem imzası).
   const footerBlock = (isCustomer
@@ -471,10 +480,7 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
   if (pausedMin > 0) {
     const gate = await getCalendarGateFor(c.companyId);
     const cal = gate(new Date(c.createdAt).getTime());
-    const dayMin = netDayMinutes(cal);
-    const span = pausedMin < dayMin
-      ? `${Math.round(pausedMin / 60)} ${cal ? 'iş-sa' : 'sa'}`
-      : `${Math.round(pausedMin / dayMin)} ${cal ? 'iş günü' : 'gün'}`;
+    const span = formatBusinessSpan(pausedMin, cal); // #553 P2 — dk dalı dahil
     enrichmentSections.push(`BEKLEME SÜRESİ:\nToplam ${span} 3. taraf/geliştirme dönüşü beklendi (SLA sayacı bu süre durdu).`);
   }
 
@@ -590,7 +596,12 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
     '      çözüm/aktarım.',
     '    - Profesyonel kurumsal ton — mail-ready. Madde imi / ":" prefix format kullanma.',
     '- currentStatus: 2-3 cümle. Vakanın şu anki durumu, kim ilgileniyor, ne bekleniyor.',
-    '- nextStep: 1-2 cümle. Önerilen sonraki aksiyon. Logdan çıkmıyorsa: "Loglarda belirtilmemiştir."',
+    // Codex #553 P2 — nextStep talimatı mode'a göre: müşteri modunda "Loglarda
+    // belirtilmemiştir." iç jargonu ÜRETİLMEZ; sonraki adım yoksa BOŞ bırakılır
+    // (backend fallback'i de mode-aware, aşağıda).
+    isCustomer
+      ? '- nextStep: 1-2 cümle. Müşteriye dönük sonraki adım/taahhüt. Belirgin bir sonraki adım yoksa BOŞ string döndür ("") — "belirtilmemiştir" gibi ifade YAZMA.'
+      : '- nextStep: 1-2 cümle. Önerilen sonraki aksiyon. Logdan çıkmıyorsa: "Loglarda belirtilmemiştir."',
     '',
     'ÇIKTI JSON ŞEMASI:',
     '{',
@@ -631,33 +642,30 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
     });
 
     // Backend birleştirir — şablon statik kısımları + AI bölümleri.
+    // Codex #553 P2 — bölüm birleştirme mode-aware: müşteri modunda boş bölüm
+    // "loglarda görünmüyor" iç-jargonu YAZMAZ; opsiyonel bölüm (SONRAKİ ADIM)
+    // boşsa tamamen atlanır (boş-alan kuralı). İç modda mevcut davranış.
     const subject = `Konu: ${c.caseNumber} — ${c.title} — Durum Raporu`;
-    const report = [
-      headerBlock,
-      '',
-      '─────────────────────────────────────',
-      'SORUNUN ÖZETİ',
-      '─────────────────────────────────────',
-      String(json.problemSummary ?? '').slice(0, 800).trim() || 'loglarda görünmüyor',
-      '',
-      '─────────────────────────────────────',
-      'SÜREÇ ÖZETİ',
-      '─────────────────────────────────────',
-      String(json.processSummary ?? '').slice(0, 2000).trim() || 'loglarda görünmüyor',
-      '',
-      '─────────────────────────────────────',
-      'GÜNCEL DURUM',
-      '─────────────────────────────────────',
-      String(json.currentStatus ?? '').slice(0, 500).trim() || 'loglarda görünmüyor',
-      '',
-      '─────────────────────────────────────',
-      'SONRAKİ ADIM',
-      '─────────────────────────────────────',
-      String(json.nextStep ?? '').slice(0, 400).trim() || 'Loglarda belirtilmemiştir.',
-      '',
-      '─────────────────────────────────────',
-      footerBlock,
-    ].join('\n');
+    const RULE = '─────────────────────────────────────';
+    const sec = (heading, text) => [RULE, heading, RULE, text, ''];
+    const emptyFill = isCustomer ? '' : 'loglarda görünmüyor';
+    const problem = String(json.problemSummary ?? '').slice(0, 800).trim();
+    const process = String(json.processSummary ?? '').slice(0, 2000).trim();
+    const current = String(json.currentStatus ?? '').slice(0, 500).trim();
+    const nextStep = String(json.nextStep ?? '').slice(0, 400).trim();
+
+    const parts = [headerBlock, ''];
+    // Zorunlu 3 bölüm: iç modda boşsa fallback yazılır, müşteri modunda boşsa
+    // yine başlık korunur ama nötr boş bırakılır (iç-jargon SIZMAZ).
+    parts.push(...sec('SORUNUN ÖZETİ', problem || emptyFill));
+    parts.push(...sec('SÜREÇ ÖZETİ', process || emptyFill));
+    parts.push(...sec('GÜNCEL DURUM', current || emptyFill));
+    // SONRAKİ ADIM: iç modda boşsa "Loglarda belirtilmemiştir."; müşteri
+    // modunda boşsa bölüm TAMAMEN atlanır.
+    if (nextStep) parts.push(...sec('SONRAKİ ADIM', nextStep));
+    else if (!isCustomer) parts.push(...sec('SONRAKİ ADIM', 'Loglarda belirtilmemiştir.'));
+    parts.push(RULE, footerBlock);
+    const report = parts.join('\n');
 
     return {
       report,
