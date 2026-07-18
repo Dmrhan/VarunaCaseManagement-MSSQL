@@ -309,6 +309,10 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
   // Durum Raporu v2 — VAKA BİLGİSİ statü: müşteri modunda ham enum yerine
   // müşteri-dostu etiket (kullanıcı kararı 2026-07-17).
   const statusDisplay = isCustomer ? customerStatusLabel(statusTr) : statusTr;
+  // Codex #554 P2 — statü ALAN ETİKETİ de mode-aware: "Statü" prompt'ta
+  // müşteri-yasağı listesindeki iç jargon; sabit label AI'a gitmediğinden
+  // burada değişir → müşteri raporunda "Durum".
+  const statusLabel = isCustomer ? 'Durum      ' : 'Statü      ';
 
   // Durum Raporu v2 — ortak türetimler (hem AI yolu hem boş-aktivite fallback'i
   // kullanır; tek yerde tanımlanır — eski iki mükerrer owner/dateTr birleşti).
@@ -397,7 +401,7 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
       `Konu       : ${c.title}`,
       `Açılış     : ${dateTr}`,
       `Sorumlu    : ${owner}`,
-      `Statü      : ${statusDisplay}`,
+      `${statusLabel}: ${statusDisplay}`,
       '',
       '─────────────────────────────────────',
       'SORUNUN ÖZETİ',
@@ -466,7 +470,7 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
     `Konu       : ${c.title}`,
     `Açılış     : ${dateTr}`,
     `Sorumlu    : ${owner}`,
-    `Statü      : ${statusDisplay}`,
+    `${statusLabel}: ${statusDisplay}`,
   ].join('\n');
   // footerBlock ortak türetimlerde (mode'a göre) zaten tanımlandı.
 

@@ -110,7 +110,7 @@ ok('19 DevOps no müşteride GİZLİ: customer → numara yok, iç referans yasa
 ok('20 statü müşteri-dostu etiket: 3rdPartyBekleniyor → "Çözüm sürecinde"; statusDisplay mode-aware',
   src.includes("'3rdPartyBekleniyor': 'Çözüm sürecinde (geliştirme/uzman ekipte)'")
   && src.includes('const statusDisplay = isCustomer ? customerStatusLabel(statusTr) : statusTr')
-  && src.includes('Statü      : ${statusDisplay}'));
+  && src.includes('${statusLabel}: ${statusDisplay}'));
 ok('21 hedef tarih taahhüdü: customer prompt SLA hedef tarihini müşteriye taahhüt olarak ister',
   src.includes('HEDEF TARİH:')
   && src.includes('müşteriye TAAHHÜT olarak'));
@@ -128,6 +128,11 @@ ok('24 girdi-sanitize (müşteri): DevOps id redact + ham statü→etiket olay a
   && src.includes("out = out.split(String(id)).join('[geliştirme kaydı]')")
   && src.includes("a.actionType === 'StatusChange' ? statusToken(a.fromValue)")
   && src.includes('redact(n.content.slice(0, 300))'));
+
+ok('25 #554 P2: statü ALAN ETİKETİ mode-aware — müşteri "Durum", iç "Statü" (label da jargonsuz)',
+  src.includes("const statusLabel = isCustomer ? 'Durum      ' : 'Statü      '")
+  && src.includes('${statusLabel}: ${statusDisplay}')
+  && !src.includes('`Statü      : ${statusDisplay}`'));
 
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);
