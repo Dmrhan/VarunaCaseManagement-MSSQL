@@ -772,7 +772,7 @@ router.post(
     // 3. Strict JSON schema — model sadece geçerli teamId üretebilir
     const teamIdEnum = teams.map((t) => t.id);
     const teamNameEnum = teams.map((t) => t.name);
-    const reasonCodeEnum = ['wrong_team', 'expertise', 'workload', 'escalation', 'customer_request', 'other'];
+    const reasonCodeEnum = ['wrong_team', 'expertise', 'workload', 'escalation', 'customer_request', 'followed_case', 'other'];
 
     const schema = {
       type: 'object',
@@ -829,6 +829,7 @@ router.post(
       '- workload: mevcut takım yoğun, başkasının daha hızlı bakabilir',
       '- escalation: eskalasyon — daha üst yetkili veya destek takımı',
       '- customer_request: müşteri açıkça başka bir takımla ilgilenmek istedi',
+      '- followed_case: takip edilen/izlenen bir vakanın ilgili takıma yönlendirilmesi',
       '- other: yukarıdakilerin hiçbiri uymuyor',
       '',
       'reasonText: max 200 karakter, Türkçe, somut gerekçe (genel söz değil).',
