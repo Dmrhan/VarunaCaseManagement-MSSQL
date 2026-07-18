@@ -2019,10 +2019,17 @@ export const caseService = {
    * Persist edilmez — UI her "Yenile" tıklayışında yeniden üretir.
    * AI yoksa 503 → UI fallback mesajı gösterir.
    */
-  async getActionSummary(caseId: string): Promise<ActionSummary | undefined> {
+  async getActionSummary(
+    caseId: string,
+    mode: 'internal' | 'customer' = 'internal',
+  ): Promise<ActionSummary | undefined> {
     return apiFetch<ActionSummary>(
       `${API_BASE}/${caseId}/action-summary`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      },
       'Eylem özeti üretilemedi',
     );
   },

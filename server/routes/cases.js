@@ -1777,10 +1777,13 @@ router.post(
   '/:id/action-summary',
   asyncRoute(async (req, res) => {
     await assertCaseSecurityFilterAccess(req);
+    // Durum Raporu v2 — muhatap modu: 'internal' (default) | 'customer'.
+    // Geçersiz değer BE'de fail-safe internal'a düşer.
     const result = await generateActionSummary({
       caseId: req.params.id,
       userId: req.user.id,
       allowedCompanyIds: req.user.allowedCompanyIds,
+      mode: (req.body ?? {}).mode,
     });
     if (result.error === 'not_found') return res.status(404).json({ error: 'Vaka bulunamadı' });
     if (result.error === 'forbidden') return res.status(403).json({ error: 'forbidden' });
