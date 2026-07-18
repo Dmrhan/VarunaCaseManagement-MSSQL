@@ -1,6 +1,7 @@
 import { prisma } from '../db/client.js';
 import { aiClient, callOpenAI, logAIUsage } from './aiClient.js';
 import { fromDb, M_STATUS } from '../db/enumMap.js';
+import { getCalendarGateFor, diffMinutes, netDayMinutes } from './sla/businessTime.js';
 
 // Codex P2 — DB'de status ASCII identifier tutulur (Cozuldu/IptalEdildi).
 const STATUS_DB_RESOLVED_AS = M_STATUS['Çözüldü'];      // 'Cozuldu'
@@ -100,6 +101,34 @@ function truncate(s, max) {
   return t.length > max ? t.slice(0, max) + '…' : t;
 }
 
+// Durum Raporu v2 — DevOps okuyucu (caseRepository.readDevopsArray modül-içi
+// olduğundan, sla-activation-write.mjs'teki desenle küçük yerel kopya).
+function readDevopsEntries(customFieldsRaw) {
+  if (!customFieldsRaw) return [];
+  let obj;
+  try {
+    obj = typeof customFieldsRaw === 'string' ? JSON.parse(customFieldsRaw) : customFieldsRaw;
+  } catch {
+    return [];
+  }
+  return Array.isArray(obj?.devops) ? obj.devops : [];
+}
+
+// Durum Raporu v2 — "X iş-sa / Y iş günü kaldı|gecikme". cal takvimliyse
+// İŞ-dakikası (Faz 4 diffMinutes deseni), takvimsizde duvar-dk. dayMin =
+// netDayMinutes (molalı net gün; duvarda 1440).
+function formatSlaRemaining(fromMs, dueMs, cal) {
+  const min = diffMinutes(fromMs, dueMs, cal); // + kaldı / − gecikme
+  const overdue = min < 0;
+  const abs = Math.abs(min);
+  const dayMin = netDayMinutes(cal);
+  let span;
+  if (abs < 60) span = `${abs} dk`;
+  else if (abs < dayMin) span = `${Math.round(abs / 60)} ${cal ? 'iş-sa' : 'sa'}`;
+  else span = `${Math.round(abs / dayMin)} ${cal ? 'iş günü' : 'gün'}`;
+  return overdue ? `${span} gecikme` : `${span} kaldı`;
+}
+
 // Süreç özetinde gösterilmemesi gereken AI metadata field'ları.
 // Bu alanların FieldUpdate event'leri rapora dahil edilmez.
 const AI_META_FIELDS = new Set([
@@ -116,16 +145,30 @@ const AI_META_FIELDS = new Set([
   'aiRootCause',
 ]);
 
-export async function generateActionSummary({ caseId, userId, allowedCompanyIds }) {
+// Durum Raporu v2 (2026-07-17) — muhatap modu.
+//   'internal' : iç yönetici (mevcut geri-uyumlu davranış; iç risk/jargon serbest)
+//   'customer' : müşteriye gidecek — iç risk gizli, jargon yasak, kurumsal imza,
+//                bilinmeyen alan HİÇ yazılmaz.
+const REPORT_MODES = new Set(['internal', 'customer']);
+
+// customerFields — 'customer' modunda kesinlikle görünmemesi gereken TR
+// jargon/işaret ifadeleri (smoke bunları çıktı-yapısında değil, prompt
+// kurallarında arar; runtime metin denetimi AI'a bırakılır).
+
+export async function generateActionSummary({ caseId, userId, allowedCompanyIds, mode = 'internal' }) {
   if (!aiClient) {
     return { error: 'ai_unavailable', message: 'AI servisi yapılandırılmamış.' };
   }
+  // Fail-safe: geçersiz mode → internal (en muhafazakâr — mevcut davranış).
+  const reportMode = REPORT_MODES.has(mode) ? mode : 'internal';
+  const isCustomer = reportMode === 'customer';
 
   const c = await prisma.case.findUnique({
     where: { id: caseId },
     select: {
       id: true,
       companyId: true,
+      companyName: true,
       accountId: true,
       caseNumber: true,
       title: true,
@@ -133,11 +176,13 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
       // PII tablosu: status-report endpoint'i için accountName +
       // assignedPersonName İZİNLİ (mail muhatabı/imza zorunlu).
       // Account.email/phone/tckn*, customerContact* HÂLÂ YASAK.
+      // 'customer' modunda bile bu izin listesi GENİŞLETİLMEZ.
       accountName: true,
       status: true,
       priority: true,
       assignedPersonName: true,
       assignedTeamName: true,
+      assignedPerson: { select: { title: true } }, // v2 — imza unvanı
       escalationLevel: true,
       thirdPartyName: true,
       createdAt: true,
@@ -151,6 +196,12 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
       accountProjectName: true,
       resolutionNote: true,
       cancellationReason: true,
+      // Durum Raporu v2 — SLA görünümü (iş-saati + uzatılmış kaynak)
+      slaResponseDueAt: true,
+      slaResolutionDueAt: true,
+      slaResolutionTargetMin: true,
+      slaTargetSource: true,
+      slaPausedDurationMin: true,
     },
   });
   if (!c) return { error: 'not_found' };
@@ -235,6 +286,25 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
   const statusTr = fromDb({ status: c.status }).status;
   const escalationTr = fromDb({ escalationLevel: c.escalationLevel }).escalationLevel;
 
+  // Durum Raporu v2 — ortak türetimler (hem AI yolu hem boş-aktivite fallback'i
+  // kullanır; tek yerde tanımlanır — eski iki mükerrer owner/dateTr birleşti).
+  const owner = c.assignedPersonName
+    ? `${c.assignedPersonName}${c.assignedTeamName ? ` / ${c.assignedTeamName}` : ''}`
+    : 'Atanmamış';
+  const dateTr = formatDateTr(c.createdAt);
+  const ownerTitle = c.assignedPerson?.title ?? null;
+  const greeting = isCustomer ? `Sayın ${c.accountName} Ekibi,` : 'Sayın İlgili,';
+  // Müşteri modunda imza KURUMSAL: sorumlu + unvan + şirket adı (Univera vb.).
+  // İç modda mevcut davranış korunur (sorumlu + Varuna sistem imzası).
+  const footerBlock = (isCustomer
+    ? [
+        'Saygılarımızla,',
+        (c.assignedPersonName ?? 'Destek Ekibi') + (ownerTitle ? `\n${ownerTitle}` : ''),
+        c.companyName ?? '',
+      ].filter(Boolean)
+    : ['Saygılarımızla,', owner, 'Varuna Vaka Yönetim Sistemi']
+  ).join('\n');
+
   // Compact event list — token kontrol için not 300 char ile kırpılır.
   // `whenTr` pre-formatlanmış TR tarih+saat (Europe/Istanbul) — AI'ın
   // doğrudan kullanması için. `at` ISO da bırakılır (gerekirse referans).
@@ -260,14 +330,13 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
   // Boş aktivite — AI'ı çağırmadan minimal rapor.
   if (activities.length === 0) {
     const subject = `Konu: ${c.caseNumber} — ${c.title} — Durum Raporu`;
-    const owner = c.assignedPersonName
-      ? `${c.assignedPersonName}${c.assignedTeamName ? ` / ${c.assignedTeamName}` : ''}`
-      : 'Atanmamış';
-    const dateTr = formatDateTr(c.createdAt);
+    // Müşteri modunda "Müşteri" satırı imzada firma zaten var; VAKA BİLGİSİ'nde
+    // müşteri adı iç raporda kalır (muhatap zaten o firma). Bilinmeyen-alan
+    // kuralı: boş SORUNUN ÖZETİ customer modunda "loglarda görünmüyor" YAZMAZ.
     const report = [
       subject,
       '',
-      'Sayın ilgili,',
+      greeting,
       '',
       'Aşağıda söz konusu vakanın güncel durum özeti sunulmaktadır.',
       '',
@@ -284,12 +353,7 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
       '─────────────────────────────────────',
       'SORUNUN ÖZETİ',
       '─────────────────────────────────────',
-      c.description ? c.description.slice(0, 500) : 'loglarda görünmüyor',
-      '',
-      '─────────────────────────────────────',
-      'SÜREÇ ÖZETİ',
-      '─────────────────────────────────────',
-      'Henüz operasyonel bir aksiyon kaydedilmedi.',
+      c.description ? c.description.slice(0, 500) : (isCustomer ? 'Talebinizin detayları değerlendirilmektedir.' : 'loglarda görünmüyor'),
       '',
       '─────────────────────────────────────',
       'GÜNCEL DURUM',
@@ -297,14 +361,7 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
       `Vaka ${statusTr} statüsünde, sorumlusu ${owner}.`,
       '',
       '─────────────────────────────────────',
-      'SONRAKİ ADIM',
-      '─────────────────────────────────────',
-      'Loglarda belirtilmemiştir.',
-      '',
-      '─────────────────────────────────────',
-      'Saygılarımızla,',
-      owner,
-      'Varuna Vaka Yönetim Sistemi',
+      footerBlock,
     ].join('\n');
     return {
       report,
@@ -314,30 +371,39 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
     };
   }
 
-  const owner = c.assignedPersonName
-    ? `${c.assignedPersonName}${c.assignedTeamName ? ` / ${c.assignedTeamName}` : ''}`
-    : 'Atanmamış';
-  const dateTr = formatDateTr(c.createdAt);
-
-  const system = [
-    "Sen Varuna CRM'de paydaşlara gönderilecek vaka durum raporları üreten profesyonel bir asistanısın.",
+  const systemCommon = [
     'Çıktın doğrudan mailde kullanılabilecek formatlanmış bir rapordur.',
     '',
     'KURALLAR (uymak zorunlu):',
     '- Türkçe yaz.',
     '- Profesyonel ton — mail-ready.',
-    '- Tahmin etme, uydurma. Bir bilgi logda/notta yoksa "loglarda görünmüyor" veya "Loglarda belirtilmemiştir." yaz.',
-    "- 'RUNA AI' aktörlü kayıtları operasyonel insan aksiyonu gibi gösterme; sadece anlamlıysa kısaca anılabilir.",
-    '- Süreç Özetinde önemli geçişleri TARİH BAZLI grupla (max 6-7 tarih satırı).',
-    '- Her log satırını tekrarlama — önemli olayları (atama, statü, öncelik, eskalasyon, 3. parti, snooze, aktarım, çağrı, not, dosya, çözüm) özetle.',
+    '- Süreç Özetinde önemli geçişleri tarih bazlı, akıcı nesir anlat.',
+    '- Her log satırını tekrarlama — önemli olayları özetle.',
     '- TR tarih formatı (örn. "12 Mayıs 2026").',
     '- Çıktı SADECE JSON formatında olsun.',
+  ];
+  const systemInternal = [
+    "Sen Varuna CRM'de İÇ YÖNETİME sunulacak vaka durum raporları üreten profesyonel bir asistanısın.",
+    ...systemCommon,
+    '- Tahmin etme, uydurma. Bir bilgi logda/notta yoksa "loglarda görünmüyor" veya "Loglarda belirtilmemiştir." yaz.',
+    "- 'RUNA AI' aktörlü kayıtları operasyonel insan aksiyonu gibi gösterme; sadece anlamlıysa kısaca anılabilir.",
+    '- İç bilgiler (eskalasyon, SLA ihlali, 3. parti adı, aktarım gecikmeleri) serbestçe belirtilebilir.',
   ].join('\n');
+  const systemCustomer = [
+    'Sen bir müşteri hizmetleri firmasında MÜŞTERİYE gönderilecek vaka durum raporları üreten profesyonel bir asistanısın.',
+    ...systemCommon,
+    '- MÜŞTERİ DİLİ: iç mutfak jargonu YASAK. Şu terimleri KULLANMA: "log", "eskalasyon", "SLA ihlali", "3. parti", "aktarım", "snooze". Yerine sırasıyla: "kayıtlarımız", "önceliklendirme", "hedef tarihin aşılması", "çözüm ortağı", "yönlendirme" gibi müşteri-dostu ifadeler kullan.',
+    '- İÇ RİSKLERİ GİZLE: gecikme suçlaması, aksiyon sahibi eleştirisi, iç süreç aksaklığı YAZILMAZ. Yalnız müşteriye dönük durum + taahhüt sunulur.',
+    '- BİLİNMEYEN ALAN: bir bilgi kayıtlarda yoksa o cümleyi/bölümü TAMAMEN ATLA — "kayıtlarda yok / belirtilmemiştir" YAZMA. (Boş-alan kuralı.)',
+    '- Sıcak ama profesyonel, güven veren bir ton kullan. Müşteriye "sizin talebiniz" perspektifinden yaz.',
+    '- Yazılım geliştirmeye iletildiyse bunu olumlu çerçevele ("kalıcı çözüm için geliştirme birimimize iletilmiştir").',
+  ].join('\n');
+  const system = isCustomer ? systemCustomer : systemInternal;
 
   const headerBlock = [
     `Konu: ${c.caseNumber} — ${c.title} — Durum Raporu`,
     '',
-    'Sayın ilgili,',
+    greeting,
     '',
     'Aşağıda söz konusu vakanın güncel durum özeti sunulmaktadır.',
     '',
@@ -351,13 +417,66 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
     `Sorumlu    : ${owner}`,
     `Statü      : ${statusTr}`,
   ].join('\n');
-
-  const footerBlock = ['Saygılarımızla,', owner, 'Varuna Vaka Yönetim Sistemi'].join('\n');
+  // footerBlock ortak türetimlerde (mode'a göre) zaten tanımlandı.
 
   // ───────── Faz 4 — yeni yapısal bölümler ─────────
   // Q2 kuralı: boş alan/bölüm yazılmaz. Her bölüm conditional toplanır,
   // sonra mevcut user prompt'a "VAKA META" altına eklenir.
   const enrichmentSections = [];
+
+  // ## SLA (Durum Raporu v2) — hedef + kalan (iş-saati) + kaynak.
+  // Kalan süre damganın rejimiyle okunur (Faz 4: takvim kapısı satırın
+  // createdAt'ine göre; kesim öncesi vaka duvar-dk). Terminal vakada
+  // "kalan" anlamsız → yalnız kaynak/hedef bilgisi.
+  const isTerminal = c.status === STATUS_DB_RESOLVED_AS || c.status === STATUS_DB_CANCELLED_AS;
+  if (c.slaResolutionDueAt || c.slaResponseDueAt) {
+    const gate = await getCalendarGateFor(c.companyId);
+    const cal = gate(new Date(c.createdAt).getTime());
+    const nowMs = Date.now();
+    const slaLines = [];
+    if (c.slaResponseDueAt && !isTerminal) {
+      slaLines.push(`Yanıt hedefi: ${formatDateTr(c.slaResponseDueAt)} (${formatSlaRemaining(nowMs, new Date(c.slaResponseDueAt).getTime(), cal)})`);
+    }
+    if (c.slaResolutionDueAt) {
+      const kaynak = c.slaTargetSource === 'extended'
+        ? ' — sözleşmedeki yazılım geliştirme çözüm süresi kapsamında'
+        : '';
+      const kalan = isTerminal ? '' : ` (${formatSlaRemaining(nowMs, new Date(c.slaResolutionDueAt).getTime(), cal)})`;
+      slaLines.push(`Çözüm hedefi: ${formatDateTr(c.slaResolutionDueAt)}${kalan}${kaynak}`);
+    }
+    if (c.slaViolation && !isTerminal) slaLines.push('Durum: çözüm hedefi aşıldı.');
+    if (slaLines.length) {
+      enrichmentSections.push(`SLA HEDEFİ:\n${slaLines.join('\n')}`);
+    }
+  }
+
+  // ## DevOps (Durum Raporu v2) — yazılım geliştirme referansı + durumu.
+  // "Yazılım Bakım Ekibinde" devri raporun kritik cümlesi; süreç özetine girer.
+  const devopsEntries = readDevopsEntries(c.customFields);
+  if (devopsEntries.length) {
+    const dvLines = devopsEntries
+      .filter((e) => e?.id != null)
+      .map((e) => {
+        const state = e.state ? ` (durum: ${e.state})` : '';
+        const t = e.title ? ` — ${truncate(e.title, 100)}` : '';
+        return `- Geliştirme kaydı #${e.id}${state}${t}`;
+      });
+    if (dvLines.length) {
+      enrichmentSections.push(`YAZILIM GELİŞTİRME REFERANSI:\n${dvLines.join('\n')}`);
+    }
+  }
+
+  // ## Bekleme muhasebesi (Durum Raporu v2) — "neden sürdü" cevabı.
+  const pausedMin = c.slaPausedDurationMin ?? 0;
+  if (pausedMin > 0) {
+    const gate = await getCalendarGateFor(c.companyId);
+    const cal = gate(new Date(c.createdAt).getTime());
+    const dayMin = netDayMinutes(cal);
+    const span = pausedMin < dayMin
+      ? `${Math.round(pausedMin / 60)} ${cal ? 'iş-sa' : 'sa'}`
+      : `${Math.round(pausedMin / dayMin)} ${cal ? 'iş günü' : 'gün'}`;
+    enrichmentSections.push(`BEKLEME SÜRESİ:\nToplam ${span} 3. taraf/geliştirme dönüşü beklendi (SLA sayacı bu süre durdu).`);
+  }
 
   // ## Sınıflandırma (Smart Ticket)
   const st = extractSmartTicket(c.customFields);
