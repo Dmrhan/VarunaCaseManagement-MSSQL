@@ -101,5 +101,33 @@ ok('18 #553-3 kısa duraklama dk dalı: formatBusinessSpan 60dk altı "N dk" (0 
   && src.includes('formatBusinessSpan(pausedMin, cal)')
   && src.includes('formatBusinessSpan(min, cal)')); // formatSlaRemaining de reuse eder
 
+// ── 10 · v2 rötuşları (kullanıcı kararı 2026-07-17) ──
+ok('19 DevOps no müşteride GİZLİ: customer → numara yok, iç referans yasağı yazılı',
+  src.includes("if (isCustomer) {\n      enrichmentSections.push(")
+  && src.includes('yazılım geliştirme birimine iletilmiştir')
+  && src.includes('iç referans/kayıt NUMARASI YAZMA')
+  && src.includes('Geliştirme kaydı #${e.id}')); // internal yolu numara verir
+ok('20 statü müşteri-dostu etiket: 3rdPartyBekleniyor → "Çözüm sürecinde"; statusDisplay mode-aware',
+  src.includes("'3rdPartyBekleniyor': 'Çözüm sürecinde (geliştirme/uzman ekipte)'")
+  && src.includes('const statusDisplay = isCustomer ? customerStatusLabel(statusTr) : statusTr')
+  && src.includes('Statü      : ${statusDisplay}'));
+ok('21 hedef tarih taahhüdü: customer prompt SLA hedef tarihini müşteriye taahhüt olarak ister',
+  src.includes('HEDEF TARİH:')
+  && src.includes('müşteriye TAAHHÜT olarak'));
+
+ok('22 halüsinasyon guard: özel-ad sadakati (JTI→Jimmy yasağı) + saat yalnız whenTr\'den',
+  src.includes('ÖZEL AD SADAKATİ')
+  && src.includes('Jimmy')
+  && src.includes('Saatleri yalnız `whenTr` alanından al'));
+ok('23 UTC kayması fix: ham `at` ISO event\'ten kaldırıldı, VAKA META tarihleri formatDateTimeTr',
+  !src.includes('at: a.at.toISOString()')
+  && src.includes('- Açılış: ${formatDateTimeTr(c.createdAt)}'));
+
+ok('24 girdi-sanitize (müşteri): DevOps id redact + ham statü→etiket olay akışında',
+  src.includes('const redact = (txt) => {')
+  && src.includes("out = out.split(String(id)).join('[geliştirme kaydı]')")
+  && src.includes("a.actionType === 'StatusChange' ? statusToken(a.fromValue)")
+  && src.includes('redact(n.content.slice(0, 300))'));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

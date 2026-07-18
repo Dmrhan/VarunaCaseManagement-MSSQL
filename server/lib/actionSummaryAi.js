@@ -33,6 +33,22 @@ const STATUS_DB_CANCELLED_AS = M_STATUS['İptalEdildi']; // 'IptalEdildi'
 
 const MAX_EVENTS = 50;
 
+// Durum Raporu v2 — MÜŞTERİ-dostu statü etiketi (kullanıcı kararı 2026-07-17).
+// VAKA BİLGİSİ bloğu statik (AI'a gitmez) → müşteriye "3rdPartyBekleniyor"
+// gibi ham enum GÖRÜNMESİN. Anahtar = fromDb sonrası görünen TR statü.
+const CUSTOMER_STATUS_LABEL = {
+  'Açık': 'Talebiniz alındı',
+  'İncelemede': 'İnceleniyor',
+  '3rdPartyBekleniyor': 'Çözüm sürecinde (geliştirme/uzman ekipte)',
+  'Eskalasyon': 'Öncelikli olarak ele alınıyor',
+  'Çözüldü': 'Çözümlendi',
+  'YenidenAcildi': 'Yeniden değerlendiriliyor',
+  'İptalEdildi': 'Kapatıldı',
+};
+function customerStatusLabel(statusTr) {
+  return CUSTOMER_STATUS_LABEL[statusTr] ?? 'İşleniyor';
+}
+
 // Faz 4 (Plan v2 — /tmp/runa-ai-enrichment-plan.md) — status-report input
 // enrichment cap'leri. supervisor-summary'dakilerden DAHA TUTUCU: status-report
 // zaten 50-olay JSON içerdiği için input bütçesi yüksek.
@@ -290,6 +306,9 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
 
   const statusTr = fromDb({ status: c.status }).status;
   const escalationTr = fromDb({ escalationLevel: c.escalationLevel }).escalationLevel;
+  // Durum Raporu v2 — VAKA BİLGİSİ statü: müşteri modunda ham enum yerine
+  // müşteri-dostu etiket (kullanıcı kararı 2026-07-17).
+  const statusDisplay = isCustomer ? customerStatusLabel(statusTr) : statusTr;
 
   // Durum Raporu v2 — ortak türetimler (hem AI yolu hem boş-aktivite fallback'i
   // kullanır; tek yerde tanımlanır — eski iki mükerrer owner/dateTr birleşti).
@@ -316,23 +335,44 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
 
   // Compact event list — token kontrol için not 300 char ile kırpılır.
   // `whenTr` pre-formatlanmış TR tarih+saat (Europe/Istanbul) — AI'ın
-  // doğrudan kullanması için. `at` ISO da bırakılır (gerekirse referans).
+  // doğrudan kullanması için.
+  // 2026-07-17 fix — HAM UTC `at` alanı KALDIRILDI: model onu (whenTr yerine)
+  // okuyup saatleri 3 saat geri kaydırıyordu (17:08→14:08). Yalnız
+  // pre-formatlanmış TR (Europe/Istanbul) whenTr gönderilir.
   // Aktiviteler zaten `at: 'asc'` ile sorgulandı → kronolojik sıra korunur.
+  // Durum Raporu v2 — MÜŞTERİ modunda olay akışı SANITIZE edilir. Prompt
+  // yasağı LLM'i tam tutmadığından (canlı gözlem: DevOps no + ham statü
+  // narrative'e sızıyordu), sızıntıyı GİRDİDE keseriz — kullanıcının "DevOps
+  // numarası gizli" kararı ancak böyle garanti edilir. İki temizlik:
+  //  (1) Bilinen DevOps id'leri metinlerden çıkar → "[geliştirme kaydı]".
+  //  (2) Ham statü token'ları (from/to/action) müşteri-dostu etikete map.
+  const devopsIds = readDevopsEntries(c.customFields).map((e) => e?.id).filter((x) => x != null);
+  const redact = (txt) => {
+    if (!txt || !isCustomer) return txt;
+    let out = String(txt);
+    for (const id of devopsIds) out = out.split(String(id)).join('[geliştirme kaydı]');
+    return out;
+  };
+  const statusToken = (v) => {
+    if (!v || !isCustomer) return v;
+    // v hem TR (fromDb sonrası) hem ham DB değeri olabilir → ikisini de dene.
+    const tr = fromDb({ status: v }).status ?? v;
+    return CUSTOMER_STATUS_LABEL[tr] ?? CUSTOMER_STATUS_LABEL[v] ?? v;
+  };
   const events = activities.map((a) => ({
-    at: a.at.toISOString(),
     whenTr: formatDateTimeTr(a.at),
     type: a.actionType ?? 'Other',
-    action: a.action,
+    action: redact(a.action),
     field: a.fieldName ?? null,
-    from: a.fromValue ?? null,
-    to: a.toValue ?? null,
-    note: a.note ? a.note.slice(0, 300) : null,
+    from: a.actionType === 'StatusChange' ? statusToken(a.fromValue) : redact(a.fromValue ?? null),
+    to: a.actionType === 'StatusChange' ? statusToken(a.toValue) : redact(a.toValue ?? null),
+    note: a.note ? redact(a.note.slice(0, 300)) : null,
     actor: a.actor,
   }));
 
   const notesContext = recentNotes.length > 0
     ? recentNotes
-        .map((n) => `- [${n.createdAt.toISOString()}] ${n.authorName}: ${n.content.slice(0, 300)}`)
+        .map((n) => `- [${formatDateTimeTr(n.createdAt)}] ${n.authorName}: ${redact(n.content.slice(0, 300))}`)
         .join('\n')
     : '(iç not yok)';
 
@@ -357,7 +397,7 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
       `Konu       : ${c.title}`,
       `Açılış     : ${dateTr}`,
       `Sorumlu    : ${owner}`,
-      `Statü      : ${statusTr}`,
+      `Statü      : ${statusDisplay}`,
       '',
       '─────────────────────────────────────',
       'SORUNUN ÖZETİ',
@@ -367,7 +407,7 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
       '─────────────────────────────────────',
       'GÜNCEL DURUM',
       '─────────────────────────────────────',
-      `Vaka ${statusTr} statüsünde, sorumlusu ${owner}.`,
+      `Vaka ${statusDisplay} durumunda, sorumlusu ${owner}.`,
       '',
       '─────────────────────────────────────',
       footerBlock,
@@ -388,7 +428,8 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
     '- Profesyonel ton — mail-ready.',
     '- Süreç Özetinde önemli geçişleri tarih bazlı, akıcı nesir anlat.',
     '- Her log satırını tekrarlama — önemli olayları özetle.',
-    '- TR tarih formatı (örn. "12 Mayıs 2026").',
+    '- TR tarih formatı (örn. "12 Mayıs 2026"). Saatleri yalnız `whenTr` alanından al — ISO/UTC yorumlama, ofset ekleme.',
+    '- ÖZEL AD SADAKATİ: firma adı, kişi adı, ürün adı, vaka konusu ne verildiyse HARFİ HARFİNE aynen kullan. Kısaltma, çevirme, düzeltme veya benzetme YAPMA (örn. "JTI"yi "Jimmy" yazma). Emin değilsen VAKA META\'daki yazımı kopyala.',
     '- Çıktı SADECE JSON formatında olsun.',
   ];
   const systemInternal = [
@@ -401,11 +442,12 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
   const systemCustomer = [
     'Sen bir müşteri hizmetleri firmasında MÜŞTERİYE gönderilecek vaka durum raporları üreten profesyonel bir asistanısın.',
     ...systemCommon,
-    '- MÜŞTERİ DİLİ: iç mutfak jargonu YASAK. Şu terimleri KULLANMA: "log", "eskalasyon", "SLA ihlali", "3. parti", "aktarım", "snooze". Yerine sırasıyla: "kayıtlarımız", "önceliklendirme", "hedef tarihin aşılması", "çözüm ortağı", "yönlendirme" gibi müşteri-dostu ifadeler kullan.',
+    '- MÜŞTERİ DİLİ: iç mutfak jargonu YASAK — olayları ANLATIRKEN de geçerli. Şu ifadeleri (ve ham sistem statülerini) HİÇBİR cümlede kullanma: "log", "eskalasyon", "SLA ihlali", "3. parti", "3rdPartyBekleniyor", "İncelemede", "aktarım", "snooze", "DevOps", "çalışma öğesi", "iş kaydı", "statü". Ham durum adı yerine müşteri-dostu anlatım kullan (örn. "3rdPartyBekleniyor" → "geliştirme/uzman ekibin değerlendirmesine alınmıştır"; "İncelemede" → "incelenmeye başlanmıştır"; "DevOps kaydı bağlandı" → "geliştirme birimine iletilmiştir").',
     '- İÇ RİSKLERİ GİZLE: gecikme suçlaması, aksiyon sahibi eleştirisi, iç süreç aksaklığı YAZILMAZ. Yalnız müşteriye dönük durum + taahhüt sunulur.',
     '- BİLİNMEYEN ALAN: bir bilgi kayıtlarda yoksa o cümleyi/bölümü TAMAMEN ATLA — "kayıtlarda yok / belirtilmemiştir" YAZMA. (Boş-alan kuralı.)',
     '- Sıcak ama profesyonel, güven veren bir ton kullan. Müşteriye "sizin talebiniz" perspektifinden yaz.',
-    '- Yazılım geliştirmeye iletildiyse bunu olumlu çerçevele ("kalıcı çözüm için geliştirme birimimize iletilmiştir").',
+    '- Yazılım geliştirmeye iletildiyse bunu olumlu çerçevele ("kalıcı çözüm için geliştirme birimimize iletilmiştir"). İç referans/kayıt NUMARASI YAZMA.',
+    '- HEDEF TARİH: SLA HEDEFİ bölümünde çözüm hedef tarihi verildiyse, "currentStatus" veya "nextStep" içinde bunu müşteriye TAAHHÜT olarak doğal cümleyle belirt (örn. "Talebinizin [tarih] tarihine kadar çözümlenmesi hedeflenmektedir."). Tarih yoksa uydurma.',
   ].join('\n');
   const system = isCustomer ? systemCustomer : systemInternal;
 
@@ -424,7 +466,7 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
     `Konu       : ${c.title}`,
     `Açılış     : ${dateTr}`,
     `Sorumlu    : ${owner}`,
-    `Statü      : ${statusTr}`,
+    `Statü      : ${statusDisplay}`,
   ].join('\n');
   // footerBlock ortak türetimlerde (mode'a göre) zaten tanımlandı.
 
@@ -459,18 +501,22 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
     }
   }
 
-  // ## DevOps (Durum Raporu v2) — yazılım geliştirme referansı + durumu.
+  // ## DevOps (Durum Raporu v2) — yazılım geliştirme referansı.
   // "Yazılım Bakım Ekibinde" devri raporun kritik cümlesi; süreç özetine girer.
-  const devopsEntries = readDevopsEntries(c.customFields);
+  // Kullanıcı kararı 2026-07-17: MÜŞTERİ modunda iç referans NUMARASI GİZLİ —
+  // yalnız "geliştirme birimine iletildi" bilgisi verilir (numara sızmaz).
+  const devopsEntries = readDevopsEntries(c.customFields).filter((e) => e?.id != null);
   if (devopsEntries.length) {
-    const dvLines = devopsEntries
-      .filter((e) => e?.id != null)
-      .map((e) => {
+    if (isCustomer) {
+      enrichmentSections.push(
+        'YAZILIM GELİŞTİRME:\nBu talep, kalıcı çözüm için yazılım geliştirme birimine iletilmiştir. (Bu bilgiyi kullanırken iç referans/kayıt NUMARASI YAZMA.)',
+      );
+    } else {
+      const dvLines = devopsEntries.map((e) => {
         const state = e.state ? ` (durum: ${e.state})` : '';
         const t = e.title ? ` — ${truncate(e.title, 100)}` : '';
         return `- Geliştirme kaydı #${e.id}${state}${t}`;
       });
-    if (dvLines.length) {
       enrichmentSections.push(`YAZILIM GELİŞTİRME REFERANSI:\n${dvLines.join('\n')}`);
     }
   }
@@ -550,8 +596,8 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds,
     `- Sorumlu: ${owner}`,
     `- Eskalasyon: ${escalationTr}`,
     `- 3. Parti: ${c.thirdPartyName ?? '-'}`,
-    `- Açılış: ${c.createdAt.toISOString()} (${dateTr})`,
-    `- Çözüm: ${c.resolvedAt ? c.resolvedAt.toISOString() : '(henüz çözülmedi)'}`,
+    `- Açılış: ${formatDateTimeTr(c.createdAt)}`,
+    `- Çözüm: ${c.resolvedAt ? formatDateTimeTr(c.resolvedAt) : '(henüz çözülmedi)'}`,
     `- SLA İhlali: ${c.slaViolation ? 'Var' : 'Yok'}`,
     `- Aktarım Sayısı: ${c.transferCount ?? 0}`,
     '',
