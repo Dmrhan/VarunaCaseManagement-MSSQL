@@ -3166,6 +3166,8 @@ function StatusReportModal({
   const [loading, setLoading] = useState(false);
   const [errored, setErrored] = useState(false);
   const [copied, setCopied] = useState(false);
+  // Durum Raporu v2 — muhatap modu. İç yönetici (varsayılan) veya müşteri.
+  const [reportMode, setReportMode] = useState<'internal' | 'customer'>('internal');
 
   // Modal açılınca AI çağrısı yap. Kapanınca state'i sıfırla.
   useEffect(() => {
@@ -3174,13 +3176,14 @@ function StatusReportModal({
       setLoading(false);
       setErrored(false);
       setCopied(false);
+      setReportMode('internal');
       return;
     }
     let alive = true;
     setLoading(true);
     setErrored(false);
     setReport(null);
-    void caseService.getActionSummary(caseId).then((r) => {
+    void caseService.getActionSummary(caseId, reportMode).then((r) => {
       if (!alive) return;
       setLoading(false);
       if (r) setReport(r);
@@ -3189,13 +3192,14 @@ function StatusReportModal({
     return () => {
       alive = false;
     };
-  }, [open, caseId]);
+    // reportMode değişince yeniden üret (muhatap değişti → dil/PII değişir).
+  }, [open, caseId, reportMode]);
 
   async function regenerate() {
     if (loading) return;
     setLoading(true);
     setErrored(false);
-    const r = await caseService.getActionSummary(caseId);
+    const r = await caseService.getActionSummary(caseId, reportMode);
     setLoading(false);
     if (r) setReport(r);
     else setErrored(true);
@@ -3256,6 +3260,41 @@ function StatusReportModal({
         </div>
       }
     >
+      {/* Durum Raporu v2 — muhatap seçimi. Rapor kimin için üretiliyor:
+          İç Yönetici (risk/jargon serbest) veya Müşteri (jargonsuz, taahhüt
+          odaklı, kurumsal imza). Seçim değişince rapor otomatik yeniden üretilir. */}
+      <div className="mb-3">
+        <div className="mb-1 text-[11px] font-medium text-slate-500 dark:text-ndark-muted">
+          Rapor kimin için?
+        </div>
+        <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-ndark-border dark:bg-ndark-bg">
+          {([
+            { key: 'internal', label: 'İç Yönetici' },
+            { key: 'customer', label: 'Müşteri' },
+          ] as const).map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              disabled={loading}
+              onClick={() => setReportMode(opt.key)}
+              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+                reportMode === opt.key
+                  ? 'bg-white text-violet-700 shadow-sm dark:bg-ndark-card dark:text-violet-300'
+                  : 'text-slate-500 hover:text-slate-700 dark:text-ndark-muted dark:hover:text-ndark-text'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        {reportMode === 'customer' && (
+          <p className="mt-1 text-[11px] leading-snug text-slate-500 dark:text-ndark-muted">
+            Müşteriye gönderilebilir dil: iç notlar ve teknik ifadeler gizlenir, kurumsal imza eklenir.
+            Göndermeden önce içeriği kontrol edin.
+          </p>
+        )}
+      </div>
+
       {loading && (
         <div className="flex items-center gap-2 rounded-md bg-violet-50 px-3 py-3 text-sm text-violet-900 ring-1 ring-violet-200 dark:bg-violet-950/30 dark:text-violet-200 dark:ring-violet-900/40">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-violet-400 border-t-transparent" />

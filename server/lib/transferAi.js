@@ -11,6 +11,7 @@ import { aiClient, callOpenAI, logAIUsage } from './aiClient.js';
  */
 
 const REASON_LABEL = {
+  followed_case: 'Takipli Vaka',
   wrong_team: 'Yanlış Takım',
   expertise: 'Uzmanlık',
   workload: 'İş Yükü',
