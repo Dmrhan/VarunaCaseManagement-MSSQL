@@ -490,10 +490,54 @@ router.post('/suggest-closure', async (req, res) => {
     const kbResolution = clarifyingAnswers
       ? `${resolution}\n\n[Operatör netleştirmesi] ${clarifyingAnswers}`
       : resolution;
+
+    // WR-KB-Taxonomy-Sync — admin panelindeki ("Akıllı Ticket Tanımları") aktif
+    // kapanış taksonomisini DB'den çek; suggestClose'a HTTP body ile taşınır
+    // (DB tek doğruluk kaynağı olur — data/cc-taxonomy-v2.json ile senkron
+    // bekleme/restart gerekmez, bkz. eski scripts/sync-kb-taxonomy-from-db.mjs).
+    // Aynı sonuç aşağıdaki matchByLabel eşleştirmesinde de yeniden kullanılır
+    // (tek DB round-trip).
+    const tax = await loadActiveClosureTaxonomies(companyId);
+
     const sgBody = { description, resolution: kbResolution };
     if (openUrun) sgBody.open_urun = openUrun;
     if (openIsSureci) sgBody.open_is_sureci = openIsSureci;
     if (openIslemTipi) sgBody.open_islem_tipi = openIslemTipi;
+
+    // Yalnızca en az 1 aktif rootCauseGroup varsa eklenir; boş/az admin verisi
+    // suggestClose'un JSON fallback'ini (data/cc-taxonomy-v2.json) bozmasın.
+    if (tax.rootCauseGroup.length > 0) {
+      const resolutionTypeLabels = tax.resolutionType.map((r) => r.label);
+      // Kapanış kategorileri bağımsız (aşağıdaki matchByLabel de parentId ile
+      // daraltma yapmıyor — ürün kararı). parentId gerçekten grupla eşleşiyorsa
+      // grup-kapsamlı cascade kur; hiçbiri eşleşmiyorsa (decouple senaryosu —
+      // admin parentId set etmemiş) her gruba TÜM detayları ver, over-reject etme.
+      const anyDetailCoupled = tax.rootCauseDetail.some((d) =>
+        tax.rootCauseGroup.some((g) => g.id === d.parentId),
+      );
+      sgBody.taxonomy = {
+        groups: tax.rootCauseGroup.map((g) => {
+          const scopedDetails = anyDetailCoupled
+            ? tax.rootCauseDetail.filter((d) => d.parentId === g.id)
+            : tax.rootCauseDetail;
+          return {
+            group: g.label,
+            details: scopedDetails.map((d) => ({
+              label: d.label,
+              // Decoupled — her çözüm tipi izinli sayılır (over-reject etme);
+              // gerçek daraltma matchByLabel'da da yok.
+              cozum_tipleri: resolutionTypeLabels,
+            })),
+          };
+        }),
+        cozum_tipi: { label: 'Çözüm Tipi', description: '', values: resolutionTypeLabels },
+        kalici_onlem: {
+          label: 'Kalıcı Önlem',
+          description: '',
+          values: tax.permanentPrevention.map((p) => p.label),
+        },
+      };
+    }
 
     // Faz 0 — Kapanış YALNIZ etiket üretir. Pahalı analyze/draft çağrısı KALDIRILDI:
     // analyze 8sn'ye bound'luydu ama ~120-180sn sürüyor → draft gelmiyor, yine de
@@ -534,8 +578,7 @@ router.post('/suggest-closure', async (req, res) => {
         ? (kbResponse.data && typeof kbResponse.data === 'object' ? kbResponse.data : kbResponse)
         : {};
 
-    const tax = await loadActiveClosureTaxonomies(companyId);
-
+    // tax zaten yukarıda (sgBody.taxonomy kurulurken) çekildi — ikinci sorgu yok.
     // Kapanış kategorileri bağımsız — detay artık gruba bağlı değil; tüm
     // rootCauseDetail listesine karşı eşleştirilir (ürün kararı: kapanış
     // kategorileri birbirine bağlı olmamalı, parentId ile daraltma yok).
