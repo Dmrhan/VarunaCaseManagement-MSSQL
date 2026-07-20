@@ -1560,39 +1560,39 @@ function isValidOpenValue(field, value) {
   if (value == null) return true;
   return getOpenField(field).values.includes(value);
 }
-function getKokNedenGroups() {
-  return loadTaxonomyV2().close.kok_neden.groups;
+function getKokNedenGroups(override) {
+  return override?.groups ?? loadTaxonomyV2().close.kok_neden.groups;
 }
-function getCozumTipi() {
-  return loadTaxonomyV2().close.cozum_tipi;
+function getCozumTipi(override) {
+  return override?.cozum_tipi ?? loadTaxonomyV2().close.cozum_tipi;
 }
-function getKaliciOnlem() {
-  return loadTaxonomyV2().close.kalici_onlem;
+function getKaliciOnlem(override) {
+  return override?.kalici_onlem ?? loadTaxonomyV2().close.kalici_onlem;
 }
-function isValidKokNedenGrubu(group) {
+function isValidKokNedenGrubu(group, override) {
   if (group == null) return true;
-  return getKokNedenGroups().some((g) => g.group === group);
+  return getKokNedenGroups(override).some((g) => g.group === group);
 }
-function isValidKokNedenDetay(detail, group) {
+function isValidKokNedenDetay(detail, group, override) {
   if (detail == null) return true;
-  const groups = getKokNedenGroups();
+  const groups = getKokNedenGroups(override);
   const scope = group ? groups.filter((g) => g.group === group) : groups;
   return scope.some((g) => g.details.some((d) => d.label === detail));
 }
-function getAllowedCozumTipleri(group, detail) {
-  if (!group || !detail) return getCozumTipi().values;
-  const g = getKokNedenGroups().find((x) => x.group === group);
+function getAllowedCozumTipleri(group, detail, override) {
+  if (!group || !detail) return getCozumTipi(override).values;
+  const g = getKokNedenGroups(override).find((x) => x.group === group);
   const d = g?.details.find((x) => x.label === detail);
   return d?.cozum_tipleri ?? [];
 }
-function isValidCozumTipi(value, group, detail) {
+function isValidCozumTipi(value, group, detail, override) {
   if (value == null) return true;
-  if (group && detail) return getAllowedCozumTipleri(group, detail).includes(value);
-  return getCozumTipi().values.includes(value);
+  if (group && detail) return getAllowedCozumTipleri(group, detail, override).includes(value);
+  return getCozumTipi(override).values.includes(value);
 }
-function isValidKaliciOnlem(value) {
+function isValidKaliciOnlem(value, override) {
   if (value == null) return true;
-  return getKaliciOnlem().values.includes(value);
+  return getKaliciOnlem(override).values.includes(value);
 }
 function formatOpenForPrompt() {
   const t = loadTaxonomyV2();
@@ -1771,7 +1771,8 @@ async function suggestClose(input) {
   if (input.open_islem_tipi) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \u0130\u015Flem Tipi: ${input.open_islem_tipi}`);
   const retrievalBlock = input.closeExamples || "";
   const closeGold = input.skipGold ? "" : formatGoldForPrompt("close");
-  const cascadeBlock = getKokNedenGroups().map((g) => {
+  const kokNedenGroups = getKokNedenGroups(input.taxonomy);
+  const cascadeBlock = kokNedenGroups.map((g) => {
     const dets = g.details.map((d) => `    - ${d.label}   [\xE7\xF6z\xFCm: ${d.cozum_tipleri.join(" | ")}]`).join("\n");
     return `\u25A0 ${g.group}
 ${dets}`;
@@ -1785,7 +1786,7 @@ ${dets}`;
     cascadeBlock,
     "",
     "TAKSONOM\u0130 \u2014 KALICI \xD6NLEM (opsiyonel, gruptan ba\u011F\u0131ms\u0131z):",
-    getKaliciOnlem().values.map((v2) => `  \u2022 ${v2}`).join("\n"),
+    getKaliciOnlem(input.taxonomy).values.map((v2) => `  \u2022 ${v2}`).join("\n"),
     "",
     ...closeGold ? ["GER\xC7EK ET\u0130KETLENM\u0130\u015E \xD6RNEKLER (insan uzman do\u011Frulad\u0131 \u2014 ayn\u0131 mant\u0131kla kapan\u0131\u015F se\xE7):", closeGold, ""] : [],
     "TICKET BA\u011ELAMI:",
@@ -1799,7 +1800,7 @@ ${dets}`;
     ...input.clarifyingAnswers ? [`OPERAT\xD6R EK B\u0130LG\u0130 (clarifying sorulara cevap \u2014 etiketlerken KULLAN): ${input.clarifyingAnswers.slice(0, 1500)}`, ""] : [],
     `\xC7\u0131kt\u0131 JSON \u015Femas\u0131 (sadece JSON):`,
     `{`,
-    `  "kok_neden_grubu": string | null,   // 9 gruptan biri`,
+    `  "kok_neden_grubu": string | null,   // ${kokNedenGroups.length} gruptan biri`,
     `  "kok_neden_detayi": string | null,  // SE\xC7\u0130LEN grubun alt\u0131ndaki detaylardan biri`,
     `  "cozum_tipi": string | null,        // SE\xC7\u0130LEN detay\u0131n izinli \xE7\xF6z\xFCm tiplerinden biri`,
     `  "kalici_onlem": string | null,      // kal\u0131c\u0131 \xF6nlemlerden biri, opsiyonel`,
@@ -1828,10 +1829,10 @@ ${dets}`;
     return emptyCloseResult(res, "LLM \xE7\u0131kt\u0131s\u0131 \u015Femaya uymad\u0131");
   }
   const out = v.data;
-  const kok_neden_grubu = isValidKokNedenGrubu(out.kok_neden_grubu) ? out.kok_neden_grubu : null;
-  const kok_neden_detayi = kok_neden_grubu && isValidKokNedenDetay(out.kok_neden_detayi, kok_neden_grubu) ? out.kok_neden_detayi : null;
-  const cozum_tipi = kok_neden_grubu && kok_neden_detayi && isValidCozumTipi(out.cozum_tipi, kok_neden_grubu, kok_neden_detayi) ? out.cozum_tipi : null;
-  const kalici_onlem = isValidKaliciOnlem(out.kalici_onlem) ? out.kalici_onlem : null;
+  const kok_neden_grubu = isValidKokNedenGrubu(out.kok_neden_grubu, input.taxonomy) ? out.kok_neden_grubu : null;
+  const kok_neden_detayi = kok_neden_grubu && isValidKokNedenDetay(out.kok_neden_detayi, kok_neden_grubu, input.taxonomy) ? out.kok_neden_detayi : null;
+  const cozum_tipi = kok_neden_grubu && kok_neden_detayi && isValidCozumTipi(out.cozum_tipi, kok_neden_grubu, kok_neden_detayi, input.taxonomy) ? out.cozum_tipi : null;
+  const kalici_onlem = isValidKaliciOnlem(out.kalici_onlem, input.taxonomy) ? out.kalici_onlem : null;
   const uncertain = !input.clarifyingAnswers && (kok_neden_grubu === null || kok_neden_detayi === null || out.confidence < CLOSE_CLARIFY_THRESHOLD);
   return {
     kok_neden_grubu,
