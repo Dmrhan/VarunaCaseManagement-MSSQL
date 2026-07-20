@@ -55,6 +55,9 @@ export const UPLOAD_ALLOWED_MIME_TYPES = [
   'application/x-sqlite3',
   // Video
   'video/quicktime',
+  // 2026-07-17 iş talebi (UNV-1000994 sahadan gelen mp4 eki) — boyut
+  // sınırı (25MB) BİLEREK yükseltilmedi; sadece tip kabulü genişletildi.
+  'video/mp4',
 ] as const;
 
 export const UPLOAD_ALLOWED_EXTENSIONS = [
@@ -80,6 +83,7 @@ export const UPLOAD_ALLOWED_EXTENSIONS = [
   '.s3db',
   // Video
   '.mov',
+  '.mp4',
 ] as const;
 
 /**
