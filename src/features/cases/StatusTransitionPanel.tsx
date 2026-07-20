@@ -242,6 +242,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     }
   }
   const [thirdPartyId, setThirdPartyId] = useState('');
+  const [thirdPartyNote, setThirdPartyNote] = useState('');
   const [escalationLevel, setEscalationLevel] = useState<EscalationLevel | ''>('');
   const [escalationReason, setEscalationReason] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -304,6 +305,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     setResolutionNote('');
     setCancelReason('');
     setThirdPartyId('');
+    setThirdPartyNote('');
     setEscalationLevel('');
     setEscalationReason('');
     setError(null);
@@ -529,9 +531,16 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     setResolutionNote('');
     setCancelReason('');
     setThirdPartyId('');
+    setThirdPartyNote('');
     setEscalationLevel('');
     setEscalationReason('');
   }
+
+  // thirdPartyId değişince (farklı 3. parti seçilince) önceki açıklama
+  // taşınmasın — her tanımın kendi zorunluluğu ayrı.
+  useEffect(() => {
+    setThirdPartyNote('');
+  }, [thirdPartyId]);
 
   // FAZ 4 — Çözüldü transition için zorunlu kontrol listesi maddelerinin
   // tamamlanmış olması gerekir. Eksik varsa transition bloklanır.
@@ -573,6 +582,9 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   // kilitleyen ikinci savunma hattı.
   const openingTagsGateActive = pending === 'Çözüldü' && openingTagsMissing;
 
+  // U-C — seçili 3. parti tanımı, requiresNote gate'i için.
+  const selectedThirdParty = thirdParties.find((tp) => tp.id === thirdPartyId);
+
   function applyDisabled(): boolean {
     if (!pending) return true;
     if (customerGateActive) return true; // müşterisiz Çözüldü engeli (SystemAdmin muaf)
@@ -583,6 +595,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     if (openingTagsGateActive) return true;
     if (pending === 'İptalEdildi' && !cancelReason.trim()) return true;
     if (pending === '3rdPartyBekleniyor' && !thirdPartyId) return true;
+    if (pending === '3rdPartyBekleniyor' && selectedThirdParty?.requiresNote === true && !thirdPartyNote.trim()) return true;
     if (pending === 'Eskalasyon' && (!escalationLevel || !escalationReason.trim())) return true;
     return false;
   }
@@ -648,6 +661,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
       cancellationReason: pending === 'İptalEdildi' ? cancelReason.trim() : undefined,
       thirdPartyId: pending === '3rdPartyBekleniyor' ? tp?.id : undefined,
       thirdPartyName: pending === '3rdPartyBekleniyor' ? tp?.name : undefined,
+      thirdPartyNote: pending === '3rdPartyBekleniyor' ? thirdPartyNote.trim() : undefined,
       escalationLevel: pending === 'Eskalasyon' && escalationLevel ? (escalationLevel as EscalationLevel) : undefined,
       escalationReason: pending === 'Eskalasyon' ? escalationReason.trim() : undefined,
       smartTicketClosure: smartTicketClosurePayload,
@@ -679,6 +693,11 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
       } else if (pending === 'İptalEdildi' && MENTION_RE.test(cancelReason)) {
         await caseService.addNote(item.id, {
           content: `Vaka iptal edildi. Gerekçe: ${cancelReason.trim()}`,
+          visibility: 'Internal',
+        });
+      } else if (pending === '3rdPartyBekleniyor' && MENTION_RE.test(thirdPartyNote)) {
+        await caseService.addNote(item.id, {
+          content: `3. parti bekleme açıklaması: ${thirdPartyNote.trim()}`,
           visibility: 'Internal',
         });
       }
@@ -1074,6 +1093,18 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                   </option>
                 ))}
               </Select>
+            </Field>
+          )}
+
+          {pending === '3rdPartyBekleniyor' && selectedThirdParty?.requiresNote === true && (
+            <Field label="Bekleme Açıklaması" required>
+              <MentionTextarea
+                caseId={item.id}
+                value={thirdPartyNote}
+                onChange={setThirdPartyNote}
+                placeholder="Neden bekleniyor? Kısa açıklama yazın… (@kişi)"
+                rows={2}
+              />
             </Field>
           )}
 

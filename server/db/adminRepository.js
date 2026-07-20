@@ -72,6 +72,7 @@ export const thirdPartyRepo = {
         // (uygular=false, DevOps-şartı=true).
         triggersExtendedSla: input.triggersExtendedSla === true,
         extendedSlaRequiresDevopsLink: input.extendedSlaRequiresDevopsLink !== false,
+        requiresNote: input.requiresNote === true,
       },
     });
   },
@@ -92,6 +93,7 @@ export const thirdPartyRepo = {
         ...(patch.pausesSla !== undefined && { pausesSla: patch.pausesSla }),
         ...(patch.triggersExtendedSla !== undefined && { triggersExtendedSla: !!patch.triggersExtendedSla }),
         ...(patch.extendedSlaRequiresDevopsLink !== undefined && { extendedSlaRequiresDevopsLink: !!patch.extendedSlaRequiresDevopsLink }),
+        ...(patch.requiresNote !== undefined && { requiresNote: !!patch.requiresNote }),
       },
     });
   },
