@@ -721,6 +721,7 @@ export const caseService = {
       cancellationReason?: string;
       thirdPartyId?: string;
       thirdPartyName?: string;
+      thirdPartyNote?: string;
       escalationLevel?: EscalationLevel;
       escalationReason?: string;
       /**

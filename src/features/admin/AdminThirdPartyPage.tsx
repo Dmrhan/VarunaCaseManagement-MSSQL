@@ -243,7 +243,7 @@ function ThirdPartyEditModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [form, setForm] = useState<ThirdPartyInput>({ name: '', description: '', isActive: true, companyId: defaultCompanyId, pausesSla: true, triggersExtendedSla: false, extendedSlaRequiresDevopsLink: true });
+  const [form, setForm] = useState<ThirdPartyInput>({ name: '', description: '', isActive: true, companyId: defaultCompanyId, pausesSla: true, triggersExtendedSla: false, extendedSlaRequiresDevopsLink: true, requiresNote: false });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
@@ -255,11 +255,11 @@ function ThirdPartyEditModal({
       void (async () => {
         const item = await adminService.thirdParties.get(editingId);
         if (item) {
-          setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive, companyId: item.companyId, pausesSla: item.pausesSla !== false, triggersExtendedSla: item.triggersExtendedSla === true, extendedSlaRequiresDevopsLink: item.extendedSlaRequiresDevopsLink !== false });
+          setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive, companyId: item.companyId, pausesSla: item.pausesSla !== false, triggersExtendedSla: item.triggersExtendedSla === true, extendedSlaRequiresDevopsLink: item.extendedSlaRequiresDevopsLink !== false, requiresNote: item.requiresNote === true });
         }
       })();
     } else {
-      setForm({ name: '', description: '', isActive: true, companyId: defaultCompanyId || undefined, pausesSla: true, triggersExtendedSla: false, extendedSlaRequiresDevopsLink: true });
+      setForm({ name: '', description: '', isActive: true, companyId: defaultCompanyId || undefined, pausesSla: true, triggersExtendedSla: false, extendedSlaRequiresDevopsLink: true, requiresNote: false });
     }
   }, [open, mode, editingId, defaultCompanyId]);
 
@@ -274,6 +274,7 @@ function ThirdPartyEditModal({
       pausesSla: form.pausesSla !== false,
       triggersExtendedSla: form.triggersExtendedSla === true,
       extendedSlaRequiresDevopsLink: form.extendedSlaRequiresDevopsLink !== false,
+      requiresNote: form.requiresNote === true,
     };
 
     const r =
@@ -389,6 +390,22 @@ function ThirdPartyEditModal({
             className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
           />
           Beklenirken SLA dursun
+        </label>
+
+        <label className="flex items-start gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={form.requiresNote === true}
+            onChange={(e) => setForm((f) => ({ ...f, requiresNote: e.target.checked }))}
+            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+          />
+          <span>
+            Seçildiğinde açıklama zorunlu
+            <span className="block text-xs text-slate-500">
+              Bu 3. parti seçildiğinde operatör bekleme nedenini yazmadan statü geçişini
+              uygulayamaz. Girilen açıklama vaka raporlarında görüntülenebilir.
+            </span>
+          </span>
         </label>
 
         {/* Uzatılmış SLA v1 (U-B) — iki parçalı tetik. İkinci anahtar

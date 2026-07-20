@@ -40,6 +40,8 @@ export interface ThirdPartyInput {
   // Uzatılmış SLA v1 — tanım bazlı iki parçalı tetik (U-B)
   triggersExtendedSla?: boolean;
   extendedSlaRequiresDevopsLink?: boolean;
+  // U-C — bu tanım seçildiğinde 3rdPartyBekleniyor geçişinde açıklama zorunlu mu.
+  requiresNote?: boolean;
 }
 
 export interface DocumentTypeInput {

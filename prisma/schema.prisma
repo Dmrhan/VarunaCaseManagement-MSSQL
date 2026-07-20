@@ -1329,6 +1329,9 @@ model ThirdParty {
   // bayrak kayıtta kalır.
   triggersExtendedSla          Boolean @default(false)
   extendedSlaRequiresDevopsLink Boolean @default(true)
+  /// U-C — bu 3. parti seçildiğinde "3rdPartyBekleniyor" geçişinde açıklama
+  /// (Case.thirdPartyNote) zorunlu olsun mu.
+  requiresNote Boolean @default(false)
   createdAt   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt   DateTime @updatedAt
 
@@ -1593,6 +1596,10 @@ model Case {
   // 3rd party
   thirdPartyId   String? @db.NVarChar(450)
   thirdPartyName String? @db.NVarChar(Max)
+  /// U-C — 3. parti bekleme açıklaması. thirdPartyId/thirdPartyName'in aksine
+  /// statüden çıkınca TEMİZLENMEZ; raporlanabilir kalıcı kayıt (cancellationReason
+  /// deseni). ThirdParty.requiresNote=true olan tanımlarda zorunlu.
+  thirdPartyNote String? @db.NVarChar(Max)
 
   // ProactiveTracking alanları
   financialStatus  String? @db.NVarChar(50) // enum:FinancialStatus
