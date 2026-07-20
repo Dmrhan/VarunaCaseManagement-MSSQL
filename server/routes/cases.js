@@ -1394,7 +1394,7 @@ router.patch(
 
 /**
  * POST /api/cases/:id/transition — statü geçişi
- * Body: { nextStatus, resolutionNote?, cancellationReason?, thirdPartyId?, thirdPartyName?, escalationLevel?, escalationReason? }
+ * Body: { nextStatus, resolutionNote?, cancellationReason?, thirdPartyId?, thirdPartyName?, thirdPartyNote?, escalationLevel?, escalationReason? }
  */
 router.post(
   '/:id/transition',

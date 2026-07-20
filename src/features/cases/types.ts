@@ -73,6 +73,8 @@ export interface CaseThirdParty {
   // Uzatılmış SLA v1 — tanım bazlı iki parçalı tetik (U-B)
   triggersExtendedSla?: boolean;
   extendedSlaRequiresDevopsLink?: boolean;
+  // U-C — bu tanım seçildiğinde 3rdPartyBekleniyor geçişinde açıklama zorunlu mu.
+  requiresNote?: boolean;
 }
 
 export interface CaseDocumentType {
@@ -454,6 +456,9 @@ export interface Case {
   // Spec 5.1 — third_party_id FK (3rdPartyBekleniyor statüsünde zorunlu)
   thirdPartyId?: string;
   thirdPartyName?: string;
+  // U-C — 3. parti bekleme açıklaması. thirdPartyId/thirdPartyName'in aksine
+  // statüden çıkınca temizlenmez; raporlanabilir kalıcı kayıt.
+  thirdPartyNote?: string | null;
 
   // Spec 5.2 — ProactiveTracking'e özel (caseType !== 'ProactiveTracking' iken undefined)
   financialStatus?: FinancialStatus;

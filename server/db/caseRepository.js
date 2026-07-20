@@ -15,6 +15,7 @@ import { resolveSlaPolicy, resolveTargetMinutes } from '../lib/sla/slaPolicyReso
 import { getEffectiveCalendar, addBusinessMinutes, businessMinutesBetween, getCalendarGateFor, diffMinutes, netDayMinutes } from '../lib/sla/businessTime.js';
 import { closeCustomerWaitPatch } from '../lib/sla/customerWaitPause.js';
 import { resolveExtendedTargetMinutes, extendedSlaTriggerMet, buildExtendedSlaPatch } from '../lib/sla/extendedSla.js';
+import { resolveThirdPartyNote } from '../lib/thirdPartyNoteGuard.js';
 
 /**
  * PR-1 (Codex P1) + PR-2 — defansif throw helper.
@@ -4390,6 +4391,9 @@ export const caseRepository = {
     let nextResolutionDueAt = cwClose?.slaResolutionDueAt ?? prev.slaResolutionDueAt;
     let resolvedThirdPartyId = prev.thirdPartyId;
     let resolvedThirdPartyName = prev.thirdPartyName;
+    // U-C — thirdPartyId/Name'in aksine leavingPause'da TEMİZLENMEZ; kalıcı
+    // ve raporlanabilir kalması istendi (cancellationReason deseni).
+    let resolvedThirdPartyNote = prev.thirdPartyNote;
 
     if (enteringPause) {
       if (payload.thirdPartyId) {
@@ -4402,6 +4406,7 @@ export const caseRepository = {
             pausesSla: true,
             triggersExtendedSla: true,
             extendedSlaRequiresDevopsLink: true,
+            requiresNote: true,
           },
         });
         // Codex P2 fix — Global (companyId=null) 3. partiler tüm
@@ -4414,8 +4419,16 @@ export const caseRepository = {
         if (!tp || (tp.companyId !== null && tp.companyId !== companyId)) {
           throw new CaseValidationError('Seçilen 3. parti bu şirkete ait değil.', { status: 400, code: 'invalid_third_party' });
         }
+        // U-C — tanım requiresNote=true ise açıklama zorunlu. Backend
+        // otoriter kapı; frontend gate bypass edilse bile burada durur.
+        // Karar saf fonksiyonda (thirdPartyNoteGuard.js) — DB'siz test edilebilir.
+        const noteResult = resolveThirdPartyNote(tp, payload);
+        if (noteResult.missing) {
+          throw new CaseValidationError('Bu 3. parti için bekleme açıklaması zorunlu.', { status: 400, code: 'third_party_note_required' });
+        }
         resolvedThirdPartyId = tp.id;
         resolvedThirdPartyName = tp.name;
+        resolvedThirdPartyNote = noteResult.note;
         if (tp.pausesSla) {
           nextSlaPausedAt = new Date();
         }
@@ -4526,6 +4539,9 @@ export const caseRepository = {
         fieldName: 'thirdPartyId',
         fromValue: null,
         toValue: resolvedThirdPartyName,
+        // U-C — bu giriş anına ait açıklama (varsa). Case.thirdPartyNote
+        // kalıcı "son değer"i tutar; bu satır o anki audit izini taşır.
+        note: resolvedThirdPartyNote || null,
         actor,
         actorUserId: stampUid,
       });
@@ -4602,6 +4618,9 @@ export const caseRepository = {
         // geçişlerde prev ile aynı (init değeri prev.thirdPartyId'ydi).
         thirdPartyId: resolvedThirdPartyId,
         thirdPartyName: resolvedThirdPartyName,
+        // U-C — kalıcı/raporlanabilir; leavingPause'da temizlenmez (yukarıda
+        // resolvedThirdPartyNote init'i prev.thirdPartyNote'dan gelir).
+        thirdPartyNote: resolvedThirdPartyNote,
         escalationLevel: newEscalationLevel,
         slaPausedAt: nextSlaPausedAt,
         slaPausedDurationMin: nextPausedDurationMin,
