@@ -199,12 +199,36 @@ router.post('/categorize-v2', v1(async (req, res) => {
   res.json(result);
 }));
 
+// WR-KB-Taxonomy-Sync — admin panelinde (Akıllı Ticket Tanımları) yönetilen
+// kapanış taksonomisi TaxonomyDef (DB) tek doğruluk kaynağıdır. Çağıran
+// (smartTicket.js) aktif satırlardan bu şekli kurup taşır; verilmezse
+// suggestClose eski davranışa (data/cc-taxonomy-v2.json) düşer (geri uyum).
+const CloseTaxonomyDetailSchema = z.object({
+  label: z.string().min(1).max(300),
+  cozum_tipleri: z.array(z.string().min(1).max(300)),
+});
+const CloseTaxonomyGroupSchema = z.object({
+  group: z.string().min(1).max(300),
+  details: z.array(CloseTaxonomyDetailSchema),
+});
+const CloseTaxonomyValuesSchema = z.object({
+  label: z.string().max(200),
+  description: z.string().max(2000),
+  values: z.array(z.string().min(1).max(300)),
+});
+const CloseTaxonomySchema = z.object({
+  groups: z.array(CloseTaxonomyGroupSchema).min(1),
+  cozum_tipi: CloseTaxonomyValuesSchema,
+  kalici_onlem: CloseTaxonomyValuesSchema,
+});
+
 const SuggestCloseBody = z.object({
   description: z.string().min(5).max(8000),
   resolution: z.string().min(5).max(20000),
   open_urun: z.string().max(100).nullable().optional(),
   open_is_sureci: z.string().max(200).nullable().optional(),
   open_islem_tipi: z.string().max(200).nullable().optional(),
+  taxonomy: CloseTaxonomySchema.optional(),
 });
 
 router.post('/suggest-close', v1(async (req, res) => {
@@ -216,6 +240,7 @@ router.post('/suggest-close', v1(async (req, res) => {
     open_urun: parsed.data.open_urun ?? null,
     open_is_sureci: parsed.data.open_is_sureci ?? null,
     open_islem_tipi: parsed.data.open_islem_tipi ?? null,
+    ...(parsed.data.taxonomy ? { taxonomy: parsed.data.taxonomy } : {}),
   });
   res.json(result);
 }));

@@ -370,30 +370,46 @@ export function isValidOpenValue(field: OpenField, value: string | null): boolea
 
 // ─── Kapanış alanları ───────────────────────────────────────────────────
 
-export function getKokNedenGroups(): CloseRootCauseGroup[] {
-  return loadTaxonomyV2().close.kok_neden.groups;
+// WR-KB-Taxonomy-Sync — Admin panelindeki "Akıllı Ticket Tanımları" ekranı
+// kapanış etiketlerini (kök neden grubu/detayı, çözüm tipi, kalıcı önlem)
+// TaxonomyDef (DB) tablosuna yazar; DB tek doğruluk kaynağıdır. Çağıran
+// (smartTicket.js) aktif DB satırlarından bu şekli kurup HTTP body ile
+// suggestClose'a taşır. Verilmezse (undefined) mevcut davranış aynen
+// çalışır: loadTaxonomyV2() → data/cc-taxonomy-v2.json (geri uyum).
+export type CloseTaxonomyOverride = {
+  groups: CloseRootCauseGroup[];
+  cozum_tipi: OpenSpec;
+  kalici_onlem: OpenSpec;
+};
+
+export function getKokNedenGroups(override?: CloseTaxonomyOverride): CloseRootCauseGroup[] {
+  return override?.groups ?? loadTaxonomyV2().close.kok_neden.groups;
 }
 
-export function getCozumTipi(): OpenSpec {
-  return loadTaxonomyV2().close.cozum_tipi;
+export function getCozumTipi(override?: CloseTaxonomyOverride): OpenSpec {
+  return override?.cozum_tipi ?? loadTaxonomyV2().close.cozum_tipi;
 }
 
-export function getKaliciOnlem(): OpenSpec {
-  return loadTaxonomyV2().close.kalici_onlem;
+export function getKaliciOnlem(override?: CloseTaxonomyOverride): OpenSpec {
+  return override?.kalici_onlem ?? loadTaxonomyV2().close.kalici_onlem;
 }
 
 // Decouple — kök neden grubu ve detayı BAĞIMSIZ doğrulanır. Detay artık seçilen
 // gruba bağlı değil; tüm grupların detay birleşiminden herhangi biri geçerlidir.
-export function isValidKokNedenGrubu(group: string | null): boolean {
+export function isValidKokNedenGrubu(group: string | null, override?: CloseTaxonomyOverride): boolean {
   if (group == null) return true;
-  return getKokNedenGroups().some((g) => g.group === group);
+  return getKokNedenGroups(override).some((g) => g.group === group);
 }
 
 // v4 CASCADE — grup verilirse detay YALNIZ o grubun altında aranır (grup-kapsamlı).
 // Grup verilmezse eski davranış (tüm gruplarda ara) — geri uyum.
-export function isValidKokNedenDetay(detail: string | null, group?: string | null): boolean {
+export function isValidKokNedenDetay(
+  detail: string | null,
+  group?: string | null,
+  override?: CloseTaxonomyOverride,
+): boolean {
   if (detail == null) return true;
-  const groups = getKokNedenGroups();
+  const groups = getKokNedenGroups(override);
   const scope = group ? groups.filter((g) => g.group === group) : groups;
   return scope.some((g) => g.details.some((d) => d.label === detail));
 }
@@ -403,9 +419,10 @@ export function isValidKokNedenDetay(detail: string | null, group?: string | nul
 export function getAllowedCozumTipleri(
   group: string | null,
   detail: string | null,
+  override?: CloseTaxonomyOverride,
 ): string[] {
-  if (!group || !detail) return getCozumTipi().values;
-  const g = getKokNedenGroups().find((x) => x.group === group);
+  if (!group || !detail) return getCozumTipi(override).values;
+  const g = getKokNedenGroups(override).find((x) => x.group === group);
   const d = g?.details.find((x) => x.label === detail);
   return d?.cozum_tipleri ?? [];
 }
@@ -416,15 +433,16 @@ export function isValidCozumTipi(
   value: string | null,
   group?: string | null,
   detail?: string | null,
+  override?: CloseTaxonomyOverride,
 ): boolean {
   if (value == null) return true;
-  if (group && detail) return getAllowedCozumTipleri(group, detail).includes(value);
-  return getCozumTipi().values.includes(value);
+  if (group && detail) return getAllowedCozumTipleri(group, detail, override).includes(value);
+  return getCozumTipi(override).values.includes(value);
 }
 
-export function isValidKaliciOnlem(value: string | null): boolean {
+export function isValidKaliciOnlem(value: string | null, override?: CloseTaxonomyOverride): boolean {
   if (value == null) return true;
-  return getKaliciOnlem().values.includes(value);
+  return getKaliciOnlem(override).values.includes(value);
 }
 
 // ─── LLM Prompt formatters ───────────────────────────────────────────────

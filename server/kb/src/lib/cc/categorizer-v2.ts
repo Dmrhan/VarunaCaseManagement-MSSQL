@@ -31,6 +31,7 @@ import {
   isValidKaliciOnlem,
   type OpenFieldsResult,
   type CloseFieldsResult,
+  type CloseTaxonomyOverride,
 } from "./taxonomy-v2";
 
 const SYSTEM = `
@@ -267,6 +268,11 @@ export type SuggestCloseInput = {
   // P1.2 — operatörün clarifying sorulara verdiği cevap. Verilirse prompt'a eklenir
   // (zenginleşmiş girdi → daha iyi etiket) ve tekrar soru SORULMAZ.
   clarifyingAnswers?: string;
+  // WR-KB-Taxonomy-Sync — verilirse kapanış taksonomisi (kök neden grupları/
+  // detayları, çözüm tipi, kalıcı önlem) data/cc-taxonomy-v2.json yerine bu
+  // kaynaktan okunur (DB tek doğruluk kaynağı, çağıran taşır). Verilmezse
+  // (undefined) JSON fallback aynen çalışır — geri uyum.
+  taxonomy?: CloseTaxonomyOverride;
 };
 
 // P1.2 — Clarifying sorular. Kapanışın 4 alanını elicit eder (kök neden / çözüm / önlem).
@@ -304,7 +310,8 @@ export async function suggestClose(
   // formatGoldForPrompt("close") eski/geçersiz örnekleri eler → v4 gold
   // (build-gold-from-reviews doğrulamalarından) birikene kadar boş, biriktikçe dolar.
   const closeGold = input.skipGold ? "" : formatGoldForPrompt("close");
-  const cascadeBlock = getKokNedenGroups()
+  const kokNedenGroups = getKokNedenGroups(input.taxonomy);
+  const cascadeBlock = kokNedenGroups
     .map((g) => {
       const dets = g.details
         .map((d) => `    - ${d.label}   [çözüm: ${d.cozum_tipleri.join(" | ")}]`)
@@ -321,7 +328,7 @@ export async function suggestClose(
     cascadeBlock,
     "",
     "TAKSONOMİ — KALICI ÖNLEM (opsiyonel, gruptan bağımsız):",
-    getKaliciOnlem().values.map((v) => `  • ${v}`).join("\n"),
+    getKaliciOnlem(input.taxonomy).values.map((v) => `  • ${v}`).join("\n"),
     "",
     ...(closeGold
       ? ["GERÇEK ETİKETLENMİŞ ÖRNEKLER (insan uzman doğruladı — aynı mantıkla kapanış seç):", closeGold, ""]
@@ -339,7 +346,7 @@ export async function suggestClose(
       : []),
     `Çıktı JSON şeması (sadece JSON):`,
     `{`,
-    `  "kok_neden_grubu": string | null,   // 9 gruptan biri`,
+    `  "kok_neden_grubu": string | null,   // ${kokNedenGroups.length} gruptan biri`,
     `  "kok_neden_detayi": string | null,  // SEÇİLEN grubun altındaki detaylardan biri`,
     `  "cozum_tipi": string | null,        // SEÇİLEN detayın izinli çözüm tiplerinden biri`,
     `  "kalici_onlem": string | null,      // kalıcı önlemlerden biri, opsiyonel`,
@@ -375,18 +382,20 @@ export async function suggestClose(
   //  - grup geçerli değilse detay & çözüm de null (zincir kırık).
   //  - detay YALNIZ seçilen grubun altında geçerliyse kabul.
   //  - çözüm YALNIZ seçilen (grup, detay)'ın izinli setindeyse kabul.
-  const kok_neden_grubu = isValidKokNedenGrubu(out.kok_neden_grubu) ? out.kok_neden_grubu : null;
+  const kok_neden_grubu = isValidKokNedenGrubu(out.kok_neden_grubu, input.taxonomy)
+    ? out.kok_neden_grubu
+    : null;
   const kok_neden_detayi =
-    kok_neden_grubu && isValidKokNedenDetay(out.kok_neden_detayi, kok_neden_grubu)
+    kok_neden_grubu && isValidKokNedenDetay(out.kok_neden_detayi, kok_neden_grubu, input.taxonomy)
       ? out.kok_neden_detayi
       : null;
   const cozum_tipi =
     kok_neden_grubu &&
     kok_neden_detayi &&
-    isValidCozumTipi(out.cozum_tipi, kok_neden_grubu, kok_neden_detayi)
+    isValidCozumTipi(out.cozum_tipi, kok_neden_grubu, kok_neden_detayi, input.taxonomy)
       ? out.cozum_tipi
       : null;
-  const kalici_onlem = isValidKaliciOnlem(out.kalici_onlem) ? out.kalici_onlem : null;
+  const kalici_onlem = isValidKaliciOnlem(out.kalici_onlem, input.taxonomy) ? out.kalici_onlem : null;
 
   // P1.2 — emin değil mi? Kök neden grubu/detayı boş VEYA güven eşik altı → etiket
   // yerine clarifying sorular. Operatör zaten cevap verdiyse (clarifyingAnswers)
