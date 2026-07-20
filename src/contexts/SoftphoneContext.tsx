@@ -215,10 +215,16 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       }
       const inbound = (r?.calls || []).find((c) => c.inbound);
       if (inbound) lastInbound.current = { callerId: inbound.callerId, queue: inbound.queue, key: inbound.key };
-      // Gelen çağrı banner'ı: agent "ringing"/"dialing" olduğu sürece (telefon çaldığı
-      // süre) göster. callerId /activecall/user'dan yakalanınca saklanır (kısa görünür).
+      // Çağrı CEVAPLANDIYSA (talking) artık "gelen çağrı" DEĞİL → banner düşsün, ticket
+      // bir daha açılmasın. Aktif çağrı MyActiveCalls'ta hâlâ inbound göründüğünden eski
+      // koşul (|| !!inbound) banner'ı TÜM görüşme boyunca "GELEN ÇAĞRI" asılı bırakıyor,
+      // screen-pop'u tekrar tetikliyordu. lastInbound KORUNUR (ANSWERED dispatch/pop onu
+      // kullanır) — yalnız banner gizlenir; cevaplanan çağrı yeniden "gelen" gösterilmez.
+      const answered = r?.agentStatus === 'talking';
       const ringing = r?.agentStatus === 'ringing' || r?.agentStatus === 'dialing' || !!inbound;
-      if (ringing) {
+      if (answered) {
+        setIncomingCall(null);
+      } else if (ringing) {
         const src = inbound ? { callerId: inbound.callerId, queue: inbound.queue, key: inbound.key } : lastInbound.current;
         const key = src?.key || 'ringing';
         if (key !== dismissedKey.current && key !== lastIncomingKey.current) {
