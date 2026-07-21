@@ -1297,6 +1297,8 @@ router.get('/sla-dashboard', requireSlaDashboard, async (req, res) => {
       {
         year: q.year,
         month: q.month,
+        createdFrom: q.createdFrom,
+        createdTo: q.createdTo,
         // Çoklu seçim: aynı isimli tekrar eden query paramları express dizi
         // olarak verir; compute tekil|dizi ikisini de kabul eder (toList).
         companyId: q.companyId ?? null,
@@ -1304,6 +1306,7 @@ router.get('/sla-dashboard', requireSlaDashboard, async (req, res) => {
         supportLevel: q.supportLevel ?? null,
         status: q.status ?? null,
         accountId: q.accountId ?? null,
+        accountProjectName: q.accountProjectName ?? null,
         openAge: q.openAge ?? null,
         requestType: q.requestType ?? null,
         page: q.page,

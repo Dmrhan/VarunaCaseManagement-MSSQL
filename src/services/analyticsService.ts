@@ -654,12 +654,17 @@ export const analyticsService = {
 export interface SlaDashboardFilters {
   year?: number | null;
   month?: number | null;
+  /** 'YYYY-MM-DD' — verilmişse year/month'u EZER (aralık kazanır, AND değil). */
+  createdFrom?: string | null;
+  createdTo?: string | null;
   /** Çoklu seçim — boş dizi = filtre yok. Query'ye tekrar eden param olarak gider. */
   companyId?: string[];
   waitingDept?: string[];
   supportLevel?: string[];
   status?: string[];
   accountId?: string[];
+  /** ADI bazlı (ID değil) — aynı proje adı birden çok bayide tekrarlanabiliyor. */
+  accountProjectName?: string[];
   openAge?: string[];
   requestType?: string[];
   page?: number;
@@ -686,8 +691,10 @@ export interface SlaDashboardRow {
   id: string;
   caseNumber: string;
   companyId: string;
+  createdAt: string;
   accountId: string | null;
   accountName: string | null;
+  accountProjectName: string | null;
   priority: string | null;
   requestType: string | null;
   status: string;
@@ -723,6 +730,8 @@ export interface SlaDashboardResponse {
     companies: Array<{ id: string; name: string }>;
     waitingDepts: string[];
     accounts: Array<{ id: string; name: string }>;
+    /** ADI bazlı dedup edilmiş liste — id yok, name tek başına kimlik. */
+    projects: string[];
     requestTypes: string[];
     statuses: string[];
   };
