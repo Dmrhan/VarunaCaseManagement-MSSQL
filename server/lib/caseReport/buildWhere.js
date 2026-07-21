@@ -44,19 +44,23 @@ function toArray(v) {
 }
 
 /**
- * Codex P2 #2 fix — `dateTo` end-of-day normalize:
+ * Codex P2 #2 fix — `dateTo` end-of-day normalize + P2 TR gün sınırı fix:
  *
- * UI date input'u 'YYYY-MM-DD' formatında gönderir. `new Date('YYYY-MM-DD')`
- * UTC midnight üretir; `lte: midnight` kullanılırsa o günkü (kullanıcının
- * "kapsasın" dediği gün) tüm vakalar drop edilir.
+ * UI date input'u 'YYYY-MM-DD' formatında gönderir. Rapor zaman damgaları
+ * Europe/Istanbul'da (sabit UTC+3, DST yok) gösteriliyor — ama `new
+ * Date('YYYY-MM-DD')` UTC gece yarısı üretir. Düz UTC sınırı kullanılırsa
+ * gece yarısına yakın (00:00–02:59 TRT) vakalar yanlış tarafta kalır:
+ *   - `dateFrom`/`resolvedFrom` (gte): TR gününün ilk 3 saati YANLIŞLIKLA
+ *     dışlanır (UTC gece yarısı henüz TR'de bir önceki günün 03:00'ü).
+ *   - `dateTo`/`resolvedTo` (lte): bir sonraki TR gününün ilk 3 saati
+ *     YANLIŞLIKLA dahil edilir.
  *
- * Çözüm: `endOfDay=true` ile çağrı geldiğinde:
- *   - Sadece tarih (YYYY-MM-DD) ise: aynı günün 23:59:59.999 UTC noktasına çek
- *   - Saat içeren ISO ise (kullanıcı zaten saati seçmişse): dokunma
- *
- * `dateFrom` için inclusive midnight start zaten doğru (gte) — onu bozmuyoruz.
+ * Çözüm: sadece tarih (YYYY-MM-DD, saatsiz) girişte TR_OFFSET_MS ile TR
+ * gün sınırına anlanır (server/lib/slaDashboardDateRange.js'teki aynı
+ * desen). Saat içeren ISO girişte (kullanıcı zaten saati seçmişse): dokunma.
  */
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TR_OFFSET_MS = 3 * 60 * 60 * 1000;
 
 function parseDate(v, { endOfDay = false } = {}) {
   if (!v) return null;
@@ -64,13 +68,17 @@ function parseDate(v, { endOfDay = false } = {}) {
   if (typeof v !== 'string') return null;
   const trimmed = v.trim();
   if (trimmed.length === 0) return null;
-  const isDateOnly = DATE_ONLY_RE.test(trimmed);
-  const d = new Date(trimmed);
-  if (Number.isNaN(d.getTime())) return null;
-  if (endOfDay && isDateOnly) {
-    d.setUTCHours(23, 59, 59, 999);
+  if (DATE_ONLY_RE.test(trimmed)) {
+    const [year, month, day] = trimmed.split('-').map(Number);
+    if (endOfDay) {
+      // TR gününün SONU dahil → ertesi TR gününün gece yarısından 1ms önce.
+      const nextDayStartMs = Date.UTC(year, month - 1, day + 1) - TR_OFFSET_MS;
+      return new Date(nextDayStartMs - 1);
+    }
+    return new Date(Date.UTC(year, month - 1, day) - TR_OFFSET_MS);
   }
-  return d;
+  const d = new Date(trimmed);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function intersectCompanyScope(filtersCompanyIds, allowedCompanyIds) {
