@@ -162,6 +162,25 @@ console.log('\n── 8) Date range (regression) ──────────�
     where.createdAt.lte.getUTCHours(), 23);
 }
 
+// ── 9) Resolved date range (Çözüm Zamanı filtresi) ─────────────
+console.log('\n── 9) Resolved date range ─────────────────────────────────');
+{
+  const { where } = buildReportWhere(
+    { resolvedFrom: '2026-01-01', resolvedTo: '2026-06-18' },
+    ALLOWED,
+  );
+  expect('9.1 resolvedAt.gte var', where.resolvedAt?.gte != null, true);
+  expect('9.2 resolvedAt.lte var', where.resolvedAt?.lte != null, true);
+  expect('9.3 resolvedTo end-of-day 23:59:59.999',
+    where.resolvedAt.lte.getUTCHours(), 23);
+  expect('9.4 createdAt filtresi etkilenmedi (undefined)', where.createdAt, undefined);
+}
+
+{
+  const { where } = buildReportWhere({}, ALLOWED);
+  expect('9.5 resolvedFrom/To yoksa where.resolvedAt YOK', where.resolvedAt, undefined);
+}
+
 console.log('');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail > 0 ? 1 : 0);

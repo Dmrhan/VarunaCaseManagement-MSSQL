@@ -11,6 +11,9 @@
  *
  * Phase 1 desteklenen filtreler (TASK kapsamı):
  *   - dateFrom / dateTo  → Case.createdAt aralığı
+ *   - resolvedFrom / resolvedTo → Case.resolvedAt aralığı (yalnız terminal
+ *     statülerde/Çözüldü/İptal dolu — açık vakalarda null, filtre uygulanınca
+ *     doğal olarak yalnız kapanmış vakalar döner)
  *   - companyIds         → CSV veya string[]
  *   - statuses           → CSV veya string[] (TR enum → DB ASCII conversion)
  *   - priorities         → CSV veya string[] (zaten ASCII; conversion yok)
@@ -122,6 +125,14 @@ export function buildReportWhere(filters, allowedCompanyIds) {
     where.createdAt = {};
     if (dateFrom) where.createdAt.gte = dateFrom;
     if (dateTo) where.createdAt.lte = dateTo;
+  }
+
+  const resolvedFrom = parseDate(f.resolvedFrom);
+  const resolvedTo = parseDate(f.resolvedTo, { endOfDay: true });
+  if (resolvedFrom || resolvedTo) {
+    where.resolvedAt = {};
+    if (resolvedFrom) where.resolvedAt.gte = resolvedFrom;
+    if (resolvedTo) where.resolvedAt.lte = resolvedTo;
   }
 
   if (typeof f.search === 'string' && f.search.trim().length > 0) {
