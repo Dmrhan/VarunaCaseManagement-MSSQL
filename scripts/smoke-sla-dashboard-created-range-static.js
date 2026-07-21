@@ -40,8 +40,13 @@ check('CsSlaDashboardPage.tsx — normalizeF createdFrom/createdTo dahil', 'src/
 check('CsSlaDashboardPage.tsx — activeFilterCount createdFrom/createdTo dahil', 'src/features/analytics/CsSlaDashboardPage.tsx', /draft\.createdFrom \|\| draft\.createdTo \? 1 : 0/);
 check('CsSlaDashboardPage.tsx — appliedChips Açılış chip', 'src/features/analytics/CsSlaDashboardPage.tsx', /chips\.push\(`Açılış: /);
 check('CsSlaDashboardPage.tsx — thead Açılış Tarihi kolonu', 'src/features/analytics/CsSlaDashboardPage.tsx', /<th className="px-2\.5 py-2">Açılış Tarihi<\/th>/);
-check('CsSlaDashboardPage.tsx — tbody Açılış Tarihi hücresi', 'src/features/analytics/CsSlaDashboardPage.tsx', /\{new Date\(r\.createdAt\)\.toLocaleDateString\('tr-TR'\)\}/);
-check('CsSlaDashboardPage.tsx — Excel export Açılış Tarihi kolonu', 'src/features/analytics/CsSlaDashboardPage.tsx', /'Açılış Tarihi': new Date\(r\.createdAt\)\.toLocaleDateString\('tr-TR'\),/);
+// P2 fix — createdAt görüntülemesi artık timeZone: 'Europe/Istanbul' ile
+// sabitlenmiş fmtOpeningDate() helper'ından geçiyor (tarayıcı yerel saat
+// dilimi kaymasını önlemek için); eski çıplak toLocaleDateString('tr-TR')
+// deseni bilinçli olarak KALDIRILDI.
+check('CsSlaDashboardPage.tsx — fmtOpeningDate TR timezone sabitlemesi', 'src/features/analytics/CsSlaDashboardPage.tsx', /toLocaleDateString\('tr-TR', \{ timeZone: 'Europe\/Istanbul' \}\)/);
+check('CsSlaDashboardPage.tsx — tbody Açılış Tarihi hücresi', 'src/features/analytics/CsSlaDashboardPage.tsx', /\{fmtOpeningDate\(r\.createdAt\)\}/);
+check('CsSlaDashboardPage.tsx — Excel export Açılış Tarihi kolonu', 'src/features/analytics/CsSlaDashboardPage.tsx', /'Açılış Tarihi': fmtOpeningDate\(r\.createdAt\),/);
 
 // Self-updating: sabit sayı hardcode etmek yerine <th> sayısıyla kıyaslar —
 // yeni kolon eklendikçe bu kontrol elle güncellenmeden doğru kalır.

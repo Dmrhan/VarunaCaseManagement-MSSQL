@@ -62,6 +62,17 @@ const DEFAULT_DRAFT: SlaDashboardFilters = { year: CURRENT_YEAR };
 const nf = new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const nf0 = new Intl.NumberFormat('tr-TR');
 
+/**
+ * P2 fix — createdAt (ISO, UTC) → gün gösterimi. `timeZone: 'Europe/Istanbul'`
+ * EKSİK olursa toLocaleDateString tarayıcının YEREL saat dilimini kullanır
+ * (locale='tr-TR' sadece biçimi belirler, saat dilimini DEĞİL) — UTC'nin
+ * batısındaki bir tarayıcıda bir gün ERİ gösterirdi (backend'in TR gün
+ * sınırına göre filtrelediği veriyle tutarsız). Sabit UTC+3 anlanır.
+ */
+function fmtOpeningDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' });
+}
+
 /** Kalan-süre hücresi: değer + orta çizgili mini veri çubuğu (mockup'taki). */
 function BarCell({ value, span, unit }: { value: number | null; span: number; unit: string }) {
   if (value == null) return <span className="text-slate-400 dark:text-ndark-dim">—</span>;
@@ -386,7 +397,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         'Öncelik': PRIORITY_TR[r.priority ?? ''] ?? r.priority ?? '',
         'Bölüm': r.teamName ?? '',
         'Vaka No': r.caseNumber,
-        'Açılış Tarihi': new Date(r.createdAt).toLocaleDateString('tr-TR'),
+        'Açılış Tarihi': fmtOpeningDate(r.createdAt),
         'DevOps No': r.devopsIds.join(', '),
         'Sahibi': r.ownerName ?? '',
         'Bekleyen Bölüm': r.waitingDept,
@@ -807,7 +818,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
                     </button>
                   </td>
                   <td className="px-2.5 py-1.5 tabular-nums text-slate-500 dark:text-ndark-muted">
-                    {new Date(r.createdAt).toLocaleDateString('tr-TR')}
+                    {fmtOpeningDate(r.createdAt)}
                   </td>
                   <td className="px-2.5 py-1.5 tabular-nums text-slate-500 dark:text-ndark-muted">
                     {r.devopsIds.length ? r.devopsIds.join(', ') : '—'}
