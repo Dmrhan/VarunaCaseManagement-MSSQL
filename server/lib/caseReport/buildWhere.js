@@ -11,9 +11,13 @@
  *
  * Phase 1 desteklenen filtreler (TASK kapsamı):
  *   - dateFrom / dateTo  → Case.createdAt aralığı
- *   - resolvedFrom / resolvedTo → Case.resolvedAt aralığı (yalnız terminal
- *     statülerde/Çözüldü/İptal dolu — açık vakalarda null, filtre uygulanınca
- *     doğal olarak yalnız kapanmış vakalar döner)
+ *   - resolvedFrom / resolvedTo → Case.resolvedAt aralığı. P2 fix: resolvedAt
+ *     terminal (Çözüldü/İptal) statüye girişte damgalanır AMA reopen'da
+ *     TEMİZLENMEZ (caseRepository.js transitionStatus — prev.resolvedAt
+ *     korunur). Yani reopen edilmiş, ŞU AN AÇIK bir vakada da eski
+ *     resolvedAt dolu olabilir. Bu yüzden bu filtre uygulanınca
+ *     where.status da otomatik terminal statüye kısıtlanır (kullanıcının
+ *     kendi statü seçimiyle kesişir) — yoksa açık/reopen vakalar sızar.
  *   - companyIds         → CSV veya string[]
  *   - statuses           → CSV veya string[] (TR enum → DB ASCII conversion)
  *   - priorities         → CSV veya string[] (zaten ASCII; conversion yok)
@@ -61,6 +65,12 @@ function toArray(v) {
  */
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TR_OFFSET_MS = 3 * 60 * 60 * 1000;
+
+// P2 fix — resolvedFrom/resolvedTo yalnız bu statülerde "gerçek" çözüm
+// zamanı anlamına gelir (server/analytics/slaDashboard.js'teki TERMINAL
+// Set'in ikizi — caseRepository.js transitionStatus reopen'da resolvedAt'i
+// TEMİZLEMİYOR, bu yüzden açık/reopen vakalarda da eski değer dolu kalabilir).
+const TERMINAL_STATUSES = ['Cozuldu', 'IptalEdildi'];
 
 function parseDate(v, { endOfDay = false } = {}) {
   if (!v) return null;
@@ -141,6 +151,14 @@ export function buildReportWhere(filters, allowedCompanyIds) {
     where.resolvedAt = {};
     if (resolvedFrom) where.resolvedAt.gte = resolvedFrom;
     if (resolvedTo) where.resolvedAt.lte = resolvedTo;
+    // P2 fix — reopen edilmiş (şu an AÇIK) bir vakada da eski resolvedAt
+    // dolu kalabildiği için, statüyü terminal'e kısıtlamadan bu filtre
+    // yanlışlıkla açık vakaları da döndürür. Kullanıcı zaten bir statü
+    // filtresi seçtiyse (where.status set) TERMINAL_STATUSES ile kesişir;
+    // hiç seçmediyse doğrudan TERMINAL_STATUSES uygulanır.
+    where.status = where.status?.in
+      ? { in: where.status.in.filter((s) => TERMINAL_STATUSES.includes(s)) }
+      : { in: TERMINAL_STATUSES };
   }
 
   if (typeof f.search === 'string' && f.search.trim().length > 0) {
