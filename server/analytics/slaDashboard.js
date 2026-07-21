@@ -35,6 +35,7 @@
 import { prisma } from '../db/client.js';
 import { M_STATUS, M_REQUEST } from '../db/enumMap.js';
 import { getCalendarGateFor, diffMinutes, netDayMinutes } from '../lib/sla/businessTime.js';
+import { resolveSlaDashboardCreatedRange } from '../lib/slaDashboardDateRange.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_MS = 60 * 1000;
@@ -104,9 +105,16 @@ export function deriveWaitingDept(c, mail) {
 }
 
 /**
- * Ana hesap. params: { year, month, companyId, waitingDept, supportLevel,
- * status, accountId, openAge, requestType, page, pageSize, exportAll }
- * (facet'ler tekil ya da liste). allowedCompanyIds: verifyJwt tenant kapsamı.
+ * Ana hesap. params: { year, month, createdFrom, createdTo, companyId,
+ * waitingDept, supportLevel, status, accountId, accountProjectName, openAge,
+ * requestType, page, pageSize, exportAll } (facet'ler tekil ya da liste).
+ * accountProjectName ADI bazlıdır (ID değil) — aynı proje adı birden çok
+ * bayide tekrarlanabildiği için filtre dedup edilmiş isim listesi üzerinden
+ * çalışır (bkz. aşağıdaki sel.accountProjectName).
+ * createdFrom/createdTo
+ * ('YYYY-MM-DD') verilmişse year/month sınırını EZER (bkz.
+ * lib/slaDashboardDateRange.js — kullanıcı kararı, AND değil override).
+ * allowedCompanyIds: verifyJwt tenant kapsamı.
  */
 export async function computeSlaDashboard(params, allowedCompanyIds) {
   if (!Array.isArray(allowedCompanyIds) || allowedCompanyIds.length === 0) {
@@ -118,7 +126,7 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
   //    4 mini sorgu ile dropdown evreni döner; rows/KPI boş kalır.
   //    Kaskad seçenekler ilk gerçek sorguyla (Filtrele) devreye girer.
   if (params.optionsOnly) {
-    const [companyRows, teamRows, thirdPartyRows, topAccounts] = await Promise.all([
+    const [companyRows, teamRows, thirdPartyRows, topAccounts, topProjects] = await Promise.all([
       prisma.company.findMany({
         where: { id: { in: allowedCompanyIds } },
         select: { id: true, name: true },
@@ -141,6 +149,16 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
         orderBy: { _count: { accountId: 'desc' } },
         take: 200,
       }),
+      // Proje ADI bazlı dedup (bkz. sel.accountProjectName yorumu) — Case'in
+      // kendi denormalize accountProjectName'i üzerinden groupBy, ekstra
+      // AccountProject join'ine gerek yok (bootstrap zaten "ucuz" olmalı).
+      prisma.case.groupBy({
+        by: ['accountProjectName'],
+        where: { companyId: { in: allowedCompanyIds }, isArchived: false, accountProjectName: { not: null } },
+        _count: { _all: true },
+        orderBy: { _count: { accountProjectName: 'desc' } },
+        take: 200,
+      }),
     ]);
     const waiting = new Set(['Havuzda', 'Müşteri']);
     for (const t of teamRows) if (t.name?.trim()) waiting.add(t.name.trim());
@@ -149,6 +167,7 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
     const accRows = accIds.length
       ? await prisma.account.findMany({ where: { id: { in: accIds } }, select: { id: true, name: true } })
       : [];
+    const projectNames = topProjects.map((p) => p.accountProjectName).filter(Boolean);
     const base = emptyResult(params);
     return {
       ...base,
@@ -158,6 +177,7 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
           .sort((a, b) => a.name.localeCompare(b.name, 'tr')),
         waitingDepts: [...waiting].sort((a, b) => a.localeCompare(b, 'tr')),
         accounts: accRows.sort((a, b) => a.name.localeCompare(b.name, 'tr')),
+        projects: projectNames.sort((a, b) => a.localeCompare(b, 'tr')),
         requestTypes: Object.keys(M_REQUEST),
         statuses: Object.keys(M_STATUS),
       },
@@ -178,6 +198,11 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
     status: new Set(stOk),
     requestType: new Set(rtOk),
     accountId: new Set(toList(params.accountId)),
+    // Proje ADI bazlı (ID değil) — aynı proje adı birden çok bayide (farklı
+    // AccountProject kaydı) tekrarlanabiliyor (örn. "Anadolu Efes" 293 farklı
+    // kayıtta); kullanıcı filtrede tek bir "Anadolu Efes" görmek istiyor,
+    // seçince ALTINDAKİ tüm kayıtlar eşleşmeli.
+    accountProjectName: new Set(toList(params.accountProjectName)),
     waitingDept: new Set(toList(params.waitingDept)),
     supportLevel: new Set(toList(params.supportLevel)),
     openAge: new Set(toList(params.openAge)),
@@ -189,18 +214,15 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
     companyId: { in: allowedCompanyIds },
     isArchived: false, // liste paritesi: arşivli default hariç
   };
-  const year = Number(params.year) || null;
-  const month = Number(params.month) || null; // 1-12
-  if (year) {
-    // Yıl/ay sınırları TÜRKİYE gün sınırıyla (Europe/Istanbul, sabit UTC+3,
-    // DST yok) — düz UTC sınırı yerel geceyarısından 3 saat kayıyordu.
-    const TR_OFFSET_MS = 3 * 60 * 60 * 1000;
-    const from = new Date(Date.UTC(year, month ? month - 1 : 0, 1) - TR_OFFSET_MS);
-    const to = month
-      ? new Date(Date.UTC(year, month, 1) - TR_OFFSET_MS)
-      : new Date(Date.UTC(year + 1, 0, 1) - TR_OFFSET_MS);
-    where.createdAt = { gte: from, lt: to };
-  }
+  // createdFrom/createdTo verilmişse year/month'u EZER (aralık kazanır) —
+  // saf fonksiyon, DB'siz test edilebilir (bkz. lib/slaDashboardDateRange.js).
+  const createdRange = resolveSlaDashboardCreatedRange({
+    year: params.year,
+    month: params.month,
+    createdFrom: params.createdFrom,
+    createdTo: params.createdTo,
+  });
+  if (createdRange) where.createdAt = createdRange;
 
   // ── Base set — yalnız gereken kolonlar (PRIVACY: customerContact* YOK) ──
   const [cases, mailAgg, companyRows] = await Promise.all([
@@ -227,6 +249,13 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
         thirdPartyName: true,
         customFields: true,
         account: { select: { id: true, name: true } },
+        // P2 fix — Case'in KENDİ denormalize accountProjectName'i kullanılır,
+        // AccountProject.name canlı ilişkisi DEĞİL. Proje adı bazlı dedup
+        // (bkz. sel.accountProjectName) bootstrap dropdown'la (optionsOnly
+        // dalı, aynı kolonu groupBy eder) AYNI kaynaktan beslenmeli — proje
+        // sonradan yeniden adlandırılırsa canlı isim eski snapshot'la
+        // eşleşmez ve filtre sessizce 0 satır dönerdi.
+        accountProjectName: true,
       },
     }),
     prisma.caseEmail.groupBy({
@@ -285,8 +314,10 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
       id: c.id,
       caseNumber: c.caseNumber,
       companyId: c.companyId,
+      createdAt: c.createdAt.toISOString(),
       accountId: c.account?.id ?? null,
       accountName: c.account?.name ?? null,
+      accountProjectName: c.accountProjectName ?? null,
       priority: c.priority,
       requestType: c.requestType,
       status: c.status,
@@ -321,6 +352,7 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
     ['status', (r) => r.status],
     ['requestType', (r) => r.requestType],
     ['accountId', (r) => r.accountId],
+    ['accountProjectName', (r) => r.accountProjectName],
     ['waitingDept', (r) => r.waitingDept],
     ['supportLevel', (r) => r.supportLevel],
     ['openAge', (r) => r.openAgeBucket],
@@ -339,6 +371,9 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
   const waitingOpt = new Set();
   const companyOpt = new Map();
   const accountCount = new Map();
+  // ADI bazlı dedup — aynı proje adı birden çok AccountProject kaydında
+  // (farklı bayi) tekrarlanabiliyor, filtrede tek satır olarak görünmeli.
+  const projectCount = new Map();
   for (const r of computed) {
     if (r.waitingDept !== '—' && matches(r, 'waitingDept')) waitingOpt.add(r.waitingDept);
     if (matches(r, 'companyId')) companyOpt.set(r.companyId, companyName.get(r.companyId) ?? r.companyId);
@@ -347,12 +382,20 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
       e.n += 1;
       accountCount.set(r.accountId, e);
     }
+    if (r.accountProjectName && matches(r, 'accountProjectName')) {
+      projectCount.set(r.accountProjectName, (projectCount.get(r.accountProjectName) ?? 0) + 1);
+    }
   }
   const accounts = [...accountCount.entries()]
     .sort((a, b) => b[1].n - a[1].n)
     .slice(0, 200)
     .map(([id, e]) => ({ id, name: e.name }))
     .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+  const projects = [...projectCount.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 200)
+    .map(([name]) => name)
+    .sort((a, b) => a.localeCompare(b, 'tr'));
 
   // ── KPI'lar — süzülmüş TAM set üzerinden ───────────────────────────
   const kpi = (arr, key) => {
@@ -386,6 +429,7 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
       .sort((a, b) => a.name.localeCompare(b.name, 'tr')),
     waitingDepts: [...waitingOpt].sort((a, b) => a.localeCompare(b, 'tr')),
     accounts,
+    projects,
     // BİLİNÇLİ: durum/tip/L-seviye/açık-kalma evrenleri SABİT küçük kümeler —
     // kaskad üretilmez (7 durum + 5 tip her zaman anlamlı; boş kombinasyon
     // seçilirse sonuç dürüstçe 0 döner). Kaskad yalnız büyük/dinamik
@@ -442,7 +486,7 @@ function emptyResult(params) {
     pageSize,
     totalPages: 1,
     kpis: { totalCount: 0, resolution: { evet: 0, hayir: 0, withDue: 0 }, response: { evet: 0, hayir: 0, withDue: 0 } },
-    options: { companies: [], waitingDepts: [], accounts: [], requestTypes: Object.keys(M_REQUEST), statuses: Object.keys(M_STATUS) },
+    options: { companies: [], waitingDepts: [], accounts: [], projects: [], requestTypes: Object.keys(M_REQUEST), statuses: Object.keys(M_STATUS) },
     generatedAt: new Date().toISOString(),
   };
 }

@@ -94,6 +94,7 @@ export const REPORT_COLUMNS = [
   // ── Çözüm / İptal ────────────────────────────────────────────────
   { id: 'resolutionNote',     label: 'Çözüm Açıklaması', category: 'resolution', type: 'text', source: 'scalar', prismaField: 'resolutionNote',     excelWidth: 60 },
   { id: 'cancellationReason', label: 'İptal Sebebi',     category: 'resolution', type: 'text', source: 'scalar', prismaField: 'cancellationReason', excelWidth: 60 },
+  { id: 'thirdPartyName', label: '3. Parti Tanımı', category: 'resolution', type: 'string', source: 'scalar', prismaField: 'thirdPartyName' },
   { id: 'thirdPartyNote',     label: '3. Parti Bekleme Açıklaması', category: 'resolution', type: 'text', source: 'scalar', prismaField: 'thirdPartyNote', excelWidth: 60 },
 
   // ── Smart Ticket — Açılış ────────────────────────────────────────

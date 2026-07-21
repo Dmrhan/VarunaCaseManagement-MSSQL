@@ -62,6 +62,17 @@ const DEFAULT_DRAFT: SlaDashboardFilters = { year: CURRENT_YEAR };
 const nf = new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const nf0 = new Intl.NumberFormat('tr-TR');
 
+/**
+ * P2 fix — createdAt (ISO, UTC) → gün gösterimi. `timeZone: 'Europe/Istanbul'`
+ * EKSİK olursa toLocaleDateString tarayıcının YEREL saat dilimini kullanır
+ * (locale='tr-TR' sadece biçimi belirler, saat dilimini DEĞİL) — UTC'nin
+ * batısındaki bir tarayıcıda bir gün ERİ gösterirdi (backend'in TR gün
+ * sınırına göre filtrelediği veriyle tutarsız). Sabit UTC+3 anlanır.
+ */
+function fmtOpeningDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' });
+}
+
 /** Kalan-süre hücresi: değer + orta çizgili mini veri çubuğu (mockup'taki). */
 function BarCell({ value, span, unit }: { value: number | null; span: number; unit: string }) {
   if (value == null) return <span className="text-slate-400 dark:text-ndark-dim">—</span>;
@@ -247,6 +258,51 @@ function MultiDropdown({
   );
 }
 
+/**
+ * Açılış tarihi aralığı — Yıl/Ay'dan AYRI bir kontrol (MultiDropdown tek
+ * hücrelik checkbox deseni tarih aralığına uymuyor, iki input gerekiyor).
+ * Seçilince Yıl/Ay'ın YERİNE GEÇER (kullanıcı kararı — AND değil override,
+ * bkz. server/lib/slaDashboardDateRange.js), bu yüzden burada seçim yapılırsa
+ * caller Yıl/Ay'ı temizler.
+ */
+function DateRangeFilter({
+  from,
+  to,
+  onChange,
+}: {
+  from: string | null | undefined;
+  to: string | null | undefined;
+  onChange: (patch: { createdFrom: string | null; createdTo: string | null }) => void;
+}) {
+  return (
+    <div>
+      <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+        Açılış Tarihi Aralığı
+      </span>
+      <div className="flex items-center gap-1">
+        <input
+          type="date"
+          value={from ?? ''}
+          onChange={(e) => onChange({ createdFrom: e.target.value || null, createdTo: to ?? null })}
+          className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800 outline-none dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+        />
+        <span className="text-slate-400">–</span>
+        <input
+          type="date"
+          value={to ?? ''}
+          onChange={(e) => onChange({ createdFrom: from ?? null, createdTo: e.target.value || null })}
+          className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800 outline-none dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+        />
+      </div>
+      {(from || to) && (
+        <span className="mt-0.5 block text-[10px] text-amber-600 dark:text-amber-400">
+          Tarih aralığı Yıl/Ay yerine geçer
+        </span>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   onSelectCase?: (caseId: string) => void;
 }
@@ -302,9 +358,11 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
   const normalizeF = (f: SlaDashboardFilters) =>
     JSON.stringify({
       y: f.year ?? null, m: f.month ?? null,
+      cf: f.createdFrom ?? null, ct: f.createdTo ?? null,
       c: [...(f.companyId ?? [])].sort(), w: [...(f.waitingDept ?? [])].sort(),
       l: [...(f.supportLevel ?? [])].sort(), s: [...(f.status ?? [])].sort(),
       a: [...(f.accountId ?? [])].sort(), o: [...(f.openAge ?? [])].sort(),
+      p: [...(f.accountProjectName ?? [])].sort(),
       r: [...(f.requestType ?? [])].sort(),
     });
   // Uyarı yalnız uygulanmış bir sorgudan SAPINCA anlamlı (açılışta değil)
@@ -334,10 +392,12 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
       const res = await analyticsService.exportSlaDashboard(applied);
       if (!res) return;
       const rows = res.rows.map((r) => ({
-        'Müşteri (Proje)': r.accountName ?? '',
+        'Müşteri': r.accountName ?? '',
+        'Proje': r.accountProjectName ?? '',
         'Öncelik': PRIORITY_TR[r.priority ?? ''] ?? r.priority ?? '',
         'Bölüm': r.teamName ?? '',
         'Vaka No': r.caseNumber,
+        'Açılış Tarihi': fmtOpeningDate(r.createdAt),
         'DevOps No': r.devopsIds.join(', '),
         'Sahibi': r.ownerName ?? '',
         'Bekleyen Bölüm': r.waitingDept,
@@ -389,7 +449,14 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         values: draft.year ? [String(draft.year)] : [],
         options: YEARS.map((y) => ({ v: String(y), l: String(y) })),
         onChange: (vals: string[]) =>
-          set({ year: vals[0] ? Number(vals[0]) : null, month: vals[0] ? draft.month : null }),
+          // Yıl seçilince tarih aralığı temizlenir — ikisi çakışmasın (aralık
+          // Yıl/Ay'ın yerine geçer, tersi de geçerli — bkz. DateRangeFilter).
+          set({
+            year: vals[0] ? Number(vals[0]) : null,
+            month: vals[0] ? draft.month : null,
+            createdFrom: null,
+            createdTo: null,
+          }),
       },
       {
         key: 'month',
@@ -401,6 +468,51 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         values: draft.month ? [String(draft.month)] : [],
         options: MONTHS.map((m, i) => ({ v: String(i + 1), l: m })),
         onChange: (vals: string[]) => set({ month: vals[0] ? Number(vals[0]) : null }),
+      },
+      {
+        key: 'accountId',
+        // Codex: eskiden "Müşteri (Proje)" — gerçekte Account (müşteri firma),
+        // proje değil. Ayrı bir Proje filtresi eklenince karışıklığı önlemek
+        // için "Müşteri" olarak düzeltildi.
+        label: 'Müşteri',
+        multiple: true,
+        disabled: false,
+        disabledHint: undefined as string | undefined,
+        values: draft.accountId ?? [],
+        options: (options?.accounts ?? []).map((a) => ({ v: a.id, l: a.name })),
+        onChange: (vals: string[]) => set({ accountId: vals }),
+      },
+      {
+        key: 'accountProjectName',
+        label: 'Proje',
+        multiple: true,
+        disabled: false,
+        disabledHint: undefined as string | undefined,
+        // ADI bazlı (ID değil) — aynı proje adı birden çok bayide tekrarlanabiliyor,
+        // filtrede tek satır olarak listelenir (bkz. server/analytics/slaDashboard.js).
+        values: draft.accountProjectName ?? [],
+        options: (options?.projects ?? []).map((name) => ({ v: name, l: name })),
+        onChange: (vals: string[]) => set({ accountProjectName: vals }),
+      },
+      {
+        key: 'status',
+        label: 'Vaka Durumu',
+        multiple: true,
+        disabled: false,
+        disabledHint: undefined as string | undefined,
+        values: draft.status ?? [],
+        options: (options?.statuses ?? []).map((s) => ({ v: s, l: s })),
+        onChange: (vals: string[]) => set({ status: vals }),
+      },
+      {
+        key: 'requestType',
+        label: 'Bildirim Tipi',
+        multiple: true,
+        disabled: false,
+        disabledHint: undefined as string | undefined,
+        values: draft.requestType ?? [],
+        options: (options?.requestTypes ?? []).map((t) => ({ v: t, l: t })),
+        onChange: (vals: string[]) => set({ requestType: vals }),
       },
       {
         key: 'waitingDept',
@@ -423,26 +535,6 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         onChange: (vals: string[]) => set({ supportLevel: vals }),
       },
       {
-        key: 'status',
-        label: 'Vaka Durumu',
-        multiple: true,
-        disabled: false,
-        disabledHint: undefined as string | undefined,
-        values: draft.status ?? [],
-        options: (options?.statuses ?? []).map((s) => ({ v: s, l: s })),
-        onChange: (vals: string[]) => set({ status: vals }),
-      },
-      {
-        key: 'accountId',
-        label: 'Müşteri (Proje)',
-        multiple: true,
-        disabled: false,
-        disabledHint: undefined as string | undefined,
-        values: draft.accountId ?? [],
-        options: (options?.accounts ?? []).map((a) => ({ v: a.id, l: a.name })),
-        onChange: (vals: string[]) => set({ accountId: vals }),
-      },
-      {
         key: 'openAge',
         label: 'Açık Kalma Aralığı',
         multiple: true,
@@ -451,16 +543,6 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         values: draft.openAge ?? [],
         options: OPEN_AGE_OPTIONS.map((b) => ({ v: b, l: `${b} gün` })),
         onChange: (vals: string[]) => set({ openAge: vals }),
-      },
-      {
-        key: 'requestType',
-        label: 'Bildirim Tipi',
-        multiple: true,
-        disabled: false,
-        disabledHint: undefined as string | undefined,
-        values: draft.requestType ?? [],
-        options: (options?.requestTypes ?? []).map((t) => ({ v: t, l: t })),
-        onChange: (vals: string[]) => set({ requestType: vals }),
       },
     ],
     // Denetim P1 düzeltmesi: options bağımlılığı olmadan açılış seçenekleri
@@ -473,10 +555,12 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
     (draft.companyId?.length ?? 0) +
     (draft.year && draft.year !== CURRENT_YEAR ? 1 : 0) +
     (draft.month ? 1 : 0) +
+    (draft.createdFrom || draft.createdTo ? 1 : 0) +
     (draft.waitingDept?.length ?? 0) +
     (draft.supportLevel?.length ?? 0) +
     (draft.status?.length ?? 0) +
     (draft.accountId?.length ?? 0) +
+    (draft.accountProjectName?.length ?? 0) +
     (draft.openAge?.length ?? 0) +
     (draft.requestType?.length ?? 0);
   const showClear = activeFilterCount > 0 || applied !== null;
@@ -485,7 +569,21 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
   const appliedChips = useMemo(() => {
     if (!applied || !data) return [];
     const chips: string[] = [];
-    if (applied.year) chips.push(`Yıl: ${applied.year}${applied.month ? ' · ' + MONTHS[applied.month - 1] : ''}`);
+    if (applied.createdFrom || applied.createdTo) {
+      // P2 fix — v zaten 'YYYY-MM-DD' (tarih-only, saatsiz) — new Date(v)
+      // ile Date objesine çevirip toLocaleDateString ETMEK UTC gece yarısı
+      // parse eder ve tarayıcı yerel saatine göre biçimlendirir; UTC'nin
+      // batısındaki bir saat diliminde bir gün ERİ görünürdü (10 Temmuz
+      // seçilse "9.07.2026" çıkardı). String'i doğrudan parçala — Date/
+      // timezone'a hiç girme.
+      const fmt = (v: string) => {
+        const [y, m, d] = v.split('-');
+        return `${d}.${m}.${y}`;
+      };
+      chips.push(`Açılış: ${applied.createdFrom ? fmt(applied.createdFrom) : '…'} → ${applied.createdTo ? fmt(applied.createdTo) : '…'}`);
+    } else if (applied.year) {
+      chips.push(`Yıl: ${applied.year}${applied.month ? ' · ' + MONTHS[applied.month - 1] : ''}`);
+    }
     if (applied.companyId?.length) {
       const names = applied.companyId.map((id) => options?.companies.find((c) => c.id === id)?.name ?? 'şirket');
       chips.push(`Şirket: ${names.join(', ')}`);
@@ -501,6 +599,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
         ? `Müşteri: ${names.join(', ')}`
         : `Müşteri: ${applied.accountId.length} seçili`);
     }
+    if (applied.accountProjectName?.length) chips.push(`Proje: ${applied.accountProjectName.join(', ')}`);
     if (applied.openAge?.length) chips.push(`Açık kalma: ${applied.openAge.join(', ')} gün`);
     if (applied.requestType?.length) chips.push(`Tip: ${applied.requestType.join(', ')}`);
     return chips.length ? chips : ['Filtre yok — tüm liste'];
@@ -555,7 +654,32 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
 
       {/* Filtreler — seçimler taslakta birikir, Filtrele ile uygulanır */}
       <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-9">
-        {filterDefs.map((f) => (
+        {/* Sıra: Şirket, Açılış Tarih Aralığı, Yıl, Ay, Müşteri, Proje, Vaka
+            Durumu, Bildirim Tipi, Bekleyen Bölüm, Support L1-L2, Açık Kalma
+            Aralığı — kullanıcı talebiyle sabitlendi. */}
+        {filterDefs.slice(0, 1).map((f) => (
+          <MultiDropdown
+            key={f.key}
+            label={f.label}
+            options={f.options}
+            values={f.values}
+            multiple={f.multiple}
+            disabled={f.disabled}
+            disabledHint={f.disabledHint}
+            onChange={f.onChange}
+          />
+        ))}
+        <div className="col-span-2">
+          <DateRangeFilter
+            from={draft.createdFrom}
+            to={draft.createdTo}
+            onChange={(patch) =>
+              // Aralık seçilince Yıl/Ay temizlenir — çakışmasınlar (bkz. DateRangeFilter doc).
+              set({ ...patch, year: null, month: null })
+            }
+          />
+        </div>
+        {filterDefs.slice(1).map((f) => (
           <MultiDropdown
             key={f.key}
             label={f.label}
@@ -636,10 +760,12 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
           <table className="w-full min-w-[1560px] border-collapse whitespace-nowrap text-xs">
             <thead>
               <tr className="bg-slate-50 text-left text-[10.5px] font-bold tracking-wide text-slate-500 dark:bg-ndark-bg dark:text-ndark-muted">
-                <th className="px-2.5 py-2">Müşteri (Proje)</th>
+                <th className="px-2.5 py-2">Müşteri</th>
+                <th className="px-2.5 py-2">Proje</th>
                 <th className="px-2.5 py-2">Öncelik</th>
                 <th className="px-2.5 py-2">Bölüm</th>
                 <th className="px-2.5 py-2">Vaka No</th>
+                <th className="px-2.5 py-2">Açılış Tarihi</th>
                 <th className="px-2.5 py-2">DevOps No</th>
                 <th className="px-2.5 py-2">Sahibi</th>
                 <th className="px-2.5 py-2">Bekleyen Bölüm</th>
@@ -656,7 +782,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={15} className="px-4 py-12 text-center text-slate-400 dark:text-ndark-dim">
+                  <td colSpan={17} className="px-4 py-12 text-center text-slate-400 dark:text-ndark-dim">
                     <Loader2 size={20} className="mx-auto mb-2 animate-spin" />
                     Sorgu çalışıyor…
                   </td>
@@ -675,6 +801,9 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
                     )}
                   </td>
                   <td className="px-2.5 py-1.5 text-slate-600 dark:text-ndark-muted">
+                    {r.accountProjectName ?? '—'}
+                  </td>
+                  <td className="px-2.5 py-1.5 text-slate-600 dark:text-ndark-muted">
                     {PRIORITY_TR[r.priority ?? ''] ?? r.priority ?? '—'}
                   </td>
                   <td className="px-2.5 py-1.5"><DeptChip label={r.teamName} /></td>
@@ -687,6 +816,9 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
                     >
                       {r.caseNumber}
                     </button>
+                  </td>
+                  <td className="px-2.5 py-1.5 tabular-nums text-slate-500 dark:text-ndark-muted">
+                    {fmtOpeningDate(r.createdAt)}
                   </td>
                   <td className="px-2.5 py-1.5 tabular-nums text-slate-500 dark:text-ndark-muted">
                     {r.devopsIds.length ? r.devopsIds.join(', ') : '—'}
@@ -717,7 +849,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
               ))}
               {!loading && !data && !loadFailed && (
                 <tr>
-                  <td colSpan={15} className="px-4 py-12 text-center text-slate-400 dark:text-ndark-dim">
+                  <td colSpan={17} className="px-4 py-12 text-center text-slate-400 dark:text-ndark-dim">
                     <Download size={20} className="mx-auto mb-2 rotate-180" />
                     Açılışta veri çekilmez (sunucu dostu). Filtreleri seçip <b>Filtrele</b>'ye basın —
                     varsayılan {CURRENT_YEAR} yılıdır; yılı kaldırıp tüm zamanları da sorgulayabilirsiniz.
@@ -726,7 +858,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
               )}
               {!loading && !data && loadFailed && (
                 <tr>
-                  <td colSpan={15} className="px-4 py-12 text-center text-red-500 dark:text-red-400">
+                  <td colSpan={17} className="px-4 py-12 text-center text-red-500 dark:text-red-400">
                     <SearchX size={20} className="mx-auto mb-2" />
                     Sorgu başarısız oldu — <b>Filtrele</b>'ye tekrar basarak yeniden deneyin.
                   </td>
@@ -734,7 +866,7 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
               )}
               {!loading && data && data.rows.length === 0 && (
                 <tr>
-                  <td colSpan={15} className="px-4 py-10 text-center text-slate-400 dark:text-ndark-dim">
+                  <td colSpan={17} className="px-4 py-10 text-center text-slate-400 dark:text-ndark-dim">
                     <SearchX size={20} className="mx-auto mb-2" />
                     Filtreye uyan vaka yok — filtreleri gevşetmeyi deneyin.
                   </td>

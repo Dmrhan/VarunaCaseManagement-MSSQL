@@ -11,6 +11,13 @@
  *
  * Phase 1 desteklenen filtreler (TASK kapsamı):
  *   - dateFrom / dateTo  → Case.createdAt aralığı
+ *   - resolvedFrom / resolvedTo → Case.resolvedAt aralığı. P2 fix: resolvedAt
+ *     terminal (Çözüldü/İptal) statüye girişte damgalanır AMA reopen'da
+ *     TEMİZLENMEZ (caseRepository.js transitionStatus — prev.resolvedAt
+ *     korunur). Yani reopen edilmiş, ŞU AN AÇIK bir vakada da eski
+ *     resolvedAt dolu olabilir. Bu yüzden bu filtre uygulanınca
+ *     where.status da otomatik terminal statüye kısıtlanır (kullanıcının
+ *     kendi statü seçimiyle kesişir) — yoksa açık/reopen vakalar sızar.
  *   - companyIds         → CSV veya string[]
  *   - statuses           → CSV veya string[] (TR enum → DB ASCII conversion)
  *   - priorities         → CSV veya string[] (zaten ASCII; conversion yok)
@@ -41,19 +48,29 @@ function toArray(v) {
 }
 
 /**
- * Codex P2 #2 fix — `dateTo` end-of-day normalize:
+ * Codex P2 #2 fix — `dateTo` end-of-day normalize + P2 TR gün sınırı fix:
  *
- * UI date input'u 'YYYY-MM-DD' formatında gönderir. `new Date('YYYY-MM-DD')`
- * UTC midnight üretir; `lte: midnight` kullanılırsa o günkü (kullanıcının
- * "kapsasın" dediği gün) tüm vakalar drop edilir.
+ * UI date input'u 'YYYY-MM-DD' formatında gönderir. Rapor zaman damgaları
+ * Europe/Istanbul'da (sabit UTC+3, DST yok) gösteriliyor — ama `new
+ * Date('YYYY-MM-DD')` UTC gece yarısı üretir. Düz UTC sınırı kullanılırsa
+ * gece yarısına yakın (00:00–02:59 TRT) vakalar yanlış tarafta kalır:
+ *   - `dateFrom`/`resolvedFrom` (gte): TR gününün ilk 3 saati YANLIŞLIKLA
+ *     dışlanır (UTC gece yarısı henüz TR'de bir önceki günün 03:00'ü).
+ *   - `dateTo`/`resolvedTo` (lte): bir sonraki TR gününün ilk 3 saati
+ *     YANLIŞLIKLA dahil edilir.
  *
- * Çözüm: `endOfDay=true` ile çağrı geldiğinde:
- *   - Sadece tarih (YYYY-MM-DD) ise: aynı günün 23:59:59.999 UTC noktasına çek
- *   - Saat içeren ISO ise (kullanıcı zaten saati seçmişse): dokunma
- *
- * `dateFrom` için inclusive midnight start zaten doğru (gte) — onu bozmuyoruz.
+ * Çözüm: sadece tarih (YYYY-MM-DD, saatsiz) girişte TR_OFFSET_MS ile TR
+ * gün sınırına anlanır (server/lib/slaDashboardDateRange.js'teki aynı
+ * desen). Saat içeren ISO girişte (kullanıcı zaten saati seçmişse): dokunma.
  */
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TR_OFFSET_MS = 3 * 60 * 60 * 1000;
+
+// P2 fix — resolvedFrom/resolvedTo yalnız bu statülerde "gerçek" çözüm
+// zamanı anlamına gelir (server/analytics/slaDashboard.js'teki TERMINAL
+// Set'in ikizi — caseRepository.js transitionStatus reopen'da resolvedAt'i
+// TEMİZLEMİYOR, bu yüzden açık/reopen vakalarda da eski değer dolu kalabilir).
+const TERMINAL_STATUSES = ['Cozuldu', 'IptalEdildi'];
 
 function parseDate(v, { endOfDay = false } = {}) {
   if (!v) return null;
@@ -61,13 +78,17 @@ function parseDate(v, { endOfDay = false } = {}) {
   if (typeof v !== 'string') return null;
   const trimmed = v.trim();
   if (trimmed.length === 0) return null;
-  const isDateOnly = DATE_ONLY_RE.test(trimmed);
-  const d = new Date(trimmed);
-  if (Number.isNaN(d.getTime())) return null;
-  if (endOfDay && isDateOnly) {
-    d.setUTCHours(23, 59, 59, 999);
+  if (DATE_ONLY_RE.test(trimmed)) {
+    const [year, month, day] = trimmed.split('-').map(Number);
+    if (endOfDay) {
+      // TR gününün SONU dahil → ertesi TR gününün gece yarısından 1ms önce.
+      const nextDayStartMs = Date.UTC(year, month - 1, day + 1) - TR_OFFSET_MS;
+      return new Date(nextDayStartMs - 1);
+    }
+    return new Date(Date.UTC(year, month - 1, day) - TR_OFFSET_MS);
   }
-  return d;
+  const d = new Date(trimmed);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function intersectCompanyScope(filtersCompanyIds, allowedCompanyIds) {
@@ -122,6 +143,22 @@ export function buildReportWhere(filters, allowedCompanyIds) {
     where.createdAt = {};
     if (dateFrom) where.createdAt.gte = dateFrom;
     if (dateTo) where.createdAt.lte = dateTo;
+  }
+
+  const resolvedFrom = parseDate(f.resolvedFrom);
+  const resolvedTo = parseDate(f.resolvedTo, { endOfDay: true });
+  if (resolvedFrom || resolvedTo) {
+    where.resolvedAt = {};
+    if (resolvedFrom) where.resolvedAt.gte = resolvedFrom;
+    if (resolvedTo) where.resolvedAt.lte = resolvedTo;
+    // P2 fix — reopen edilmiş (şu an AÇIK) bir vakada da eski resolvedAt
+    // dolu kalabildiği için, statüyü terminal'e kısıtlamadan bu filtre
+    // yanlışlıkla açık vakaları da döndürür. Kullanıcı zaten bir statü
+    // filtresi seçtiyse (where.status set) TERMINAL_STATUSES ile kesişir;
+    // hiç seçmediyse doğrudan TERMINAL_STATUSES uygulanır.
+    where.status = where.status?.in
+      ? { in: where.status.in.filter((s) => TERMINAL_STATUSES.includes(s)) }
+      : { in: TERMINAL_STATUSES };
   }
 
   if (typeof f.search === 'string' && f.search.trim().length > 0) {
