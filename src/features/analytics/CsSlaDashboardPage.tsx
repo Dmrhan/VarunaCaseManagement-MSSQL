@@ -559,7 +559,16 @@ export function CsSlaDashboardPage({ onSelectCase }: Props) {
     if (!applied || !data) return [];
     const chips: string[] = [];
     if (applied.createdFrom || applied.createdTo) {
-      const fmt = (v: string) => new Date(v).toLocaleDateString('tr-TR');
+      // P2 fix — v zaten 'YYYY-MM-DD' (tarih-only, saatsiz) — new Date(v)
+      // ile Date objesine çevirip toLocaleDateString ETMEK UTC gece yarısı
+      // parse eder ve tarayıcı yerel saatine göre biçimlendirir; UTC'nin
+      // batısındaki bir saat diliminde bir gün ERİ görünürdü (10 Temmuz
+      // seçilse "9.07.2026" çıkardı). String'i doğrudan parçala — Date/
+      // timezone'a hiç girme.
+      const fmt = (v: string) => {
+        const [y, m, d] = v.split('-');
+        return `${d}.${m}.${y}`;
+      };
       chips.push(`Açılış: ${applied.createdFrom ? fmt(applied.createdFrom) : '…'} → ${applied.createdTo ? fmt(applied.createdTo) : '…'}`);
     } else if (applied.year) {
       chips.push(`Yıl: ${applied.year}${applied.month ? ' · ' + MONTHS[applied.month - 1] : ''}`);
