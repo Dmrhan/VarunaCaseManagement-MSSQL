@@ -26,8 +26,19 @@ function check(label, filePath, pattern) {
 // (farklı AccountProject kaydı) tekrarlanabildiği için, filtrede tek satır
 // olarak listelenmesi gerekiyor (kullanıcı geri bildirimi). Bu yüzden
 // dedup key ID değil accountProjectName.
-check('slaDashboard.js — accountProject select (yalnız name)', 'server/analytics/slaDashboard.js', /accountProject: \{ select: \{ name: true \} \}/);
-check('slaDashboard.js — row çıktısında accountProjectName', 'server/analytics/slaDashboard.js', /accountProjectName: c\.accountProject\?\.name \?\? null,/);
+// P2 fix — canlı AccountProject.name ilişkisi DEĞİL, Case'in kendi
+// denormalize accountProjectName kolonu kullanılmalı; bootstrap dropdown
+// (optionsOnly dalı) da aynı kolonu groupBy ediyor. Proje sonradan yeniden
+// adlandırılırsa canlı isim eski snapshot'la eşleşmez, filtre 0 satır
+// dönerdi — ikisi AYNI kaynaktan (Case.accountProjectName) beslenmeli.
+check('slaDashboard.js — accountProjectName scalar select (canlı join YOK)', 'server/analytics/slaDashboard.js', /accountProjectName: true,/);
+check('slaDashboard.js — row çıktısında Case snapshot kullanılıyor', 'server/analytics/slaDashboard.js', /accountProjectName: c\.accountProjectName \?\? null,/);
+{
+  const src = readFileSync(path.resolve(root, 'server/analytics/slaDashboard.js'), 'utf8');
+  const ok = !/accountProject:\s*\{\s*select/.test(src) && !/c\.accountProject\?\.name/.test(src);
+  console.log(`${ok ? '✔' : '✘'} slaDashboard.js — canlı accountProject join KALDIRILDI`);
+  if (ok) pass += 1; else fail += 1;
+}
 check('slaDashboard.js — sel.accountProjectName', 'server/analytics/slaDashboard.js', /accountProjectName: new Set\(toList\(params\.accountProjectName\)\)/);
 check('slaDashboard.js — FACETS accountProjectName', 'server/analytics/slaDashboard.js', /\['accountProjectName', \(r\) => r\.accountProjectName\]/);
 check('slaDashboard.js — options.projects', 'server/analytics/slaDashboard.js', /accounts,\s*\n\s*projects,/);

@@ -249,7 +249,13 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
         thirdPartyName: true,
         customFields: true,
         account: { select: { id: true, name: true } },
-        accountProject: { select: { name: true } },
+        // P2 fix — Case'in KENDİ denormalize accountProjectName'i kullanılır,
+        // AccountProject.name canlı ilişkisi DEĞİL. Proje adı bazlı dedup
+        // (bkz. sel.accountProjectName) bootstrap dropdown'la (optionsOnly
+        // dalı, aynı kolonu groupBy eder) AYNI kaynaktan beslenmeli — proje
+        // sonradan yeniden adlandırılırsa canlı isim eski snapshot'la
+        // eşleşmez ve filtre sessizce 0 satır dönerdi.
+        accountProjectName: true,
       },
     }),
     prisma.caseEmail.groupBy({
@@ -311,7 +317,7 @@ export async function computeSlaDashboard(params, allowedCompanyIds) {
       createdAt: c.createdAt.toISOString(),
       accountId: c.account?.id ?? null,
       accountName: c.account?.name ?? null,
-      accountProjectName: c.accountProject?.name ?? null,
+      accountProjectName: c.accountProjectName ?? null,
       priority: c.priority,
       requestType: c.requestType,
       status: c.status,
