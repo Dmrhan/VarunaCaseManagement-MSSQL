@@ -296,6 +296,8 @@ export const CASE_FIELD_LABELS: Record<string, string> = {
   companyName:          'Şirket',
   accountId:            'Müşteri',
   accountName:          'Müşteri',
+  accountProjectId:     'Proje',
+  accountProjectName:   'Proje',
   assignedTeamId:       'Atanan Takım',
   assignedTeamName:     'Atanan Takım',
   assignedPersonId:     'Atanan Kişi',
@@ -426,6 +428,13 @@ export interface Case {
   /** WR-A4 / PM-04 — AccountCompany altındaki proje (opsiyonel). */
   accountProjectId?: string;
   accountProjectName?: string;
+  /**
+   * WR-Proje-Kapanış — müşteride seçilebilir AKTİF proje (isActive:true AND
+   * status:'Active') var mı. Yalnız TEKİL vaka dönen endpoint'lerde dolu
+   * gelir (get, transition, patch, transfer, claim, link-account vb.) —
+   * liste (GET /api/cases) bu alanı TAŞIMAZ (bilinçli, performans).
+   */
+  hasAvailableProjects?: boolean;
 
   category: string;
   subCategory: string;
