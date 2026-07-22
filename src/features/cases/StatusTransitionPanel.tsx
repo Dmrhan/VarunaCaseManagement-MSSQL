@@ -253,12 +253,20 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   const effectiveAccountId = linkedCaseSnapshot?.accountId ?? item.accountId;
   const effectiveCompanyId = linkedCaseSnapshot?.companyId ?? item.companyId;
   const effectiveHasAvailableProjects = linkedCaseSnapshot?.hasAvailableProjects ?? item.hasAvailableProjects;
-  const effectiveAccountProjectId = linkedCaseSnapshot?.accountProjectId ?? item.accountProjectId;
+  // Fix — accountProjectId'nin DOLU olması yetmez; o proje sonradan
+  // Completed/Cancelled/Passive'e çekilmiş (stale) olabilir. Backend artık
+  // kapanışta bunu reddediyor (isAccountProjectCurrentlyActive); FE de aynı
+  // "hâlâ aktif mi" sinyaline bakmalı — aksi halde kapı erken kapanır, seçim
+  // kutusu hiç görünmez, kullanıcı Uygula'ya basıp backend hatasından
+  // öğrenir. accountProjectIsActive true DIŞINDA her şey (false, undefined —
+  // proje yok ya da alan henüz taşınmıyor) kapıyı açık tutar; strict eşitlik
+  // bilinçli (diğer kapılarla aynı desen, bkz. hasAvailableProjects===true).
+  const effectiveAccountProjectIsActive = linkedCaseSnapshot?.accountProjectIsActive ?? item.accountProjectIsActive;
   const projectGateActive =
     pending === 'Çözüldü' &&
     !!effectiveAccountId &&
     effectiveHasAvailableProjects === true &&
-    !effectiveAccountProjectId &&
+    effectiveAccountProjectIsActive !== true &&
     !projectSet &&
     user?.role !== 'SystemAdmin';
   const [gateAccountProjects, setGateAccountProjects] = useState<AccountProjectSummary[]>([]);
