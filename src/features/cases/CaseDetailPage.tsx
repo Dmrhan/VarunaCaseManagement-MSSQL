@@ -107,12 +107,13 @@ import {
   canLookupAccountForCaseProject,
   type CaseCustomerContext,
   type AccountProjectSummary,
+  type AccountListItem,
 } from '@/services/accountService';
 import {
   authorizationService,
   type AuthorizationFieldState,
 } from '@/services/authorizationService';
-import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
+import { AccountSearchPicker, type PickedProject } from '@/features/accounts/AccountSearchPicker';
 import { useAuth } from '@/services/AuthContext';
 import { featureFlags } from '@/config/featureFlags';
 import { formatDateTime, formatRelative, formatRemaining, formatSlaRemaining } from '@/lib/format';
@@ -248,7 +249,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
   // taslak olarak bekler + onay istenir. "Manuel müşteri ara" (müşterisiz
   // vaka) akışı bundan ayrı — hâlâ anında commit ediyor.
   const [changeAccountMode, setChangeAccountMode] = useState(false);
-  const [pendingAccountChange, setPendingAccountChange] = useState<{ id: string; name: string } | null>(null);
+  const [pendingAccountChange, setPendingAccountChange] = useState<{ id: string; name: string; projectId?: string; projectLabel?: string } | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [unsnoozing, setUnsnoozing] = useState(false);
@@ -278,6 +279,12 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
   // sneak past `noteSubmitting`. The ref flips synchronously.
   const noteSubmittingRef = useRef(false);
 
+  // Müşteri arama modalında proje alt-listesi göstermek tenant'ın "Proje
+  // kullanımı aktif" ayarına bağlı (Smart Ticket'taki kullanım ile aynı).
+  const projectsEnabledForCompany = useMemo(
+    () => lookupService.companies().find((c) => c.id === item?.companyId)?.projectsEnabled ?? false,
+    [item?.companyId],
+  );
   const offeredSolutions = useMemo(() => lookupService.offeredSolutions(), []);
   // Phase C2: account bilgisi artık /api/cases/:id/customer-context'tan; bootstrap kullanılmıyor.
   const accounts = useMemo(() => lookupService.accounts(), []);
@@ -335,7 +342,11 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
     void accountService.get(item.accountId).then((detail) => {
       if (!alive) return;
       const company = detail?.companies.find((c) => c.companyId === item.companyId);
-      setAccountProjects((company?.projects ?? []).filter((p) => p.isActive));
+      // "Aktif proje" tanımı sistem çapında tek: isActive VE status==='Active'
+      // (bkz. server/db/accountRepository.js picker sorgusu, caseRepository.js
+      // hasActiveProjectsForCaseAccount). Yalnız isActive'e bakmak pasif/
+      // tamamlanmış/iptal projeleri de listelerdi.
+      setAccountProjects((company?.projects ?? []).filter((p) => p.isActive && p.status === 'Active'));
     });
     return () => {
       alive = false;
@@ -738,10 +749,17 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
     let savedCount = 0;
 
     if (pendingAccountChange) {
-      const updatedAccount = await caseService.linkAccount(item.id, pendingAccountChange.id);
+      let updatedAccount = await caseService.linkAccount(item.id, pendingAccountChange.id);
       if (!updatedAccount) {
         setSavingDrafts(false);
         return;
+      }
+      // Müşteri değişince backend eski proje bağını sıfırlıyor — picker'da
+      // yeni müşteri için proje de seçildiyse (bkz. onSelectWithProject),
+      // linkAccount'un hemen ardından o da uygulanır.
+      if (pendingAccountChange.projectId) {
+        const withProject = await caseService.update(item.id, { accountProjectId: pendingAccountChange.projectId });
+        if (withProject) updatedAccount = withProject;
       }
       currentItem = updatedAccount;
       setItem(updatedAccount);
@@ -1533,6 +1551,38 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
               });
             }
           }}
+          projectsEnabled={projectsEnabledForCompany}
+          projectsRequired
+          onSelectWithProject={async (account: AccountListItem, project: PickedProject | null) => {
+            if (linkSubmitting) return;
+            if (changeAccountMode) {
+              // Değiştir akışı taslak/onay mekanizması kullanıyor — seçilen
+              // proje de taslağa eklenir, Kaydet'e basınca handleSaveDrafts
+              // içinde müşteri linki ile birlikte uygulanır.
+              setPendingAccountChange({
+                id: account.id,
+                name: account.name,
+                projectId: project?.id,
+                projectLabel: project ? `${project.name} (${project.code})` : undefined,
+              });
+              setLinkAccountOpen(false);
+              return;
+            }
+            setLinkSubmitting(true);
+            let updated = await caseService.linkAccount(item.id, account.id);
+            if (updated && project) {
+              const withProject = await caseService.update(item.id, { accountProjectId: project.id });
+              if (withProject) updated = withProject;
+            }
+            setLinkSubmitting(false);
+            if (updated) {
+              setItem(updated);
+              setLinkAccountOpen(false);
+              void accountService.getCaseCustomerContext(item.id).then((out) => {
+                setCustomerContext(out?.context ?? null);
+              });
+            }
+          }}
         />
       )}
 
@@ -1675,8 +1725,8 @@ function LeftPanel({
   onLinkAccount?: () => void;
   /** Değiştir akışı — mevcut müşteriyi başka bir müşteriyle değiştirmek için. */
   onChangeAccount?: () => void;
-  /** Değiştir akışında seçilen ama henüz Kaydet ile commit edilmemiş müşteri. */
-  pendingAccountChange?: { id: string; name: string } | null;
+  /** Değiştir akışında seçilen ama henüz Kaydet ile commit edilmemiş müşteri (+ varsa proje). */
+  pendingAccountChange?: { id: string; name: string; projectId?: string; projectLabel?: string } | null;
   onCancelAccountChange?: () => void;
   onConfirmLinkSuggestion?: (suggestion: CustomerMatchSuggestion) => Promise<void>;
   drawerOpen: boolean;
@@ -1749,7 +1799,11 @@ function LeftPanel({
               {pendingAccountChange && (
                 <div className="mt-1.5 flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800 ring-1 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:ring-amber-900/40">
                   <span className="min-w-0 truncate">
-                    Yeni müşteri: <strong>{pendingAccountChange.name}</strong> — Kaydet'e basınca uygulanır.
+                    Yeni müşteri: <strong>{pendingAccountChange.name}</strong>
+                    {pendingAccountChange.projectLabel && (
+                      <> — Proje: <strong>{pendingAccountChange.projectLabel}</strong></>
+                    )}
+                    {' '}— Kaydet'e basınca uygulanır.
                   </span>
                   {onCancelAccountChange && (
                     <button

@@ -184,6 +184,79 @@ function shape(c) {
 }
 
 /**
+ * WR-Proje-Kapanış — "aktif proje" TEK tanımı, sistem çapında tutarlı:
+ * isActive === true AND status === 'Active'. Bu tanım zaten
+ * server/db/accountRepository.js'teki picker sorgusunda kullanılıyor; guard
+ * (aşağıda) ve dropdown (CaseDetailPage.tsx client filtresi) da AYNI tanımı
+ * kullanmalı — aksi halde "kural var ama dropdown'da seçenek yok" ya da
+ * "kural yok ama pasif proje seçilebiliyor" gibi tutarsızlıklar oluşur.
+ *
+ * AccountProject doğrudan Account'a bağlı değil:
+ *   Account → AccountCompany → AccountProject
+ * Bu yüzden accountId + companyId üzerinden önce AccountCompany bulunur.
+ * AccountCompany yoksa (account bu şirkete hiç bağlanmamışsa) "seçilebilir
+ * proje yok" kabul edilir — kural devreye girmez, false döner.
+ *
+ * @param {{ accountId: string | null, companyId: string }} params
+ * @returns {Promise<boolean>}
+ */
+export async function hasActiveProjectsForCaseAccount({ accountId, companyId }) {
+  if (!accountId) return false;
+  const accountCompany = await prisma.accountCompany.findUnique({
+    where: { accountId_companyId: { accountId, companyId } },
+    select: { id: true },
+  });
+  if (!accountCompany) return false;
+  const count = await prisma.accountProject.count({
+    where: { accountCompanyId: accountCompany.id, isActive: true, status: 'Active' },
+  });
+  return count > 0;
+}
+
+/**
+ * WR-Proje-Kapanış fix — kapanış kapısı yalnızca "Case.accountProjectId dolu
+ * mu" diye bakıyordu; bu, projesi sonradan Completed/Cancelled/Passive'e
+ * çekilmiş (veya loadAndValidateProject'in eski, yalnız isActive kontrol
+ * eden sürümüyle set edilmiş) STALE bir referansı da "proje seçilmiş" kabul
+ * ediyordu — kapı atlatılabiliyordu. Bu helper, bağlı projenin HÂLÂ aktif
+ * (isActive===true AND status==='Active') olup olmadığını doğrudan sorar;
+ * null/silinmiş/pasif projede false döner.
+ *
+ * @param {string | null | undefined} projectId
+ * @returns {Promise<boolean>}
+ */
+export async function isAccountProjectCurrentlyActive(projectId) {
+  if (!projectId) return false;
+  const project = await prisma.accountProject.findUnique({
+    where: { id: projectId },
+    select: { isActive: true, status: true },
+  });
+  return !!project && project.isActive === true && project.status === 'Active';
+}
+
+/**
+ * shape() + hasAvailableProjects enrichment — TEKİL vaka döndüren her
+ * repository fonksiyonu bunu kullanmalı (shape() değil, doğrudan). Liste
+ * fonksiyonları (list(), vb. — items.map(shape) kalıbı) BU FONKSİYONU
+ * KULLANMAZ: hasAvailableProjects yalnız tekil-vaka görünümlerinde
+ * (CaseDetailPage/CompactStatusStepper/L1WorkbenchPanel — hepsi tekil `item`
+ * prop'u alır, liste satırı render etmez) anlamlı; listeye eklemek her
+ * sayfa yüklemesinde gereksiz ekstra sorgu demek olurdu (performans riski).
+ *
+ * shape()'in kendisi senkron kalır (DB sorgusu yapmaz) — bu sarmalayıcı
+ * onun ÜSTÜNE async enrichment ekler.
+ */
+async function shapeWithProjectAvailability(c) {
+  const shaped = shape(c);
+  if (!shaped) return shaped;
+  const hasAvailableProjects = await hasActiveProjectsForCaseAccount({
+    accountId: shaped.accountId ?? null,
+    companyId: shaped.companyId,
+  });
+  return { ...shaped, hasAvailableProjects };
+}
+
+/**
  * Per-process in-flight registry for note/reply creates — guards against
  * truly-concurrent identical create requests (browser HTTP/2 multiplexed
  * double-click). Single-instance scope; sufficient for current BFF
@@ -403,10 +476,17 @@ async function loadAndValidateProject({ projectId, accountId, companyId }) {
       id: true,
       name: true,
       isActive: true,
+      status: true,
       accountCompany: { select: { accountId: true, companyId: true } },
     },
   });
-  if (!project || !project.isActive) {
+  // "Aktif proje" TEK tanımı sistem çapında: isActive===true AND
+  // status==='Active' (bkz. hasActiveProjectsForCaseAccount üstündeki
+  // yorum). Önceden yalnız isActive kontrol ediliyordu — Completed/Cancelled/
+  // Passive statüdeki (ama isActive=true kalmış) bir proje de burada kabul
+  // edilebiliyordu; bu da kapanış kapısının stale bir projeyle atlatılmasına
+  // yol açıyordu (bkz. transitionStatus guard'ındaki ek kontrol).
+  if (!project || !project.isActive || project.status !== 'Active') {
     throw new CaseValidationError('Geçersiz veya pasif proje.', {
       status: 400,
       code: 'invalid_project',
@@ -1413,7 +1493,7 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -1664,7 +1744,7 @@ export const caseRepository = {
     // PR-SD — Arşivli vaka direct URL: yalnız SystemAdmin görür. Diğer
     // roller için 404 davranışı (null döner → route 404 yansıtır).
     if (c.isArchived && actorRole !== 'SystemAdmin') return null;
-    return (await enrichSlaView([shape(c)]))[0];
+    return (await enrichSlaView([await shapeWithProjectAvailability(c)]))[0];
   },
 
   /**
@@ -2068,7 +2148,7 @@ export const caseRepository = {
     // UI/portal/API açılışlarında ACK semantiği yok (kullanıcı UI teyit
     // görür); intake olmayan path'lerde emit zaten beklenmiyor.
 
-    return shape(created);
+    return await shapeWithProjectAvailability(created);
   },
 
   async update(id, patch, actor, allowedCompanyIds, actorRole, actorPersonId = null, actorObject = null) {
@@ -2281,6 +2361,20 @@ export const caseRepository = {
     // Neither accountId nor accountProjectId in patch → existing project link
     // is preserved by the absence of any lifecyclePatch entry.
 
+    // Aktiviteler'de "Proje: <ID>" yerine "Proje: <ad>" görünsün diye —
+    // genel historyEntries döngüsü (yukarıda) patch'teki ham accountProjectId
+    // değerini String() ile logluyor; burada proje adı çözüldükten SONRA o
+    // kaydı isimle güncelliyoruz (accountId değişiminin yan etkisiyle sessizce
+    // temizlenen proje için ayrı bir kayıt açılmıyor — patch'te alan hiç
+    // gelmediğinden zaten history girdisi de yok, mevcut davranış korunur).
+    if (projectIdInPatch) {
+      const projectHistoryEntry = historyEntries.find((h) => h.fieldName === 'accountProjectId');
+      if (projectHistoryEntry) {
+        projectHistoryEntry.fromValue = before.accountProjectName ?? null;
+        projectHistoryEntry.toValue = lifecyclePatch.accountProjectName ?? null;
+      }
+    }
+
     // WR-A7b / DI.6 — Product / Package lifecycle on PATCH.
     //
     //  - productId explicit set → validate Product (company match), refresh productName snapshot.
@@ -2417,7 +2511,7 @@ export const caseRepository = {
       });
     }
 
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -2574,7 +2668,7 @@ export const caseRepository = {
       where: { id: caseId },
       include: CASE_INCLUDE,
     });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -2610,7 +2704,7 @@ export const caseRepository = {
       // Idempotent: zaten arşivli — current state'i döndür (UI'da double-click
       // edilirse 409 yerine sessizce success).
       const current = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
-      return shape(current);
+      return await shapeWithProjectAvailability(current);
     }
 
     await prisma.$transaction([
@@ -2638,7 +2732,7 @@ export const caseRepository = {
     ]);
 
     const updated = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -2844,7 +2938,7 @@ export const caseRepository = {
     if (!before.isArchived) {
       // Idempotent: zaten arşivli değil.
       const current = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
-      return shape(current);
+      return await shapeWithProjectAvailability(current);
     }
 
     await prisma.$transaction([
@@ -2871,7 +2965,7 @@ export const caseRepository = {
     ]);
 
     const updated = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -2919,7 +3013,7 @@ export const caseRepository = {
     if (existingArr.some((entry) => entry?.id === workItemId)) {
       // Idempotent: zaten bağlı, güncel state'i döndür.
       const c = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
-      return shape(c);
+      return await shapeWithProjectAvailability(c);
     }
 
     // Faz 2.1 — per-tenant config (DB-first, env fallback). companyId
@@ -3025,7 +3119,7 @@ export const caseRepository = {
     }
 
     const updated = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -3078,7 +3172,7 @@ export const caseRepository = {
     }
 
     const updated = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -3296,7 +3390,7 @@ export const caseRepository = {
       }
     }
 
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -3782,7 +3876,7 @@ export const caseRepository = {
       data: { updatedAt: new Date() },
       include: CASE_INCLUDE,
     });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   async toggleChecklistItem(caseId, itemId, checked, actor, allowedCompanyIds) {
@@ -3790,7 +3884,7 @@ export const caseRepository = {
     const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
     if (!companyId) return null;
     const c = await prisma.case.findUnique({ where: { id: caseId } });
-    if (!c?.checklistItems) return shape(c);
+    if (!c?.checklistItems) return await shapeWithProjectAvailability(c);
 
     const items = c.checklistItems.map((it) => {
       if (it.id !== itemId) return it;
@@ -3817,7 +3911,7 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -3955,7 +4049,7 @@ export const caseRepository = {
     const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
     if (!target || target.caseId !== id) {
       const c = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
-      return shape(c);
+      return await shapeWithProjectAvailability(c);
     }
     // Önce Storage'dan sil — başarısız olursa DB satırı yine silinir, orphan log'lanır.
     if (target.fileUrl) {
@@ -3979,7 +4073,7 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -4187,7 +4281,7 @@ export const caseRepository = {
     };
     if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
     const found = await prisma.case.findFirst({ where: mergeSecurityWhere(where, securityWhere), include: CASE_INCLUDE });
-    return shape(found);
+    return await shapeWithProjectAvailability(found);
   },
 
   /**
@@ -4239,6 +4333,43 @@ export const caseRepository = {
         'Vaka müşteri eşleştirilmeden çözülemez. Lütfen önce müşteri seçin (öneriler veya elle ekle).',
         { status: 400, code: 'account_required_for_closure' },
       );
+    }
+
+    // Proje zorunluluğu (kapanış kapısı) — WR-Proje-Kapanış. Müşteride
+    // seçilebilir AKTİF proje tanımlıysa (isActive:true AND status:'Active',
+    // bkz. hasActiveProjectsForCaseAccount) proje seçimi zorunlu; müşteride
+    // hiç aktif proje yoksa kural devreye girmez (projesiz kapanabilir).
+    // CompanySettings.projectsRequired bu kuralı ETKİLEMEZ — o yalnız
+    // create-time davranışı (bkz. yukarıdaki accountId+projectsRequired
+    // bloğu); kapanış kuralı tenant bazlı değil, müşteri bazlı çalışır.
+    // account_required_for_closure guard'ından HEMEN SONRA, product_group
+    // guard'ından ÖNCE — prev.accountId burada zaten var olduğu garanti
+    // (üstteki guard geçtiyse).
+    if (
+      dbNext === 'Cozuldu' &&
+      prev.status !== 'Cozuldu' &&
+      prev.accountId &&
+      actorObject?.role !== 'SystemAdmin'
+    ) {
+      const hasActiveProjects = await hasActiveProjectsForCaseAccount({
+        accountId: prev.accountId,
+        companyId: prev.companyId,
+      });
+      if (hasActiveProjects) {
+        // Fix — önceden yalnız "accountProjectId dolu mu" bakılıyordu; bu,
+        // projesi sonradan Completed/Cancelled/Passive'e çekilmiş (ya da
+        // loadAndValidateProject'in eski, yalnız isActive kontrol eden
+        // sürümüyle set edilmiş) STALE bir referansı da "proje seçilmiş"
+        // sayıp kapıyı atlatıyordu. Artık bağlı projenin HÂLÂ aktif olduğu
+        // ayrıca doğrulanıyor — değilse (null veya stale) kural devam eder.
+        const linkedProjectStillActive = await isAccountProjectCurrentlyActive(prev.accountProjectId);
+        if (!linkedProjectStillActive) {
+          throw new CaseValidationError(
+            'Bu müşteri için tanımlı proje(ler) var; vaka çözülmeden önce proje seçilmelidir.',
+            { status: 400, code: 'project_required_for_closure' },
+          );
+        }
+      }
     }
 
     // Ürün Grubu zorunluluğu (kapanış kapısı) — kayıtlarda bu bilginin
@@ -4720,7 +4851,7 @@ export const caseRepository = {
       void emitNotificationEvent({ event: 'status_changed', caseId: id });
     }
 
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -5091,7 +5222,7 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -5105,7 +5236,7 @@ export const caseRepository = {
     const exists = await prisma.case.findUnique({ where: { id } });
     if (!exists) return null;
     if (!exists.snoozeUntil) {
-      return shape(await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE }));
+      return await shapeWithProjectAvailability(await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE }));
     }
 
     const restored = pickRestoreStatus(exists.snoozePreviousStatus, exists.status);
@@ -5131,7 +5262,7 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
