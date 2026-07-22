@@ -30,7 +30,13 @@ import {
 } from '@/services/caseService';
 import { useAuth } from '@/services/AuthContext';
 import { CustomerMatchSuggestionsPanel } from './components/CustomerMatchSuggestionsPanel';
-import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
+import { AccountSearchPicker, type PickedProject } from '@/features/accounts/AccountSearchPicker';
+import {
+  accountService,
+  canLookupAccountForCaseProject,
+  type AccountListItem,
+  type AccountProjectSummary,
+} from '@/services/accountService';
 import { aiService, aiErrorMessage } from '@/services/aiService';
 import { externalKbService } from '@/services/externalKbService';
 import {
@@ -175,6 +181,21 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   const { user } = useAuth();
   const [linkedCustomer, setLinkedCustomer] = useState<{ id: string; name: string } | null>(null);
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  // Müşteri arama modalında proje alt-listesi göstermek tenant'ın "Proje
+  // kullanımı aktif" ayarına bağlı (Smart Ticket'taki kullanım ile aynı
+  // kapı) — CompanySettings.projectsEnabled=false olan tenant'larda picker
+  // sade müşteri-seçim moduna düşer.
+  const projectsEnabledForCompany = useMemo(
+    () => lookupService.companies().find((c) => c.id === item.companyId)?.projectsEnabled ?? false,
+    [item.companyId],
+  );
+  // Proje kapısı bu turda item.accountId'ye değil, panel içinde YENİ
+  // bağlanan müşterinin taze dönen alanlarına (accountId/companyId/
+  // hasAvailableProjects/accountProjectId) ihtiyaç duyar — item prop'u bu
+  // turda tazelenmiyor (bkz. üstteki not). linkAccount() zaten
+  // shapeWithProjectAvailability ile dönüyor, o yüzden `updated`'ı burada
+  // saklamak yeterli.
+  const [linkedCaseSnapshot, setLinkedCaseSnapshot] = useState<Case | null>(null);
   const customerGateActive =
     pending === 'Çözüldü' &&
     !item.accountId &&
@@ -182,7 +203,29 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     user?.role !== 'SystemAdmin';
   async function handleLinkCustomer(accountId: string, accountName: string) {
     const updated = await caseService.linkAccount(item.id, accountId);
-    if (updated) setLinkedCustomer({ id: accountId, name: accountName });
+    if (updated) {
+      setLinkedCustomer({ id: accountId, name: accountName });
+      setLinkedCaseSnapshot(updated);
+    }
+  }
+  // Müşteri arama modalı — Smart Ticket'taki "müşteri + proje tek adımda"
+  // akışıyla aynı (AccountSearchPicker.onSelectWithProject, projectsEnabled).
+  // Müşteri bağlandıktan hemen sonra seçilen proje de kaydedilir; böylece
+  // proje kapısı (aşağıda) aynı adımda kapanmış olur. project null gelirse
+  // (müşterinin projesi yok / "projesiz devam et") ek işlem yapılmaz — proje
+  // kapısı zaten hasAvailableProjects=false olduğu için devreye girmeyecek.
+  async function handleLinkCustomerWithProject(account: AccountListItem, project: PickedProject | null) {
+    const updated = await caseService.linkAccount(item.id, account.id);
+    if (!updated) return;
+    setLinkedCustomer({ id: account.id, name: account.name });
+    setLinkedCaseSnapshot(updated);
+    if (project) {
+      const withProject = await caseService.update(item.id, { accountProjectId: project.id });
+      if (withProject) {
+        setLinkedCaseSnapshot(withProject);
+        setProjectSet({ id: project.id, label: `${project.name} (${project.code})` });
+      }
+    }
   }
   // Ürün Grubu kapısı — kapanışta veri kesinliği için zorunlu. Müşteri
   // kapısıyla aynı desen: SystemAdmin istisna, local override state
@@ -196,6 +239,58 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     !item.productGroup &&
     !productGroupSet &&
     user?.role !== 'SystemAdmin';
+  // Proje kapısı — WR-Proje-Kapanış. Müşteride vaka açıldıktan sonra
+  // yeniden adlandırılmış/silinmiş bir proje SNAPSHOT'ı değil, backend'in
+  // hasAvailableProjects hesabı (server/db/caseRepository.js
+  // hasActiveProjectsForCaseAccount, isActive:true AND status:'Active')
+  // kullanılıyor — CaseDetailPage'in local accountProjects state'ine değil,
+  // ortak Case payload alanına bağlı (Panel, L1WorkbenchPanel/
+  // CompactStatusStepper'da da reuse ediliyor, o bağlamlarda local state yok).
+  const [projectSet, setProjectSet] = useState<{ id: string; label: string } | null>(null);
+  // Panel içinde yeni bağlanan müşteri varsa (linkedCaseSnapshot) onun taze
+  // alanları geçerli; yoksa item prop'u kullanılır (sayfa ilk açıldığında
+  // veya müşteri zaten bağlıysa bu zaten günceldir).
+  const effectiveAccountId = linkedCaseSnapshot?.accountId ?? item.accountId;
+  const effectiveCompanyId = linkedCaseSnapshot?.companyId ?? item.companyId;
+  const effectiveHasAvailableProjects = linkedCaseSnapshot?.hasAvailableProjects ?? item.hasAvailableProjects;
+  const effectiveAccountProjectId = linkedCaseSnapshot?.accountProjectId ?? item.accountProjectId;
+  const projectGateActive =
+    pending === 'Çözüldü' &&
+    !!effectiveAccountId &&
+    effectiveHasAvailableProjects === true &&
+    !effectiveAccountProjectId &&
+    !projectSet &&
+    user?.role !== 'SystemAdmin';
+  const [gateAccountProjects, setGateAccountProjects] = useState<AccountProjectSummary[]>([]);
+  const [projectDraft, setProjectDraft] = useState('');
+  const [projectSaving, setProjectSaving] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (!projectGateActive || !effectiveAccountId || !effectiveCompanyId || !canLookupAccountForCaseProject(user?.role)) {
+      return;
+    }
+    void accountService.get(effectiveAccountId).then((detail) => {
+      if (!alive) return;
+      const company = detail?.companies.find((c) => c.companyId === effectiveCompanyId);
+      setGateAccountProjects((company?.projects ?? []).filter((p) => p.isActive && p.status === 'Active'));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [projectGateActive, effectiveAccountId, effectiveCompanyId, user?.role]);
+  async function handleSaveProject() {
+    if (!projectDraft) return;
+    setProjectSaving(true);
+    try {
+      const updated = await caseService.update(item.id, { accountProjectId: projectDraft });
+      if (updated) {
+        const found = gateAccountProjects.find((p) => p.id === projectDraft);
+        setProjectSet({ id: projectDraft, label: found ? `${found.name} (${found.code})` : projectDraft });
+      }
+    } finally {
+      setProjectSaving(false);
+    }
+  }
   // Fix — Ürün Kataloğu'nda (ProductGroup) tanımlı ama henüz hiçbir vakada
   // kullanılmamış gruplar da bu kapı select'ine düşsün diye (bkz. aynı fix
   // CaseDetailPage.tsx'te); lookupService.productGroups() yalnız daha önce
@@ -589,6 +684,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     if (!pending) return true;
     if (customerGateActive) return true; // müşterisiz Çözüldü engeli (SystemAdmin muaf)
     if (productGroupGateActive) return true; // ürün grubu boşken Çözüldü engeli (SystemAdmin muaf)
+    if (projectGateActive) return true; // aktif proje varken projesiz Çözüldü engeli (SystemAdmin muaf)
     if (pending === 'Çözüldü' && !resolutionNote.trim()) return true;
     if (pending === 'Çözüldü' && requiredChecklistPending.length > 0) return true;
     if (pending === 'Çözüldü' && closureLabelsPending) return true;
@@ -902,6 +998,47 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                   ✓ Ürün grubu kaydedildi: <strong>{productGroupSet}</strong> — artık çözebilirsin.
                 </div>
               )}
+              {/* Proje kapısı — WR-Proje-Kapanış. Ürün grubu kapısıyla aynı
+                  desen: uyarı + inline seçim, müşteri kartına gitmeye gerek
+                  yok. gateAccountProjects yalnız kapı aktifken (ve izin
+                  varsa) fetch edilir — CaseDetailPage'in kendi accountProjects
+                  state'inden bağımsız, bu panel başka bağlamlarda da
+                  (L1WorkbenchPanel/CompactStatusStepper) tek başına render
+                  olabildiği için. */}
+              {projectGateActive && (
+                <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/40">
+                  <div className="flex items-start gap-2 text-sm font-medium text-amber-900 dark:text-amber-200">
+                    <span>⚠️</span>
+                    <span>Bu müşteri için aktif proje tanımlı — vaka çözülmeden önce proje seçilmelidir.</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={projectDraft}
+                      onChange={(e) => setProjectDraft(e.target.value)}
+                      className="flex-1"
+                    >
+                      <option value="">— Seçin —</option>
+                      {gateAccountProjects.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
+                      ))}
+                    </Select>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleSaveProject()}
+                      disabled={!projectDraft || projectSaving}
+                      leftIcon={projectSaving ? <Loader2 size={12} className="animate-spin" /> : undefined}
+                    >
+                      Kaydet
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {projectSet && (
+                <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200">
+                  ✓ Proje kaydedildi: <strong>{projectSet.label}</strong> — artık çözebilirsin.
+                </div>
+              )}
               <RunaAiCard
                 title="Çözüm Notu Taslağı"
                 body={
@@ -1204,7 +1341,10 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
         </div>
       )}
 
-      {/* Kapanış müşteri kapısı — manuel arama modalı (öneri yetmezse). */}
+      {/* Kapanış müşteri kapısı — manuel arama modalı (öneri yetmezse).
+          Smart Ticket'taki "müşteri + proje tek adımda" akışıyla aynı:
+          projectsEnabled olan tenant'larda müşteri satırının altında proje
+          alt-listesi de görünür, seçilirse aynı adımda kaydedilir. */}
       <AccountSearchPicker
         open={customerPickerOpen}
         companyId={item.companyId}
@@ -1212,6 +1352,12 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
         onSelect={(account) => {
           setCustomerPickerOpen(false);
           if (account) void handleLinkCustomer(account.id, account.name);
+        }}
+        projectsEnabled={projectsEnabledForCompany}
+        projectsRequired
+        onSelectWithProject={(account, project) => {
+          setCustomerPickerOpen(false);
+          void handleLinkCustomerWithProject(account, project);
         }}
       />
     </section>
