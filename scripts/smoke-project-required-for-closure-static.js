@@ -102,5 +102,15 @@ check('types.ts — CASE_FIELD_LABELS.accountProjectId = Proje', 'src/features/c
 //    Backoffice için hiç fetch edilmiyordu (Uygula/Kaydet kilitli kalıyordu) ──
 check('accountService.ts — canLookupAccountForCaseProject Backoffice içeriyor', 'src/services/accountService.ts', /\[\.\.\.ACCOUNT_READ_ROLES, 'Agent', 'Backoffice'\]/);
 
+// ── Bug: kapanış kapısı yalnız "accountProjectId dolu mu" bakıyordu,
+//    stale (Completed/Cancelled/Passive) bir proje referansı kapıyı
+//    atlatabiliyordu. Artık bağlı projenin HÂLÂ aktif olduğu ayrıca
+//    doğrulanıyor; loadAndValidateProject de artık status==='Active'
+//    kontrol ediyor (yalnız isActive değil) ──
+check('caseRepository.js — isAccountProjectCurrentlyActive export', 'server/db/caseRepository.js', /export async function isAccountProjectCurrentlyActive\(projectId\)/);
+check('caseRepository.js — transitionStatus guard linkedProjectStillActive kullanıyor', 'server/db/caseRepository.js', /const linkedProjectStillActive = await isAccountProjectCurrentlyActive\(prev\.accountProjectId\);/);
+check('caseRepository.js — guard artık !linkedProjectStillActive kontrol ediyor (eski !prev.accountProjectId DEĞİL)', 'server/db/caseRepository.js', /if \(!linkedProjectStillActive\) \{/);
+check('caseRepository.js — loadAndValidateProject status===Active kontrolü', 'server/db/caseRepository.js', /if \(!project \|\| !project\.isActive \|\| project\.status !== 'Active'\) \{/);
+
 console.log(`\n${pass} geçti, ${fail} başarısız.`);
 if (fail > 0) process.exitCode = 1;
