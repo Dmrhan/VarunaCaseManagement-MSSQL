@@ -435,6 +435,17 @@ export interface Case {
    * liste (GET /api/cases) bu alanı TAŞIMAZ (bilinçli, performans).
    */
   hasAvailableProjects?: boolean;
+  /**
+   * WR-Proje-Kapanış fix — accountProjectId dolu olsa bile o proje sonradan
+   * Completed/Cancelled/Passive'e çekilmiş (stale) olabilir; backend kapanış
+   * guard'ı artık bunu reddediyor (isAccountProjectCurrentlyActive). FE'nin
+   * projectGateActive hesabı yalnız "accountProjectId dolu mu" değil, bu
+   * alanla "bağlı proje HÂLÂ aktif mi" diye de bakmalı — aksi halde kapı
+   * erken kapanıp seçim kutusu gizlenir, kullanıcı Uygula'ya basıp backend
+   * hatası alana kadar sorunu fark edemez. Aynı kapsam kısıtı geçerli:
+   * yalnız tekil-vaka endpoint'lerinde dolu gelir.
+   */
+  accountProjectIsActive?: boolean;
 
   category: string;
   subCategory: string;

@@ -112,5 +112,21 @@ check('caseRepository.js — transitionStatus guard linkedProjectStillActive kul
 check('caseRepository.js — guard artık !linkedProjectStillActive kontrol ediyor (eski !prev.accountProjectId DEĞİL)', 'server/db/caseRepository.js', /if \(!linkedProjectStillActive\) \{/);
 check('caseRepository.js — loadAndValidateProject status===Active kontrolü', 'server/db/caseRepository.js', /if \(!project \|\| !project\.isActive \|\| project\.status !== 'Active'\) \{/);
 
+// ── Bug: addCallLog/finalizeUpload/transferCase hâlâ çıplak shape(...)
+//    kullanıyordu (caseUpdated/case alanı) — bu 3 mutasyondan dönen case
+//    hasAvailableProjects/accountProjectIsActive'ı kaybediyor, proje kapısı
+//    tam refetch'e kadar render olmuyordu ──
+check('caseRepository.js — addCallLog shapeWithProjectAvailability kullanıyor', 'server/db/caseRepository.js', /caseUpdated: await shapeWithProjectAvailability\(caseUpdated\), callLog:/);
+check('caseRepository.js — finalizeUpload shapeWithProjectAvailability kullanıyor', 'server/db/caseRepository.js', /caseUpdated: await shapeWithProjectAvailability\(caseUpdated\), file \};/);
+check('caseRepository.js — transferCase shapeWithProjectAvailability kullanıyor', 'server/db/caseRepository.js', /case: await shapeWithProjectAvailability\(updated\),/);
+
+// ── Bug: FE projectGateActive yalnız accountProjectId dolu mu bakıyordu;
+//    stale (Completed/Cancelled/Passive) bir proje referansı kapıyı erken
+//    kapatıp seçim kutusunu gizliyordu (backend zaten reddediyordu) ──
+check('caseRepository.js — shapeWithProjectAvailability accountProjectIsActive dönüyor', 'server/db/caseRepository.js', /isAccountProjectCurrentlyActive\(shaped\.accountProjectId \?\? null\)/);
+check('types.ts — Case.accountProjectIsActive', 'src/features/cases/types.ts', /accountProjectIsActive\?: boolean;/);
+check('StatusTransitionPanel.tsx — effectiveAccountProjectIsActive tanımı', 'src/features/cases/StatusTransitionPanel.tsx', /const effectiveAccountProjectIsActive = linkedCaseSnapshot\?\.accountProjectIsActive \?\? item\.accountProjectIsActive;/);
+check('StatusTransitionPanel.tsx — gate artık accountProjectIsActive!==true kontrol ediyor (eski !effectiveAccountProjectId DEĞİL)', 'src/features/cases/StatusTransitionPanel.tsx', /effectiveAccountProjectIsActive !== true &&/);
+
 console.log(`\n${pass} geçti, ${fail} başarısız.`);
 if (fail > 0) process.exitCode = 1;
