@@ -97,5 +97,10 @@ check('CaseDetailPage.tsx — handleSaveDrafts pendingAccountChange.projectId uy
 check('caseRepository.js — update() proje history kaydını isimle güncelliyor', 'server/db/caseRepository.js', /projectHistoryEntry\.toValue = lifecyclePatch\.accountProjectName \?\? null;/);
 check('types.ts — CASE_FIELD_LABELS.accountProjectId = Proje', 'src/features/cases/types.ts', /accountProjectId:\s*'Proje',/);
 
+// ── Bug: Backoffice canLookupAccountForCaseProject listesinde yoktu —
+//    projectGateActive her role uygulanıyordu ama proje dropdown'ı
+//    Backoffice için hiç fetch edilmiyordu (Uygula/Kaydet kilitli kalıyordu) ──
+check('accountService.ts — canLookupAccountForCaseProject Backoffice içeriyor', 'src/services/accountService.ts', /\[\.\.\.ACCOUNT_READ_ROLES, 'Agent', 'Backoffice'\]/);
+
 console.log(`\n${pass} geçti, ${fail} başarısız.`);
 if (fail > 0) process.exitCode = 1;

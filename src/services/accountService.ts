@@ -996,7 +996,14 @@ export function canWriteAccounts(role: string | undefined): boolean {
 /** Vaka detayındaki "Proje" inline-edit alanı için DAR kapsamlı erişim —
  * müşteri modülünü (canReadAccounts) AÇMAZ, sadece o vakanın müşterisinin
  * proje listesini okumaya izin verir. Kasıtlı olarak canReadAccounts'tan
- * ayrı tutulur ki biri genişletilince diğeri yanlışlıkla etkilenmesin. */
+ * ayrı tutulur ki biri genişletilince diğeri yanlışlıkla etkilenmesin.
+ *
+ * Fix — Backoffice eksikti: WR-Proje-Kapanış kapanış kapısı (bkz.
+ * StatusTransitionPanel.tsx projectGateActive) hasAvailableProjects=true
+ * olan HER role uygulanıyor ama proje listesi yalnız bu fonksiyonun izin
+ * verdiği rollere fetch ediliyordu — Backoffice kullanıcıları kapıyı görüp
+ * dropdown'ı hiç dolduramıyor, Uygula/Kaydet kilitli kalıyordu (kapanamayan
+ * vaka). Backoffice de vaka kapatabilen bir rol olduğu için listeye eklendi. */
 export function canLookupAccountForCaseProject(role: string | undefined): boolean {
-  return !!role && ([...ACCOUNT_READ_ROLES, 'Agent'] as readonly string[]).includes(role);
+  return !!role && ([...ACCOUNT_READ_ROLES, 'Agent', 'Backoffice'] as readonly string[]).includes(role);
 }
