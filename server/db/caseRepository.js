@@ -249,11 +249,20 @@ export async function isAccountProjectCurrentlyActive(projectId) {
 async function shapeWithProjectAvailability(c) {
   const shaped = shape(c);
   if (!shaped) return shaped;
-  const hasAvailableProjects = await hasActiveProjectsForCaseAccount({
-    accountId: shaped.accountId ?? null,
-    companyId: shaped.companyId,
-  });
-  return { ...shaped, hasAvailableProjects };
+  const [hasAvailableProjects, accountProjectIsActive] = await Promise.all([
+    hasActiveProjectsForCaseAccount({
+      accountId: shaped.accountId ?? null,
+      companyId: shaped.companyId,
+    }),
+    // Fix — FE'nin projectGateActive'i yalnız accountProjectId'nin dolu
+    // olup olmadığına bakıyordu; bağlı proje sonradan Completed/Cancelled/
+    // Passive'e çekilmişse (backend isAccountProjectCurrentlyActive ile
+    // artık kapanışta reddediyor) FE bunu göremiyor, kapıyı erken kapatıp
+    // seçim kutusunu gizliyordu. Bu alan FE'ye "bağlı proje HÂLÂ aktif mi"
+    // bilgisini taşır.
+    isAccountProjectCurrentlyActive(shaped.accountProjectId ?? null),
+  ]);
+  return { ...shaped, hasAvailableProjects, accountProjectIsActive };
 }
 
 /**
@@ -3848,7 +3857,7 @@ export const caseRepository = {
       data: { updatedAt: new Date() },
       include: CASE_INCLUDE,
     });
-    return { caseUpdated: shape(caseUpdated), callLog: fromDb(log) };
+    return { caseUpdated: await shapeWithProjectAvailability(caseUpdated), callLog: fromDb(log) };
   },
 
   async addActivity(caseId, input, allowedCompanyIds, actor) {
@@ -4026,7 +4035,7 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
-    return { caseUpdated: shape(caseUpdated), file };
+    return { caseUpdated: await shapeWithProjectAvailability(caseUpdated), file };
   },
 
   /** Download için kısa ömürlü token'lı URL üret (local disk; Faz 4). */
@@ -5110,7 +5119,7 @@ export const caseRepository = {
     // (c.transferCount + 1) eş zamanlı transfer'lerde supervisor uyarı
     // eşiğini atlatabilir.
     return {
-      case: shape(updated),
+      case: await shapeWithProjectAvailability(updated),
       transferCount: updated.transferCount,
       fromTeamId,
       fromTeamName,
