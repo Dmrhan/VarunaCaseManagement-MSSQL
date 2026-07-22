@@ -214,6 +214,27 @@ export async function hasActiveProjectsForCaseAccount({ accountId, companyId }) 
 }
 
 /**
+ * WR-Proje-Kapanış fix — kapanış kapısı yalnızca "Case.accountProjectId dolu
+ * mu" diye bakıyordu; bu, projesi sonradan Completed/Cancelled/Passive'e
+ * çekilmiş (veya loadAndValidateProject'in eski, yalnız isActive kontrol
+ * eden sürümüyle set edilmiş) STALE bir referansı da "proje seçilmiş" kabul
+ * ediyordu — kapı atlatılabiliyordu. Bu helper, bağlı projenin HÂLÂ aktif
+ * (isActive===true AND status==='Active') olup olmadığını doğrudan sorar;
+ * null/silinmiş/pasif projede false döner.
+ *
+ * @param {string | null | undefined} projectId
+ * @returns {Promise<boolean>}
+ */
+export async function isAccountProjectCurrentlyActive(projectId) {
+  if (!projectId) return false;
+  const project = await prisma.accountProject.findUnique({
+    where: { id: projectId },
+    select: { isActive: true, status: true },
+  });
+  return !!project && project.isActive === true && project.status === 'Active';
+}
+
+/**
  * shape() + hasAvailableProjects enrichment — TEKİL vaka döndüren her
  * repository fonksiyonu bunu kullanmalı (shape() değil, doğrudan). Liste
  * fonksiyonları (list(), vb. — items.map(shape) kalıbı) BU FONKSİYONU
@@ -455,10 +476,17 @@ async function loadAndValidateProject({ projectId, accountId, companyId }) {
       id: true,
       name: true,
       isActive: true,
+      status: true,
       accountCompany: { select: { accountId: true, companyId: true } },
     },
   });
-  if (!project || !project.isActive) {
+  // "Aktif proje" TEK tanımı sistem çapında: isActive===true AND
+  // status==='Active' (bkz. hasActiveProjectsForCaseAccount üstündeki
+  // yorum). Önceden yalnız isActive kontrol ediliyordu — Completed/Cancelled/
+  // Passive statüdeki (ama isActive=true kalmış) bir proje de burada kabul
+  // edilebiliyordu; bu da kapanış kapısının stale bir projeyle atlatılmasına
+  // yol açıyordu (bkz. transitionStatus guard'ındaki ek kontrol).
+  if (!project || !project.isActive || project.status !== 'Active') {
     throw new CaseValidationError('Geçersiz veya pasif proje.', {
       status: 400,
       code: 'invalid_project',
@@ -4327,11 +4355,20 @@ export const caseRepository = {
         accountId: prev.accountId,
         companyId: prev.companyId,
       });
-      if (hasActiveProjects && !prev.accountProjectId) {
-        throw new CaseValidationError(
-          'Bu müşteri için tanımlı proje(ler) var; vaka çözülmeden önce proje seçilmelidir.',
-          { status: 400, code: 'project_required_for_closure' },
-        );
+      if (hasActiveProjects) {
+        // Fix — önceden yalnız "accountProjectId dolu mu" bakılıyordu; bu,
+        // projesi sonradan Completed/Cancelled/Passive'e çekilmiş (ya da
+        // loadAndValidateProject'in eski, yalnız isActive kontrol eden
+        // sürümüyle set edilmiş) STALE bir referansı da "proje seçilmiş"
+        // sayıp kapıyı atlatıyordu. Artık bağlı projenin HÂLÂ aktif olduğu
+        // ayrıca doğrulanıyor — değilse (null veya stale) kural devam eder.
+        const linkedProjectStillActive = await isAccountProjectCurrentlyActive(prev.accountProjectId);
+        if (!linkedProjectStillActive) {
+          throw new CaseValidationError(
+            'Bu müşteri için tanımlı proje(ler) var; vaka çözülmeden önce proje seçilmelidir.',
+            { status: 400, code: 'project_required_for_closure' },
+          );
+        }
       }
     }
 
