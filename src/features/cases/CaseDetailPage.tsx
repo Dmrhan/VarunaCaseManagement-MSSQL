@@ -3637,6 +3637,21 @@ function DetailTab({
     !!user && ['Agent', 'Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) &&
     !wideViewReadOnly;
 
+  // Açıklama alanı — diğer InlineEdit alanlarının aksine taslağa yazıp üstteki
+  // toplu "Kaydet"i beklemez; ✓'a basınca DOĞRUDAN backend'e kaydedilir.
+  // Kasıtlı istisna (kullanıcı talebi) — diğer alanlar mevcut taslak+toplu
+  // Kaydet akışında kalmaya devam ediyor.
+  async function handleCommitDescription(val: unknown) {
+    const updated = await caseService.update(item.id, { description: (val as string) ?? '' });
+    // updated undefined ise: apiFetch zaten hata toast'unu gösterdi — edit
+    // modunda kal, kullanıcı yazdığını kaybetmesin (handleSaveDrafts'taki
+    // aynı davranış).
+    if (updated) {
+      onCaseUpdated(updated);
+      onCancelEdit();
+    }
+  }
+
   // Kategori cascade — taslakta seçili kategoriye göre alt-kategori opsiyonları
   const activeCategory = (drafts.category ?? item.category) as string;
   const subCategoryOptions = categories.find((c) => c.category === activeCategory)?.subCategories ?? [];
@@ -3738,7 +3753,7 @@ function DetailTab({
                 editing={editingField === 'description'}
                 isDraft={drafts.description !== undefined}
                 onStart={() => onStartEdit('description')}
-                onCommit={(val) => onCommitDraft('description', val)}
+                onCommit={(val) => void handleCommitDescription(val)}
                 onCancel={onCancelEdit}
                 disabled={!canEditField('description') || !canReadField('description') || isMaskedField('description')}
                 renderDisplay={(val) => displayValue('description', <ExpandableText text={String(val ?? '—')} className="whitespace-pre-wrap text-sm text-slate-700" />)}
