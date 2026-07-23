@@ -5007,9 +5007,18 @@ function InlineEdit({
           autoFocus
           value={String(draft ?? '')}
           onChange={(e) => setDraft(e.target.value)}
-          // Dışarı tıklama (blur) artık ne kaydediyor ne siliyor — draft
-          // korunur, alan edit modunda kalır. Kaydetmenin TEK yolu ✓
-          // butonu (veya Enter); iptalin TEK yolu ESC/✗.
+          onBlur={(e) => {
+            // Dışarı tıklama = iptal (edit modundan çık, draft atılır).
+            // Kaydetmenin TEK yolu ✓ butonu/Enter — relatedTarget o buton
+            // ise zaten kendi onMouseDown'ında commit ediyor ve blur bile
+            // tetiklenmiyor (preventDefault); burası yalnız güvenlik ağı.
+            const next = e.relatedTarget as HTMLElement | null;
+            if (next?.dataset?.role === 'commit-draft' || next?.dataset?.role === 'voice-input') {
+              onCommit(draft);
+            } else {
+              onCancel();
+            }
+          }}
           onKeyDown={handleKey}
           placeholder={placeholder}
           rows={4}
@@ -5090,9 +5099,16 @@ function InlineEdit({
         type={type === 'date' ? 'date' : 'text'}
         value={String(draft ?? '')}
         onChange={(e) => setDraft(e.target.value)}
-        // Dışarı tıklama (blur) artık ne kaydediyor ne siliyor — draft
-        // korunur, alan edit modunda kalır. Kaydetmenin TEK yolu ✓
-        // butonu (veya Enter); iptalin TEK yolu ESC/✗.
+        onBlur={(e) => {
+          // Dışarı tıklama = iptal (edit modundan çık, draft atılır).
+          // Kaydetmenin TEK yolu ✓ butonu/Enter.
+          const next = e.relatedTarget as HTMLElement | null;
+          if (next?.dataset?.role === 'commit-draft') {
+            onCommit(draft);
+          } else {
+            onCancel();
+          }
+        }}
         onKeyDown={handleKey}
         placeholder={placeholder}
         className="flex-1 rounded-md border border-blue-500 bg-white px-3 py-1.5 text-sm text-slate-800 ring-2 ring-blue-500/40 focus:outline-none dark:bg-ndark-card dark:text-ndark-text"
