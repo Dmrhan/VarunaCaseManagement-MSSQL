@@ -5007,15 +5007,9 @@ function InlineEdit({
           autoFocus
           value={String(draft ?? '')}
           onChange={(e) => setDraft(e.target.value)}
-          onBlur={(e) => {
-            // Click outside iptal — eğer relatedTarget Kaydet/Voice butonuna gitmiyorsa
-            const next = e.relatedTarget as HTMLElement | null;
-            if (next?.dataset?.role === 'commit-draft' || next?.dataset?.role === 'voice-input') {
-              onCommit(draft);
-            } else {
-              onCommit(draft);
-            }
-          }}
+          // Dışarı tıklama (blur) artık ne kaydediyor ne siliyor — draft
+          // korunur, alan edit modunda kalır. Kaydetmenin TEK yolu ✓
+          // butonu (veya Enter); iptalin TEK yolu ESC/✗.
           onKeyDown={handleKey}
           placeholder={placeholder}
           rows={4}
@@ -5096,14 +5090,9 @@ function InlineEdit({
         type={type === 'date' ? 'date' : 'text'}
         value={String(draft ?? '')}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={(e) => {
-          const next = e.relatedTarget as HTMLElement | null;
-          if (next?.dataset?.role === 'commit-draft') {
-            onCommit(draft);
-          } else {
-            onCommit(draft);
-          }
-        }}
+        // Dışarı tıklama (blur) artık ne kaydediyor ne siliyor — draft
+        // korunur, alan edit modunda kalır. Kaydetmenin TEK yolu ✓
+        // butonu (veya Enter); iptalin TEK yolu ESC/✗.
         onKeyDown={handleKey}
         placeholder={placeholder}
         className="flex-1 rounded-md border border-blue-500 bg-white px-3 py-1.5 text-sm text-slate-800 ring-2 ring-blue-500/40 focus:outline-none dark:bg-ndark-card dark:text-ndark-text"
