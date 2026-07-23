@@ -5013,7 +5013,7 @@ function InlineEdit({
             if (next?.dataset?.role === 'commit-draft' || next?.dataset?.role === 'voice-input') {
               onCommit(draft);
             } else {
-              onCancel();
+              onCommit(draft);
             }
           }}
           onKeyDown={handleKey}
@@ -5101,7 +5101,7 @@ function InlineEdit({
           if (next?.dataset?.role === 'commit-draft') {
             onCommit(draft);
           } else {
-            onCancel();
+            onCommit(draft);
           }
         }}
         onKeyDown={handleKey}
