@@ -75,6 +75,21 @@ export function ContactPicker({ label, values, onChange, suggestions = [], disab
   const [openSug, setOpenSug] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Faz 2 — sürükle-bırak. Bu instance'a özgü kaynak kimliği: bir chip
+  // AYNI ContactPicker'a geri bırakılırsa ("self-drop") kaynak onDragEnd'i
+  // chip'i silmemeli — dropEffect tek başına self/cross-instance ayrımını
+  // yapamaz (her iki durumda da onDragOver 'move' set eder). Bu yüzden
+  // dragStart'ta yazılan source id, drop anında karşılaştırılıyor.
+  const sourceIdRef = useRef<string | undefined>(undefined);
+  if (!sourceIdRef.current) {
+    sourceIdRef.current = `cp_${Math.random().toString(36).slice(2)}`;
+  }
+  // Self-drop tespit edilince set edilir; AYNI instance'ın onDragEnd'i
+  // bunu tüketip (false'a çevirip) chip'i silmekten vazgeçer. Drop her
+  // zaman dragEnd'den ÖNCE fırlar (HTML5 spec garantisi), o yüzden bu
+  // ref güvenilir bir senkron sinyal.
+  const justHandledSelfDropRef = useRef(false);
+
   // Gmail-benzeri chip seçimi — address bazlı (index DEĞİL): bir chip
   // silinip aradakiler kayınca index'ler kayar, address bazlı seçim bu
   // kaymadan etkilenmez. values değişince artık var olmayan seçimler
@@ -194,6 +209,58 @@ export function ContactPicker({ label, values, onChange, suggestions = [], disab
           inputRef.current?.focus();
         }}
         onKeyDown={handleContainerKeyDown}
+        onDragOver={(e) => {
+          if (disabled) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+        }}
+        onDrop={(e) => {
+          if (disabled) return;
+          e.preventDefault();
+          setSelectedAddresses(new Set());
+
+          const sourceId = e.dataTransfer.getData('application/x-varuna-contact-source');
+          const isSelfDrop = !!sourceId && sourceId === sourceIdRef.current;
+
+          let parsed: ContactPickerValue | null = null;
+          const contactJson = e.dataTransfer.getData('application/x-varuna-contact');
+          if (contactJson) {
+            try {
+              const obj = JSON.parse(contactJson);
+              if (obj && typeof obj.address === 'string') {
+                parsed = { address: obj.address, name: typeof obj.name === 'string' ? obj.name : null };
+              }
+            } catch {
+              parsed = null;
+            }
+          }
+          if (!parsed) {
+            parsed = parseEntry(e.dataTransfer.getData('text/plain'));
+          }
+          if (!parsed) {
+            // Geçersiz veri — kaynak (varsa) chip'i silmesin diye 'none' işaretle.
+            e.dataTransfer.dropEffect = 'none';
+            return;
+          }
+
+          if (isSelfDrop) {
+            // Aynı instance'a bırakıldı — chip zaten values içinde, hiçbir
+            // şey eklenmez. Kaynağın (=bu instance'ın) onDragEnd'i bu flag'i
+            // görüp chip'i SİLMEYECEK.
+            justHandledSelfDropRef.current = true;
+            return;
+          }
+
+          const duplicate = values.some((v) => v.address.toLowerCase() === (parsed as ContactPickerValue).address.toLowerCase());
+          if (duplicate) {
+            // Hedefte zaten var (dedupe) — eklenmeyecek. Kaynak da chip'i
+            // SİLMESİN diye dropEffect'i 'none' yap (aksi halde chip hiçbir
+            // yerde kalmadan kaybolurdu).
+            e.dataTransfer.dropEffect = 'none';
+            return;
+          }
+          onChange([...values, parsed]);
+        }}
       >
         {values.map((v, i) => {
           const selected = selectedAddresses.has(v.address);
@@ -203,6 +270,29 @@ export function ContactPicker({ label, values, onChange, suggestions = [], disab
             tabIndex={disabled ? undefined : -1}
             onClick={(e) => handleChipClick(e, v.address)}
             onDoubleClick={(e) => handleChipDoubleClick(e, v, i)}
+            draggable={!disabled}
+            onDragStart={(e) => {
+              if (disabled) return;
+              e.stopPropagation();
+              e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('text/plain', v.address);
+              e.dataTransfer.setData('application/x-varuna-contact', JSON.stringify(v));
+              e.dataTransfer.setData('application/x-varuna-contact-source', sourceIdRef.current ?? '');
+            }}
+            onDragEnd={(e) => {
+              if (disabled) return;
+              if (justHandledSelfDropRef.current) {
+                // Self-drop — bu instance'ın onDrop'u zaten işaretledi, silme.
+                justHandledSelfDropRef.current = false;
+                return;
+              }
+              // Cross-instance başarılı taşıma → hedef kabul etti (dropEffect
+              // 'move'). Reddedildiyse (dedupe/parse hatası) hedef 'none' set
+              // etmiştir — o zaman kaynakta da kalır, chip kaybolmaz.
+              if (e.dataTransfer.dropEffect === 'move') {
+                onChange(values.filter((_, idx) => idx !== i));
+              }
+            }}
             className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs text-slate-700 outline-none dark:text-ndark-text ${
               selected
                 ? 'bg-brand-50 ring-2 ring-brand-400 dark:bg-brand-950/40 dark:ring-brand-500'
