@@ -46,6 +46,13 @@ interface Props {
 }
 
 export function RichTextEditor({ value, onChange, placeholder, disabled, onPasteImage, autoFocus = false }: Props) {
+  // Cursor-jump fix — onUpdate'ten gelen value echo'sunu dışarıdan (imza/
+  // şablon ekleme gibi) gelen gerçek value değişikliklerinden ayırt eder.
+  // Aşağıdaki sync useEffect bu flag true iken setContent'i atlar; flag
+  // sadece onUpdate'te set edilir, aşağıdaki effect'te tüketilir (false'a
+  // döner) — programatik komutlar (paste/link/image/undo/redo) da onUpdate
+  // tetiklediği için doğru şekilde "internal" sayılır.
+  const isInternalChangeRef = useRef(false);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -67,6 +74,7 @@ export function RichTextEditor({ value, onChange, placeholder, disabled, onPaste
     content: value,
     editable: !disabled,
     onUpdate: ({ editor: e }) => {
+      isInternalChangeRef.current = true;
       onChange(e.getHTML());
     },
     editorProps: {
@@ -132,6 +140,12 @@ export function RichTextEditor({ value, onChange, placeholder, disabled, onPaste
   // Dışarıdan value değişimi (örn. imza eklendi) → editor sync.
   useEffect(() => {
     if (!editor) return;
+    if (isInternalChangeRef.current) {
+      // Bu value değişimi bizim kendi onUpdate'imizin echo'su — setContent
+      // çağırırsak imleç sona atlar. Flag'i tüket, hiçbir şey yapma.
+      isInternalChangeRef.current = false;
+      return;
+    }
     const cur = editor.getHTML();
     if (cur !== value) editor.commands.setContent(value, { emitUpdate: false });
   }, [value, editor]);
