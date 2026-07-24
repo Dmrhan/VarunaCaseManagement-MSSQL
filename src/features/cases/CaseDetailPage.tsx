@@ -237,7 +237,18 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
     if (!item) return;
     if (appliedForCaseIdRef.current === item.id) return;
     appliedForCaseIdRef.current = item.id;
-    setTab(item.origin === 'E-posta' ? 'communication' : 'detail');
+
+    // Devredilmiş vakada Devir Notu paneli Detay sekmesinde, Açıklama'nın
+    // hemen altında gösteriliyor — devri alan ekip bunu vaka açılır açılmaz
+    // görsün diye, mail kökenli olsun olmasın varsayılan sekme Detay olur.
+    const initialTab: TabKey =
+      (item.transferCount ?? 0) > 0
+        ? 'detail'
+        : item.origin === 'E-posta'
+          ? 'communication'
+          : 'detail';
+
+    setTab(initialTab);
   }, [item]);
   const [previousCases, setPreviousCases] = useState<Case[]>([]);
   const [callActive, setCallActive] = useState(false);
