@@ -18,6 +18,7 @@
 
 import { Prisma } from '@prisma/client';
 import { prisma } from './client.js';
+import { caseRepository } from './caseRepository.js';
 
 const UNIVERA_COMPANY_NAME = 'UNIVERA';
 const CUSTOMER_PORTAL_VIEW_REF = '[UNIVERA_CUSTOMER_PORTAL].[dbo].[VIEW_N4B_CUSTOMERS]';
@@ -279,6 +280,147 @@ export async function findCaseDetailByNumber(caseNumber, authorizedCodes) {
     history: [...caseRow.history].reverse(),
     attachments: [...caseRow.attachments].reverse(),
   };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// POST /tickets (create) — kod → TEKİL proje çözümü + Case yaratma.
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Saf karar fonksiyonu — resolveSingleProjectByCode'un DB sorgusu SONRASI
+ * "0/1/>1 eşleşme" kararını izole eder. isCodeAuthorized ile aynı desen:
+ * DB'siz, doğrudan test edilebilir (bkz. scripts/smoke-connect-tickets.mjs).
+ *
+ * @param {Array<object>} matches - DB'den dönen aday satırlar (herhangi bir şekil).
+ * @param {string} code - hata mesajında görüntü için (orijinal, trim'lenmiş kod).
+ * @returns {object} TEK eşleşen aday (matches[0]).
+ * @throws {ConnectResolverError} code_not_found (0 eşleşme) / code_ambiguous (>1).
+ */
+export function pickSingleProjectMatch(matches, code) {
+  if (!Array.isArray(matches) || matches.length === 0) {
+    throw new ConnectResolverError('code_not_found', `'${code}' koduna ait aktif proje bulunamadı.`);
+  }
+  if (matches.length > 1) {
+    throw new ConnectResolverError(
+      'code_ambiguous',
+      `'${code}' kodu birden fazla projeye eşleşiyor (${matches.length}) — belirsiz, işlem reddedildi.`,
+    );
+  }
+  return matches[0];
+}
+
+/**
+ * code (Sifre) ile TAM 1 aktif AccountProject bul — UNIVERA company scope.
+ *
+ * KARAR (Delivery Lead): code ZORUNLU + TEKİL eşleşme. 0 eşleşme →
+ * `code_not_found`, >1 eşleşme → `code_ambiguous` — ikisi de fail-closed
+ * (route 422'ye çevirir). Sessizce "ilkini seç" YOK: hangi projeye
+ * bağlandığı BELİRSİZKEN bir Case yaratmak yanlış müşteriye/projeye
+ * bağlama riski taşır — bu, findCasesByCodes/isCodeAuthorized'daki
+ * "yetkisiz → sessizce dışla" fail-closed'ından FARKLI bir karar: orada
+ * çok-adaylı bir KÜME zaten güvenli (hepsi zaten yetkili), burada TEK bir
+ * hedefe YAZMA işlemi var — belirsizlik asla örtük çözülmez.
+ *
+ * Karşılaştırma DB'nin kendi (varsayılan, case-insensitive + trailing-
+ * space-insensitive) collation'ına bırakılır — findCasesByCodes'taki
+ * `code: { in: codes }` ile AYNI güven modeli. isCodeAuthorized'daki
+ * manuel JS-tarafı normalize FARKLI bir senaryo içindi (cross-DB'den gelen
+ * bir JS string'i yerel bir JS string'iyle karşılaştırmak — DB collation'ın
+ * hiç devreye giremediği, salt bellek-içi bir kıyas); burada TEK bir DB'ye
+ * karşı doğrudan Prisma `where` filtresi var, collation zaten devrede.
+ *
+ * @param {string} codeRaw
+ * @returns {Promise<{accountProjectId: string, accountProjectName: string, accountId: string, accountName: string|null, companyId: string}>}
+ */
+export async function resolveSingleProjectByCode(codeRaw) {
+  if (typeof codeRaw !== 'string' || !codeRaw.trim()) {
+    throw new ConnectResolverError('code_not_found', "'code' boş/geçersiz.");
+  }
+  const code = codeRaw.trim();
+  const companyId = await resolveUniveraCompanyId();
+
+  const matches = await prisma.accountProject.findMany({
+    where: { code, isActive: true, accountCompany: { companyId } },
+    select: {
+      id: true,
+      name: true,
+      accountCompany: { select: { accountId: true, account: { select: { name: true } } } },
+    },
+  });
+
+  const project = pickSingleProjectMatch(matches, code);
+  return {
+    accountProjectId: project.id,
+    accountProjectName: project.name,
+    accountId: project.accountCompany.accountId,
+    accountName: project.accountCompany.account?.name ?? null,
+    companyId,
+  };
+}
+
+// Connect service-actor — gerçek bir User değil (userId=null → createdByUserId
+// NULL kalır, User FK ihlali YOK); audit iz'i yalnız createdByName üzerinden
+// (free-text). SystemAdmin/gerçek kullanıcı rolü KULLANILMAZ — assertActor
+// (caseRepository.js) object actor için yalnız displayName ister, bu yeterli.
+const CONNECT_ACTOR = Object.freeze({
+  userId: null,
+  personId: null,
+  fullName: null,
+  email: null,
+  role: null,
+  displayName: 'Connect Entegrasyonu',
+});
+
+// Case.category/subCategory NOT NULL (schema) — Connect body'sinde bu
+// alanlar YOK. n4b migrasyonunun/Smart Ticket'ın kendi "sınıflandırılamayan"
+// sabitinden ('Akıllı Ticket' — bkz. _n4bmigrate.mjs) KASITLI olarak AYRI:
+// o etiket Smart Ticket/AI intake'e özel, Connect farklı bir kaynak.
+// origin='Connect' zaten kaynağı ayırt ediyor; category/subCategory yalnız
+// NOT NULL kısıtını dolduran nötr bir değer. Export edilir — smoke testi
+// (createConnectCase wiring) elle kopyalanmış literal yerine GERÇEK
+// sabitlere karşı doğrular (STATUS_CROSSWALK-tamlık testiyle aynı prensip).
+export const CONNECT_CASE_CATEGORY = 'Connect Talebi';
+export const CONNECT_CASE_SUBCATEGORY = 'Genel';
+const CONNECT_CASE_TYPE = 'GeneralSupport';
+const CONNECT_CASE_PRIORITY = 'Medium';
+
+/**
+ * Connect'ten gelen bir POST /tickets isteğinden Varuna Case yaratır.
+ *
+ * MEVCUT caseRepository.create() akışı KULLANILIR (iş kuralları/SLA
+ * politikası çözümü/vaka numarası üretimi/proje-hesap tutarlılık guard'ları
+ * BYPASS EDİLMEZ) — burada yalnız Connect'e özgü sabit alanlar (origin,
+ * category/subCategory fallback, servis-actor) + resolveSingleProjectByCode
+ * çıktısı birleştirilir. status='Acik' (create()'in varsayılanı —
+ * assignedPersonId hiç verilmediği için Smart Ticket self-assign dalı
+ * devreye girmez; SystemAdmin/onay kapısı bu yüzden hiç tetiklenmez).
+ *
+ * @param {object} params
+ * @param {{accountProjectId: string, accountId: string, accountName: string|null, companyId: string}} params.project - resolveSingleProjectByCode sonucu.
+ * @param {string} params.title
+ * @param {string} params.description
+ * @param {string} params.requestType - Varuna CaseRequestType ASCII (bkz. connectMapper.js::mapConnectTypeToRequestType).
+ * @param {string} [params.createdByEmail] - Case.customerContactEmail'e yazılır (reporter/contact — create() içindeki sanitizeRequesterContext zaten trim+format doğrular, burada tekrarlanmaz).
+ * @returns {Promise<object>} caseRepository.create() dönüşü (shape() edilmiş — TR label'lı, caseNumber/status dahil).
+ */
+export async function createConnectCase({ project, title, description, requestType, createdByEmail }) {
+  const input = {
+    title,
+    description,
+    caseType: CONNECT_CASE_TYPE,
+    priority: CONNECT_CASE_PRIORITY,
+    origin: 'Connect',
+    companyId: project.companyId,
+    companyName: UNIVERA_COMPANY_NAME,
+    accountId: project.accountId,
+    accountName: project.accountName,
+    accountProjectId: project.accountProjectId,
+    category: CONNECT_CASE_CATEGORY,
+    subCategory: CONNECT_CASE_SUBCATEGORY,
+    requestType,
+    customerContactEmail: createdByEmail || undefined,
+  };
+  return caseRepository.create(input, CONNECT_ACTOR);
 }
 
 // Test-only escape hatch — company id cache'ini sıfırlar (unit test izolasyonu).

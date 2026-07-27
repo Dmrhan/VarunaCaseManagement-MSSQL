@@ -105,8 +105,10 @@ export function mapCaseToConnectTicket(caseRow) {
 // caseRepository.js::transitionStatus — `prevStatusTr`/`nextStatus`), ASCII
 // DEĞİL. toConnectStatus'un beklediği ASCII identifier'a çevirmek için
 // enumMap.js::M_STATUS (TR → ASCII) forward map'i reuse edilir — ikinci bir
-// TR sözlüğü BURADA DUPLICATE edilmez.
-function trStatusLabelToAscii(trLabel) {
+// TR sözlüğü BURADA DUPLICATE edilmez. Export edilir — POST /tickets create
+// yanıtı da caseRepository.create()'in TR-label döndüren shape()'inden
+// (fromDb) aynı çeviriye ihtiyaç duyar (bkz. connectApi.js).
+export function trStatusLabelToAscii(trLabel) {
   return M_STATUS[trLabel] ?? trLabel;
 }
 
@@ -184,4 +186,39 @@ export function mapCaseToConnectDetail(caseRow) {
     history: capChronological(caseRow.history, DETAIL_CHILD_CAP).map(mapActivityToConnectHistoryEntry),
     attachments: capChronological(caseRow.attachments, DETAIL_CHILD_CAP).map((a) => mapAttachmentToConnect(a, caseRow.id)),
   };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// POST /tickets (create) — Connect type → Varuna CaseRequestType.
+// ─────────────────────────────────────────────────────────────────
+
+// Connect'in 5 sabit talep tipi → Varuna CaseRequestType ASCII identifier
+// (server/db/enumMap.js::M_REQUEST tek kaynak referans — buradaki değerler
+// M_REQUEST'in ÜRETTİĞİ ASCII değerlerle birebir aynı olmalı). Export
+// edilir — smoke testi bu tablonun değerlerinin Object.values(M_REQUEST)'in
+// bir ALT-KÜMESİ olduğunu doğrular (STATUS_CROSSWALK-tamlık testinin
+// muadili — yeni bir CaseRequestType eklenip burası unutulursa YAKALANMAZ
+// ama en azından burada YANLIŞ/var-olmayan bir ASCII değer kullanılırsa
+// yakalanır).
+// 'Soru' Varuna'da YOK — en yakın karşılık 'Bilgi' (bilgi talebi); KARAR
+// (görev tanımı). Diğer 4'ü birebir.
+export const CONNECT_TYPE_TO_REQUEST_TYPE = {
+  Soru: 'Bilgi',
+  Talep: 'Talep',
+  'Öneri': 'Oneri',
+  'Şikayet': 'Sikayet',
+  Hata: 'Hata',
+};
+
+/**
+ * Connect 'type' alanı (Soru/Talep/Öneri/Şikayet/Hata) → Varuna
+ * CaseRequestType ASCII. Eşleşmeyen/bilinmeyen tip için `null` döner —
+ * çağıran (route) bunu 400'e çevirir; sessiz varsayılan/en-yakın-tahmin YOK.
+ *
+ * @param {string} connectType
+ * @returns {string|null}
+ */
+export function mapConnectTypeToRequestType(connectType) {
+  if (typeof connectType !== 'string') return null;
+  return CONNECT_TYPE_TO_REQUEST_TYPE[connectType.trim()] ?? null;
 }

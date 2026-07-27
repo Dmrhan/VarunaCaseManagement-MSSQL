@@ -1,13 +1,27 @@
-// Smoke test — Varuna↔Connect GET-liste + GET-detay dilimleri
+// Smoke test — Varuna↔Connect GET-liste + GET-detay + POST-create dilimleri
 // (server/routes/connectApi.js, server/db/connectResolver.js,
 // server/lib/connectMapper.js).
 //
+// ⚠️ POST /tickets (create) — bu script PROD'A ASLA CASE INSERT ETMEZ.
+// HTTP route testleri yalnız create-ETMEYEN yolları dener: auth (401),
+// zorunlu-alan/tip/uzunluk validasyonu (400) ve code-çözümleme
+// fail-closed'ı (422 code_not_found) — bu son test bile
+// caseRepository.create()'e ULAŞMADAN, resolveSingleProjectByCode'un
+// erken-throw'unda durur. `createConnectCase` bu dosyada YALNIZ bir
+// "wiring" birim testinde çağrılır ve o testte `caseRepository.create`
+// GEÇİCİ OLARAK STUB'LANIR (DB'ye gitmez, sahte bir Case döner) — orijinal
+// fonksiyon try/finally ile HER KOŞULDA geri yüklenir. Gerçek create
+// happy-path canlı ortamda kontrollü/manuel yapılır (bkz.
+// server/routes/connectApi.js dosya sonu curl yorumu).
+//
 // Canlı DB'ye ÇOĞUNLUKLA DOKUNMAZ: connectResolver'ın validasyon adımları
-// (invalid merkez kodu / boş codes / boş authorizedCodes / IDOR guard) hiçbir
-// prisma sorgusu ÇALIŞTIRMADAN throw/early-return eder. Yalnız İKİ test (bkz.
-// "canlı DB — best effort" bölümü) gerçek Case tablosuna gider — bu ortamda
-// DATABASE_URL erişilebilir olduğu doğrulandığı için dahil edildi, ama DB
-// erişilemezse net bir FAIL ile (hang değil — timeout'lu fetch) haber verir.
+// (invalid merkez kodu / boş codes / boş authorizedCodes / IDOR guard /
+// pickSingleProjectMatch 0-1-çoklu karar mantığı) hiçbir prisma sorgusu
+// ÇALIŞTIRMADAN throw/early-return eder. Birkaç test (bkz. "canlı DB —
+// best effort" ve "== 6)" bölümleri) gerçek tablolara SALT-OKUMA gider — bu
+// ortamda DATABASE_URL erişilebilir olduğu doğrulandığı için dahil edildi,
+// ama DB erişilemezse net bir FAIL ile (hang değil — timeout'lu fetch)
+// haber verir.
 //
 // Kullanım: node --env-file-if-exists=.env scripts/smoke-connect-tickets.mjs
 //
@@ -19,24 +33,37 @@
 //   # Liste yanıtındaki bir "id" (Case.caseNumber, ör. "OLD_123456") ile detay:
 //   curl -s "http://localhost:3101/api/connect/tickets/OLD_123456?scope=merkez&code=198" \
 //     -H "x-api-key: <gercek-key>" | jq .
+//   # POST create (GERÇEK INSERT — bkz. server/routes/connectApi.js dosya
+//   # sonu için tam curl + test-sonrası temizleme notu):
+//   #   ÖN KOŞUL: prisma/migrations/20260727_case_origin_connect UYGULANMIŞ
+//   #   olmalı (CK_Case_origin constraint'i 'Connect' değerine izin vermeli),
+//   #   aksi halde POST her zaman 500 (constraint violation) döner.
 
 import http from 'node:http';
 import assert from 'node:assert/strict';
 import {
   mapCaseToConnectTicket,
   mapCaseToConnectDetail,
+  mapConnectTypeToRequestType,
+  CONNECT_TYPE_TO_REQUEST_TYPE,
   toConnectStatus,
   STATUS_CROSSWALK,
 } from '../server/lib/connectMapper.js';
-import { M_STATUS } from '../server/db/enumMap.js';
+import { M_STATUS, M_REQUEST } from '../server/db/enumMap.js';
 import {
   resolveCodesForMerkez,
   findCasesByCodes,
   findCaseDetailByNumber,
   isCodeAuthorized,
+  pickSingleProjectMatch,
+  resolveSingleProjectByCode,
+  createConnectCase,
+  CONNECT_CASE_CATEGORY,
+  CONNECT_CASE_SUBCATEGORY,
   ConnectResolverError,
   DETAIL_CHILD_CAP,
 } from '../server/db/connectResolver.js';
+import { caseRepository } from '../server/db/caseRepository.js';
 
 // mapCaseToConnectDetail'in ihtiyaç duyduğu zorunlu alanlarla minimal sahte
 // Case satırı — her yeni testte tüm alanları tekrar yazmamak için (Metz:
@@ -331,7 +358,128 @@ async function main() {
     assert.equal(detail.attachments[0].fileName, 'eski-dosya.txt');
   });
 
+  await check(
+    "mapConnectTypeToRequestType — Connect tipleri (Soru/Talep/Öneri/Şikayet/Hata) Varuna requestType'a eşlenir",
+    () => {
+      assert.equal(mapConnectTypeToRequestType('Soru'), 'Bilgi', "Varuna'da 'Soru' yok — en yakın 'Bilgi' olmalı");
+      assert.equal(mapConnectTypeToRequestType('Talep'), 'Talep');
+      assert.equal(mapConnectTypeToRequestType('Öneri'), 'Oneri');
+      assert.equal(mapConnectTypeToRequestType('Şikayet'), 'Sikayet');
+      assert.equal(mapConnectTypeToRequestType('Hata'), 'Hata');
+    },
+  );
+
+  await check("mapConnectTypeToRequestType — bilinmeyen/geçersiz tip → null (route 400'e çevirir)", () => {
+    assert.equal(mapConnectTypeToRequestType('BilinmeyenTip'), null);
+    assert.equal(mapConnectTypeToRequestType(''), null);
+    assert.equal(mapConnectTypeToRequestType(null), null);
+    assert.equal(mapConnectTypeToRequestType(undefined), null);
+    assert.equal(mapConnectTypeToRequestType(42), null);
+  });
+
+  await check(
+    "CONNECT_TYPE_TO_REQUEST_TYPE — tüm değerler enumMap.js::M_REQUEST'in ÜRETTİĞİ ASCII kümesinin alt-kümesi (gerçek export'a karşı, elle kopya YOK)",
+    () => {
+      // M_REQUEST bir TR→ASCII forward map; ÜRETTİĞİ ASCII değerler
+      // (Object.values) Case.requestType'ın olası tüm değerleridir.
+      // CONNECT_TYPE_TO_REQUEST_TYPE'ın her değeri bu kümede olmalı —
+      // aksi halde connectMapper yanlış/var-olmayan bir requestType üretir
+      // ve caseRepository.create() bunu sessizce (ya da hatalı) kabul
+      // edebilir. STATUS_CROSSWALK-tamlık testinin muadili (ama TAM eşleşme
+      // değil, ALT-KÜME — Varuna'nın her requestType'ının Connect'te bir
+      // karşılığı olması ZORUNLU değil).
+      const validRequestTypes = new Set(Object.values(M_REQUEST));
+      const invalidValues = Object.entries(CONNECT_TYPE_TO_REQUEST_TYPE).filter(
+        ([, ascii]) => !validRequestTypes.has(ascii),
+      );
+      assert.deepEqual(
+        invalidValues,
+        [],
+        `CONNECT_TYPE_TO_REQUEST_TYPE'da geçersiz/var-olmayan requestType değeri: ${JSON.stringify(invalidValues)}`,
+      );
+    },
+  );
+
   console.log('\n== 2) connectResolver — fail-closed validasyon (DB\'ye GİTMEDEN) ==');
+
+  await check(
+    "pickSingleProjectMatch — saf karar mantığı (0/1/>1 eşleşme, DB'siz/mock)",
+    () => {
+      // 0 eşleşme → code_not_found.
+      assert.throws(
+        () => pickSingleProjectMatch([], '10005'),
+        (err) => err instanceof ConnectResolverError && err.code === 'code_not_found',
+      );
+      // 1 eşleşme → aynı öğeyi döner (throw YOK).
+      const single = { id: 'ap1', name: 'Proje 1' };
+      assert.equal(pickSingleProjectMatch([single], '10005'), single);
+      // >1 eşleşme → code_ambiguous (mock — iki sahte aday).
+      assert.throws(
+        () => pickSingleProjectMatch([{ id: 'ap1' }, { id: 'ap2' }], '10005'),
+        (err) => err instanceof ConnectResolverError && err.code === 'code_ambiguous',
+      );
+    },
+  );
+
+  await check(
+    "createConnectCase — wiring birim testi (caseRepository.create GEÇİCİ STUB'lanır, DB'ye gitmez)",
+    async () => {
+      // caseRepository bir plain object export'u (Object.freeze YOK) —
+      // ES module namespace import'u AYNI obje referansını verir, bu
+      // yüzden burada bir property'sini geçici değiştirmek
+      // connectResolver.js::createConnectCase'in kullandığı AYNI
+      // caseRepository.create'i etkiler. try/finally ile HER KOŞULDA
+      // (assertion fail etse bile) orijinal fonksiyon geri yüklenir.
+      const originalCreate = caseRepository.create;
+      let capturedInput = null;
+      let capturedActor = null;
+      caseRepository.create = async (input, actor) => {
+        capturedInput = input;
+        capturedActor = actor;
+        // Sahte dönüş — gerçek create()'in shape()'inden (fromDb) TR-label
+        // döndürdüğü sözleşmeyi taklit eder (connectApi.js POST handler'ı
+        // created.status'u böyle bekliyor).
+        return { id: 'fake-id', caseNumber: 'UNV-FAKE-9999', status: 'Açık' };
+      };
+      try {
+        const fakeProject = {
+          accountProjectId: 'ap-fake-1',
+          accountId: 'acc-fake-1',
+          accountName: 'Sahte Hesap',
+          companyId: 'comp-fake-univera',
+        };
+        const result = await createConnectCase({
+          project: fakeProject,
+          title: 'Wiring test başlık',
+          description: 'Wiring test açıklama',
+          requestType: 'Talep',
+          createdByEmail: 'wiring-test@example.com',
+        });
+
+        assert.ok(capturedInput, 'caseRepository.create hiç çağrılmadı');
+        assert.equal(capturedInput.origin, 'Connect');
+        assert.equal(capturedInput.accountId, fakeProject.accountId);
+        assert.equal(capturedInput.accountProjectId, fakeProject.accountProjectId);
+        assert.equal(capturedInput.companyId, fakeProject.companyId);
+        assert.equal(capturedInput.category, CONNECT_CASE_CATEGORY);
+        assert.equal(capturedInput.subCategory, CONNECT_CASE_SUBCATEGORY);
+        assert.equal(capturedInput.requestType, 'Talep');
+        assert.equal(capturedInput.customerContactEmail, 'wiring-test@example.com', "createdByEmail customerContactEmail'e bağlanmadı");
+        assert.equal(capturedInput.title, 'Wiring test başlık');
+        assert.equal(capturedInput.description, 'Wiring test açıklama');
+
+        assert.ok(capturedActor, 'actor caseRepository.create()e iletilmedi');
+        assert.equal(capturedActor.userId, null, 'servis-actor userId NULL olmalı (User FK ihlali yok)');
+        assert.equal(typeof capturedActor.displayName, 'string');
+        assert.ok(capturedActor.displayName.length > 0, 'displayName dolu olmalı (assertActor gereği)');
+        assert.notEqual(capturedActor.role, 'SystemAdmin', 'servis-actor SystemAdmin rolü KULLANMAMALI');
+
+        assert.equal(result.caseNumber, 'UNV-FAKE-9999');
+      } finally {
+        caseRepository.create = originalCreate;
+      }
+    },
+  );
 
   await check('resolveCodesForMerkez — tamsayı olmayan kod throw eder (ConnectResolverError)', async () => {
     await assert.rejects(() => resolveCodesForMerkez('abc'), ConnectResolverError);
@@ -593,6 +741,125 @@ async function main() {
         assert.equal(body.error, 'not_found');
       },
     );
+
+    console.log(
+      "\n== 6) POST /tickets (create) — auth + fail-closed + code-çözüm 422 (⚠️ PROD'A INSERT YOK — bkz. dosya başı) ==",
+    );
+
+    // Bu bölümdeki HİÇBİR test caseRepository.create()'e ULAŞMAZ: her
+    // senaryo ya auth/400 validasyonunda ya da (son 2 test) code çözümleme
+    // 422'sinde erken-return eder — createConnectCase BU SCRIPT'TEN HİÇ
+    // İMPORT EDİLMEDİ BİLE (yanlışlıkla çağrılması yapısal olarak engellendi).
+    const VALID_POST_BODY_SHAPE = {
+      code: 'ZZZ-KESINLIKLE-YOK-BU-KOD', // kasıtlı bogus — code_not_found'a düşsün, create()'e hiç gidilmesin
+      title: 'Smoke test başlığı',
+      description: 'Smoke test açıklaması.',
+      type: 'Talep',
+    };
+
+    await check('POST /tickets — key yok → 401 (paylaşılan checkConnectApiKey)', async () => {
+      const res = await fetch(`${base}/api/connect/tickets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(VALID_POST_BODY_SHAPE),
+      });
+      assert.equal(res.status, 401);
+    });
+
+    await check('POST /tickets — doğru key ama TÜM zorunlu alanlar eksik → 400 missing_param', async () => {
+      const res = await fetch(`${base}/api/connect/tickets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+        body: JSON.stringify({}),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.error, 'missing_param');
+      for (const field of ['code', 'title', 'description', 'type']) {
+        assert.ok(body.message.includes(field), `eksik alan mesajında '${field}' yok`);
+      }
+    });
+
+    await check("POST /tickets — yalnız 'code' eksik → 400 missing_param", async () => {
+      const { code, ...rest } = VALID_POST_BODY_SHAPE;
+      const res = await fetch(`${base}/api/connect/tickets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+        body: JSON.stringify(rest),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.error, 'missing_param');
+      assert.ok(body.message.includes('code'));
+    });
+
+    await check("POST /tickets — bilinmeyen 'type' → 400 invalid_type (code çözümlemeye hiç gidilmez)", async () => {
+      const res = await fetch(`${base}/api/connect/tickets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+        body: JSON.stringify({ ...VALID_POST_BODY_SHAPE, type: 'BilinmeyenTip' }),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.error, 'invalid_type');
+    });
+
+    await check("POST /tickets — 'title' üst sınırı aşılırsa → 400 title_too_long", async () => {
+      const res = await fetch(`${base}/api/connect/tickets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+        body: JSON.stringify({ ...VALID_POST_BODY_SHAPE, title: 'x'.repeat(501) }),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.error, 'title_too_long');
+    });
+
+    await check("POST /tickets — 'description' üst sınırı aşılırsa → 400 description_too_long", async () => {
+      const res = await fetch(`${base}/api/connect/tickets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+        body: JSON.stringify({ ...VALID_POST_BODY_SHAPE, description: 'x'.repeat(20001) }),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.error, 'description_too_long');
+    });
+
+    await check("POST /tickets — geçersiz tipte 'createdByEmail' (string değil) → 400 invalid_param", async () => {
+      const res = await fetch(`${base}/api/connect/tickets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+        body: JSON.stringify({ ...VALID_POST_BODY_SHAPE, createdByEmail: 12345 }),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.error, 'invalid_param');
+    });
+
+    await check(
+      "canlı (salt-okuma) — resolveSingleProjectByCode: var olmayan kod → code_not_found (create()'e hiç gidilmez)",
+      async () => {
+        await assert.rejects(
+          () => resolveSingleProjectByCode('ZZZ-KESINLIKLE-YOK-BU-KOD-XYZ'),
+          (err) => err instanceof ConnectResolverError && err.code === 'code_not_found',
+        );
+      },
+    );
+
+    await check(
+      "canlı — POST /tickets: geçerli gövde ama code hiçbir projeye çözülmez → 422 code_not_found (⚠️ hiçbir Case INSERT edilmez — resolveSingleProjectByCode create()'ten ÖNCE fail eder)",
+      async () => {
+        const res = await fetchWithTimeout(`${base}/api/connect/tickets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+          body: JSON.stringify(VALID_POST_BODY_SHAPE),
+        });
+        assert.equal(res.status, 422);
+        const body = await res.json();
+        assert.equal(body.error, 'code_not_found');
+      },
+    );
   } finally {
     if (originalKey === undefined) delete process.env.CONNECT_API_KEY;
     else process.env.CONNECT_API_KEY = originalKey;
@@ -604,7 +871,7 @@ async function main() {
     console.error('SMOKE TEST BAŞARISIZ — yukarıdaki FAIL satırlarına bakın.');
   } else {
     console.log(
-      'SMOKE TEST PASS (auth + fail-closed yollar çoğunlukla DB\'siz; birkaç test bu ortamda erişilebilir gerçek DB\'ye timeout\'lu gider — bkz. 3) ve 5) bölümleri; 5) authorized/IDOR/not-found canlı regresyonlarını da içerir).',
+      'SMOKE TEST PASS (auth + fail-closed yollar çoğunlukla DB\'siz; birkaç test bu ortamda erişilebilir gerçek DB\'ye SALT-OKUMA timeout\'lu gider — bkz. 3)/5)/6) bölümleri; PROD\'A HİÇBİR Case INSERT EDİLMEDİ — createConnectCase yalnız caseRepository.create STUB\'lanmış wiring testinde çağrıldı).',
     );
   }
 }
