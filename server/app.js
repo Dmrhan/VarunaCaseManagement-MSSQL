@@ -7,6 +7,7 @@ import adminRouter from './routes/admin.js';
 import analyticsRouter from './routes/analytics.js';
 import authRouter from './routes/auth.js';
 import cronRouter from './routes/cron.js';
+import connectApiRouter from './routes/connectApi.js';
 import myRouter from './routes/my.js';
 import accountsRouter from './routes/accounts.js';
 import externalKbRouter from './routes/externalKb.js';
@@ -96,6 +97,10 @@ app.use('/api/admin/imports', importsRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/cron', cronRouter);
+// Varuna↔Connect entegrasyonu — ilk dilim (GET-liste). Kendi api-key
+// guard'ı var (CONNECT_API_KEY, cron.js ile aynı stil); global auth
+// zincirine girmez (bkz. server/routes/connectApi.js).
+app.use('/api/connect', connectApiRouter);
 app.use('/api/my', myRouter);
 app.use('/api/accounts', accountsRouter);
 app.use('/api/external-kb', externalKbRouter);
