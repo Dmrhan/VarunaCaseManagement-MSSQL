@@ -1,25 +1,36 @@
 import { Router } from 'express';
 import { timingSafeEqual } from 'node:crypto';
-import { resolveCodesForMerkez, findCasesByCodes, ConnectResolverError } from '../db/connectResolver.js';
-import { mapCaseToConnectTicket } from '../lib/connectMapper.js';
+import {
+  resolveCodesForMerkez,
+  findCasesByCodes,
+  findCaseDetailByNumber,
+  ConnectResolverError,
+} from '../db/connectResolver.js';
+import { mapCaseToConnectTicket, mapCaseToConnectDetail } from '../lib/connectMapper.js';
 import { M_STATUS } from '../db/enumMap.js';
 
 /**
- * /api/connect/* — Varuna↔Connect entegrasyonu, ilk uçtan-uca dilim.
- * Bu turda YALNIZ GET-liste var (POST/PATCH/detay/attachment sonraki
- * dilimlerde).
+ * /api/connect/* — Varuna↔Connect entegrasyonu.
+ *   GET /tickets     — liste (bu dilimden önce eklendi).
+ *   GET /tickets/:id — tek ticket'ın zengin detayı (bu dilim). `:id` =
+ *     liste'nin döndürdüğü `id`, yani Case.caseNumber (globally unique).
+ * Bu turda hâlâ YALNIZ OKUMA var (POST/PATCH sonraki dilimlerde).
  *
  * Auth: api-key, `x-api-key: <key>` VEYA `Authorization: Bearer <key>`
  * header; env CONNECT_API_KEY. server/routes/cron.js::checkCronSecret ile
  * aynı stil. Key yoksa (env tanımsız) veya yanlışsa: 401 — hangi sebep
- * olduğu client'a sızdırılmaz, yalnız server log'una yazılır.
+ * olduğu client'a sızdırılmaz, yalnız server log'una yazılır. Her iki route
+ * da AYNI `checkConnectApiKey`'i paylaşır (kopya YOK).
  *
  * FAIL-CLOSED sözleşmesi (scope/kod belirsizse ASLA "tüm vakalar" dönmez):
  *   - scope eksik/tanınmayan değer → 400 invalid_scope
  *   - scope=merkez, code eksik → 400 missing_param
- *   - scope=codes, codes eksik/boş → 400 missing_param
- *   - scope geçerli ama kod hiçbir Case'e eşleşmiyor → 200 + items:[]
- *     (geçerli bir arama kapsamı, sadece sonuç boş — "tüm kayıtlar" değil)
+ *   - scope=codes, codes eksik/boş/limit-aşımı → 400 missing_param/too_many_codes
+ *   - GET /tickets: scope geçerli ama kod hiçbir Case'e eşleşmiyor → 200 +
+ *     items:[] (geçerli bir arama kapsamı, sadece sonuç boş).
+ *   - GET /tickets/:id: scope ZORUNLU (liste ile aynı) + IDOR kapatma —
+ *     Case'in accountProject.code'u scope'un çözdüğü kod setinde DEĞİLSE
+ *     (ya da Case hiç yoksa) 404 döner — 403 DEĞİL (varlık sızdırma yok).
  */
 
 const router = Router();
@@ -75,6 +86,55 @@ function clampInt(raw, fallback, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
+// scope=merkez/codes validasyon hatası — ConnectResolverError ile aynı
+// {code, message} sözleşmesini paylaşır (route'larda TEK catch bloğu ikisini
+// de 400'e çevirir).
+class ScopeError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = 'ScopeError';
+    this.code = code;
+  }
+}
+
+/**
+ * `scope` query paramını çözer — GET /tickets VE GET /tickets/:id TARAFINDAN
+ * PAYLAŞILIR (kopya YOK). Başarılıysa yetkili AccountProject.code listesini
+ * döner; aksi halde ScopeError veya (resolveCodesForMerkez'den)
+ * ConnectResolverError throw eder — ikisi de caller'da aynı şekilde 400'e
+ * çevrilir. FAIL-CLOSED: bilinmeyen/eksik scope ASLA "hepsi" anlamına gelmez.
+ */
+async function resolveScopeCodes({ scope, code, codesParam }) {
+  if (scope === 'merkez') {
+    if (code === undefined || code === null || String(code).trim() === '') {
+      throw new ScopeError('missing_param', "scope=merkez için 'code' zorunlu.");
+    }
+    return resolveCodesForMerkez(code);
+  }
+  if (scope === 'codes') {
+    if (!codesParam || typeof codesParam !== 'string' || !codesParam.trim()) {
+      throw new ScopeError('missing_param', "scope=codes için 'codes' zorunlu.");
+    }
+    const codes = codesParam
+      .split(',')
+      .map((c) => c.trim())
+      .filter(Boolean);
+    if (!codes.length) {
+      throw new ScopeError('missing_param', "'codes' listesi boş.");
+    }
+    // DB'ye gitmeden reddet — MSSQL parametre limiti + DoS payı (bkz. MAX_CODES yorumu).
+    if (codes.length > MAX_CODES) {
+      throw new ScopeError(
+        'too_many_codes',
+        `'codes' listesi en fazla ${MAX_CODES} kod içerebilir (gelen: ${codes.length}).`,
+      );
+    }
+    return codes;
+  }
+  // FAIL-CLOSED — bilinmeyen/eksik scope asla tüm vakaları döndürmez.
+  throw new ScopeError('invalid_scope', "'scope' 'merkez' veya 'codes' olmalı.");
+}
+
 router.get('/tickets', async (req, res) => {
   if (!checkConnectApiKey(req, res)) return;
 
@@ -93,35 +153,9 @@ router.get('/tickets', async (req, res) => {
 
   let codes;
   try {
-    if (scope === 'merkez') {
-      if (code === undefined || code === null || String(code).trim() === '') {
-        return res.status(400).json({ error: 'missing_param', message: "scope=merkez için 'code' zorunlu." });
-      }
-      codes = await resolveCodesForMerkez(code);
-    } else if (scope === 'codes') {
-      if (!codesParam || typeof codesParam !== 'string' || !codesParam.trim()) {
-        return res.status(400).json({ error: 'missing_param', message: "scope=codes için 'codes' zorunlu." });
-      }
-      codes = codesParam
-        .split(',')
-        .map((c) => c.trim())
-        .filter(Boolean);
-      if (!codes.length) {
-        return res.status(400).json({ error: 'missing_param', message: "'codes' listesi boş." });
-      }
-      // DB'ye gitmeden reddet — MSSQL parametre limiti + DoS payı (bkz. MAX_CODES yorumu).
-      if (codes.length > MAX_CODES) {
-        return res.status(400).json({
-          error: 'too_many_codes',
-          message: `'codes' listesi en fazla ${MAX_CODES} kod içerebilir (gelen: ${codes.length}).`,
-        });
-      }
-    } else {
-      // FAIL-CLOSED — bilinmeyen/eksik scope asla tüm vakaları döndürmez.
-      return res.status(400).json({ error: 'invalid_scope', message: "'scope' 'merkez' veya 'codes' olmalı." });
-    }
+    codes = await resolveScopeCodes({ scope, code, codesParam });
   } catch (err) {
-    if (err instanceof ConnectResolverError) {
+    if (err instanceof ScopeError || err instanceof ConnectResolverError) {
       return res.status(400).json({ error: err.code, message: err.message });
     }
     console.error('[connect-api:tickets] kod çözümleme hatası:', err);
@@ -144,6 +178,43 @@ router.get('/tickets', async (req, res) => {
     res.json({ items: items.map(mapCaseToConnectTicket), page, pageSize, total });
   } catch (err) {
     console.error('[connect-api:tickets]', err);
+    res.status(500).json({ error: 'internal', message: 'Sunucu hatası' });
+  }
+});
+
+router.get('/tickets/:id', async (req, res) => {
+  if (!checkConnectApiKey(req, res)) return;
+
+  const { scope, code, codes: codesParam } = req.query;
+  const caseNumber = req.params.id;
+
+  let authorizedCodes;
+  try {
+    authorizedCodes = await resolveScopeCodes({ scope, code, codesParam });
+  } catch (err) {
+    if (err instanceof ScopeError || err instanceof ConnectResolverError) {
+      return res.status(400).json({ error: err.code, message: err.message });
+    }
+    console.error('[connect-api:ticket-detail] kod çözümleme hatası:', err);
+    return res.status(500).json({ error: 'internal', message: 'Sunucu hatası' });
+  }
+
+  try {
+    const caseRow = await findCaseDetailByNumber(caseNumber, authorizedCodes);
+    if (!caseRow) {
+      // Case yok VEYA çağıranın yetkili kod setinde değil (IDOR kapatma) —
+      // ikisi için de AYNI 404; 403 ile "var ama erişemiyorsun" ima etmiyoruz.
+      return res.status(404).json({ error: 'not_found' });
+    }
+    console.log('[connect-api:ticket-detail] audit', {
+      scope,
+      ...(scope === 'merkez' ? { code } : {}),
+      ...(scope === 'codes' ? { codesCount: authorizedCodes.length } : {}),
+      caseNumber,
+    });
+    res.json(mapCaseToConnectDetail(caseRow));
+  } catch (err) {
+    console.error('[connect-api:ticket-detail]', err);
     res.status(500).json({ error: 'internal', message: 'Sunucu hatası' });
   }
 });

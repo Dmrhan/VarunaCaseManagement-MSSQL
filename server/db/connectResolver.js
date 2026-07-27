@@ -167,6 +167,120 @@ export async function findCasesByCodes(codes, { status, updatedSince, page = 1, 
   return { items, total };
 }
 
+// GET-detay dilimi — yorumlar/durum-geçmişi/ekler için makul üst sınır.
+// Bir vakanın doğal büyüklüğü bunun çok altında kalır; bu yalnız dejenere
+// bir case'in (ör. yıllarca açık kalmış, yüzlerce not) tek istekte aşırı
+// payload/DoS üretmesine karşı savunma tavanı. Export edilir — connectMapper.js
+// AYNI değeri savunma-derinliği ikinci bir cap olarak reuse eder (bkz.
+// mapCaseToConnectDetail); tek kaynak, iki yerde ayrı sabit YOK.
+export const DETAIL_CHILD_CAP = 200;
+
+// Detay select — CASE_SELECT'in üstüne resolutionNote + accountProject.code
+// (yetki kontrolü İÇİN, route'a dönmez — bkz. findCaseDetailByNumber) +
+// filtrelenmiş child ilişkiler eklenir. N+1 yok: tek prisma.case.findFirst,
+// her child ilişki DB tarafında filtrelenip cap'lenir.
+const CASE_DETAIL_SELECT = {
+  ...CASE_SELECT,
+  resolutionNote: true,
+  accountProject: { select: { code: true } },
+  // Yalnız MÜŞTERİYE-GÖRÜNÜR notlar (visibility='Customer') — iç/agent-only
+  // notlar (default 'Internal') Connect'e ASLA gitmez. DB seviyesinde
+  // filtrelenir (app-layer'a hiç yüklenmez — savunma derinliği).
+  notes: {
+    where: { visibility: 'Customer' },
+    orderBy: { createdAt: 'desc' },
+    take: DETAIL_CHILD_CAP,
+    select: { id: true, authorName: true, content: true, createdAt: true },
+  },
+  // Yalnız durum geçişleri (actionType='StatusChange') — diğer CaseActivity
+  // türleri (atama/checklist/iç saha güncellemeleri vb.) iç operasyonel
+  // detaydır, Connect'e sızdırılmaz.
+  history: {
+    where: { actionType: 'StatusChange' },
+    orderBy: { at: 'desc' },
+    take: DETAIL_CHILD_CAP,
+    select: { fromValue: true, toValue: true, at: true, actor: true },
+  },
+  attachments: {
+    orderBy: { uploadedAt: 'desc' },
+    take: DETAIL_CHILD_CAP,
+    select: { id: true, fileName: true, fileSize: true, mimeType: true, fileUrl: true, uploadedBy: true, uploadedAt: true },
+  },
+};
+
+/**
+ * IDOR guard — saf fonksiyon, DB'siz test edilebilir (bkz.
+ * scripts/smoke-connect-tickets.mjs). Case'in accountProject.code'u
+ * çağıranın yetkili kod setinde mi?
+ *
+ * Normalize edilmiş (trim + case-insensitive) TAM eşleşme — substring/prefix
+ * DEĞİL. Bu, findCasesByCodes'un DB tarafındaki `code: { in: codes }`
+ * filtresiyle TUTARLI olsun diye: AccountProject.code kolonu MSSQL default
+ * collation'da (case-insensitive + trailing-space-insensitive karşılaştırma)
+ * saklanıyor — liste tarafı bu yüzden zaten case/boşluk varyantlarını
+ * eşleştiriyor. Normalize edilmemiş `.includes()` (eski hal) bu yüzden bir
+ * false-negative üretebiliyordu: liste'de görünen bir case, detayda (tam
+ * string eşitliği farklı case/boşlukla) 404 dönebiliyordu. Normalize
+ * SADECE false-negative'i giderir — over-authorization ÜRETMEZ (hâlâ tam
+ * eşleşme, substring/regex yok).
+ *
+ * @param {string|null|undefined} projectCode
+ * @param {string[]|null|undefined} authorizedCodes
+ * @returns {boolean}
+ */
+export function isCodeAuthorized(projectCode, authorizedCodes) {
+  if (typeof projectCode !== 'string') return false;
+  const normalizedProjectCode = projectCode.trim().toLowerCase();
+  if (!normalizedProjectCode) return false;
+  if (!Array.isArray(authorizedCodes)) return false;
+  return authorizedCodes.some(
+    (c) => typeof c === 'string' && c.trim().toLowerCase() === normalizedProjectCode,
+  );
+}
+
+/**
+ * caseNumber ile tek Case'in zengin detayını getirir — IDOR kapalı: Case'in
+ * accountProject.code'u `authorizedCodes` içinde DEĞİLSE (ya da Case hiç
+ * bulunamazsa) `null` döner. Çağıran (route) bunu 404'e çevirir — 403 DEĞİL,
+ * yetkisiz bir çağıran için "var ama erişemiyorsun" sinyali (varlık
+ * sızdırma) vermemek üzere kasıtlı.
+ *
+ * FAIL-CLOSED: authorizedCodes boş/array-değilse DB'ye hiç gitmeden null
+ * döner (route zaten scope'u zorunlu kılıyor, bu ikinci savunma katmanı).
+ *
+ * @param {string} caseNumber - Case.caseNumber (globally @unique).
+ * @param {string[]} authorizedCodes - resolveCodesForMerkez/scope=codes'tan
+ *   gelen, çağıranın yetkili olduğu AccountProject.code listesi.
+ * @returns {Promise<object|null>}
+ */
+export async function findCaseDetailByNumber(caseNumber, authorizedCodes) {
+  if (typeof caseNumber !== 'string' || !caseNumber.trim()) return null;
+  if (!Array.isArray(authorizedCodes) || authorizedCodes.length === 0) return null;
+
+  const companyId = await resolveUniveraCompanyId();
+
+  const caseRow = await prisma.case.findFirst({
+    where: { caseNumber, companyId, isArchived: false },
+    select: CASE_DETAIL_SELECT,
+  });
+  if (!caseRow) return null;
+
+  if (!isCodeAuthorized(caseRow.accountProject?.code ?? null, authorizedCodes)) {
+    // IDOR kapatma — Case var ama bu çağıranın yetkili kod setinde değil.
+    return null;
+  }
+
+  // history/notes/attachments DB'de `orderBy: 'desc'` + cap ile çekildi
+  // (cap tetiklenirse "en yeni N" korunsun diye); doğal okuma sırası için
+  // (eski→yeni) burada ters çevrilir.
+  return {
+    ...caseRow,
+    notes: [...caseRow.notes].reverse(),
+    history: [...caseRow.history].reverse(),
+    attachments: [...caseRow.attachments].reverse(),
+  };
+}
+
 // Test-only escape hatch — company id cache'ini sıfırlar (unit test izolasyonu).
 export function _resetUniveraCompanyIdCacheForTests() {
   univeraCompanyIdCache = null;
