@@ -69,8 +69,13 @@ export function verifyStorageToken(token) {
   }
 }
 
-/** Vaka için path: cases/{caseId}/{attachmentId}-{safeName} */
-function buildPath(caseId, attachmentId, fileName) {
+/**
+ * Vaka için path: cases/{caseId}/{attachmentId}-{safeName}.
+ * Export edilir — createUploadUrl (browser two-step akışı) VE
+ * caseRepository.js::ingestExternalAttachment (Connect server-to-server
+ * ingest, token'sız tek-adım) AYNI path şemasını kullanır (tek kaynak).
+ */
+export function buildPath(caseId, attachmentId, fileName) {
   // Türkçe karakterler ve özel chars'lar dosya adında sorun yaratmasın diye sade.
   const safe = fileName.replace(/[^\w.\-]+/g, '_').slice(0, 120);
   return `cases/${caseId}/${attachmentId}-${safe}`;
@@ -169,3 +174,22 @@ export class StorageError extends Error {
 }
 
 export const STORAGE_ROOT_DIR = STORAGE_ROOT;
+
+// Mutable object yüzeyi — server/db/caseRepository.js::ingestExternalAttachment
+// (Varuna↔Connect attachment ingest) bu yüzden ÇAĞIRIR (düz destructured
+// import DEĞİL). Neden: ES module named export'ları dışarıdan REBIND
+// edilemez (import binding'leri immutable) — bu, scripts/smoke-connect-tickets.mjs
+// içindeki wiring testinin gerçek disk I/O yapmadan `saveObject`'i STUB'la
+// yabilmesi için KASITLI bir mutable-object-property yüzeyi (caseRepository
+// export'unun AYNI deseni — bkz. server/db/caseRepository.js export const
+// caseRepository = {...}). Diğer TÜM mevcut çağıranlar (cases.js vb.)
+// named export'ları AYNEN kullanmaya devam eder — bu ek, backward-compat.
+export const storageApi = {
+  saveObject,
+  statObject,
+  createObjectStream,
+  removeObject,
+  createUploadUrl,
+  createDownloadUrl,
+  buildPath,
+};

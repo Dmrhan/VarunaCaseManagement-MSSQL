@@ -282,6 +282,38 @@ export async function findCaseDetailByNumber(caseNumber, authorizedCodes) {
   };
 }
 
+/**
+ * caseNumber + yetkili kod seti ile Case'in internal id'sini çözer — IDOR
+ * kapalı, findCaseDetailByNumber ile AYNI desen (aynı isCodeAuthorized
+ * guard'ı). Attachment ingest gibi "zengin detay gerekmez, sadece id +
+ * yetki lazım" senaryolar için LEAN bir alternatif — DETAIL_CHILD_CAP'li
+ * notes/history/attachments join'lerini GEREKSİZ YERE tekrar çekmez.
+ *
+ * FAIL-CLOSED: findCaseDetailByNumber ile aynı — authorizedCodes boş/
+ * caseNumber geçersizse DB'ye gitmeden null.
+ *
+ * @param {string} caseNumber
+ * @param {string[]} authorizedCodes
+ * @returns {Promise<{id: string}|null>}
+ */
+export async function resolveAuthorizedCaseId(caseNumber, authorizedCodes) {
+  if (typeof caseNumber !== 'string' || !caseNumber.trim()) return null;
+  if (!Array.isArray(authorizedCodes) || authorizedCodes.length === 0) return null;
+
+  const companyId = await resolveUniveraCompanyId();
+
+  const caseRow = await prisma.case.findFirst({
+    where: { caseNumber, companyId, isArchived: false },
+    select: { id: true, accountProject: { select: { code: true } } },
+  });
+  if (!caseRow) return null;
+
+  if (!isCodeAuthorized(caseRow.accountProject?.code ?? null, authorizedCodes)) {
+    return null;
+  }
+  return { id: caseRow.id };
+}
+
 // ─────────────────────────────────────────────────────────────────
 // POST /tickets (create) — kod → TEKİL proje çözümü + Case yaratma.
 // ─────────────────────────────────────────────────────────────────
@@ -358,6 +390,14 @@ export async function resolveSingleProjectByCode(codeRaw) {
   };
 }
 
+// Connect service-actor/uploader görüntü adı — TEK KAYNAK. Case create
+// (CONNECT_ACTOR.displayName, createdByName) VE attachment ingest
+// (caseRepository.js::ingestExternalAttachment'a uploadedByLabel olarak
+// server/routes/connectApi.js'ten geçirilir, uploadedBy alanı) AYNI
+// string'i paylaşır — iki ayrı yerde "Connect Entegrasyonu" literal'i
+// tekrarlanmaz. Export edilir.
+export const CONNECT_ACTOR_DISPLAY_NAME = 'Connect Entegrasyonu';
+
 // Connect service-actor — gerçek bir User değil (userId=null → createdByUserId
 // NULL kalır, User FK ihlali YOK); audit iz'i yalnız createdByName üzerinden
 // (free-text). SystemAdmin/gerçek kullanıcı rolü KULLANILMAZ — assertActor
@@ -368,7 +408,7 @@ const CONNECT_ACTOR = Object.freeze({
   fullName: null,
   email: null,
   role: null,
-  displayName: 'Connect Entegrasyonu',
+  displayName: CONNECT_ACTOR_DISPLAY_NAME,
 });
 
 // Case.category/subCategory NOT NULL (schema) — Connect body'sinde bu

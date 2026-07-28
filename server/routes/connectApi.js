@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, json } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import {
   resolveCodesForMerkez,
@@ -6,9 +6,13 @@ import {
   findCaseDetailByNumber,
   resolveSingleProjectByCode,
   createConnectCase,
+  resolveAuthorizedCaseId,
+  CONNECT_ACTOR_DISPLAY_NAME,
   ConnectResolverError,
 } from '../db/connectResolver.js';
-import { CaseValidationError } from '../db/caseRepository.js';
+import { CaseValidationError, caseRepository, CONNECT_ATTACHMENT_MAX_FILE_BYTES } from '../db/caseRepository.js';
+import { createDownloadUrl } from '../db/storage.js';
+import { isAcceptedUpload } from '../lib/uploadWhitelist.js';
 import {
   mapCaseToConnectTicket,
   mapCaseToConnectDetail,
@@ -20,17 +24,18 @@ import { M_STATUS } from '../db/enumMap.js';
 
 /**
  * /api/connect/* — Varuna↔Connect entegrasyonu.
- *   GET  /tickets     — liste.
- *   GET  /tickets/:id — tek ticket'ın zengin detayı. `:id` = liste'nin
- *     döndürdüğü `id`, yani Case.caseNumber (globally unique).
- *   POST /tickets      — Connect'ten talep açma → yeni Varuna Case (bu
- *     dilim). Ekler bu turda YOK (attachment ingest ayrı dilim). PATCH
- *     sonraki dilimde.
+ *   GET  /tickets                  — liste.
+ *   GET  /tickets/:id               — tek ticket'ın zengin detayı. `:id` =
+ *     liste'nin döndürdüğü `id`, yani Case.caseNumber (globally unique).
+ *   POST /tickets                   — Connect'ten talep açma → yeni Varuna
+ *     Case.
+ *   POST /tickets/:id/attachments   — Connect'ten dosya ekleme (server-to-
+ *     server, base64 gövde) — bu dilim. PATCH sonraki dilimde.
  *
  * Auth: api-key, `x-api-key: <key>` VEYA `Authorization: Bearer <key>`
  * header; env CONNECT_API_KEY. server/routes/cron.js::checkCronSecret ile
  * aynı stil. Key yoksa (env tanımsız) veya yanlışsa: 401 — hangi sebep
- * olduğu client'a sızdırılmaz, yalnız server log'una yazılır. Üç route da
+ * olduğu client'a sızdırılmaz, yalnız server log'una yazılır. Dört route da
  * AYNI `checkConnectApiKey`'i paylaşır (kopya YOK).
  *
  * FAIL-CLOSED sözleşmesi (scope/kod belirsizse ASLA "tüm vakalar" dönmez):
@@ -39,15 +44,30 @@ import { M_STATUS } from '../db/enumMap.js';
  *   - scope=codes, codes eksik/boş/limit-aşımı → 400 missing_param/too_many_codes
  *   - GET /tickets: scope geçerli ama kod hiçbir Case'e eşleşmiyor → 200 +
  *     items:[] (geçerli bir arama kapsamı, sadece sonuç boş).
- *   - GET /tickets/:id: scope ZORUNLU (liste ile aynı) + IDOR kapatma —
- *     Case'in accountProject.code'u scope'un çözdüğü kod setinde DEĞİLSE
- *     (ya da Case hiç yoksa) 404 döner — 403 DEĞİL (varlık sızdırma yok).
+ *   - GET /tickets/:id VE POST /tickets/:id/attachments: scope ZORUNLU (liste
+ *     ile aynı) + IDOR kapatma — Case'in accountProject.code'u scope'un
+ *     çözdüğü kod setinde DEĞİLSE (ya da Case hiç yoksa) 404 döner — 403
+ *     DEĞİL (varlık sızdırma yok).
  *   - POST /tickets: `code` ZORUNLU + TEKİL eşleşme — 0 veya >1
  *     AccountProject'e çözülürse 422 (code_not_found/code_ambiguous);
  *     sessizce "ilkini seç" YOK (yanlış müşteriye/projeye bağlama riski).
  *     Eksik zorunlu alan (code/title/description/type) → 400. Bilinmeyen
- *     `type` → 400 invalid_type. Key başına dakikada 30 create ile
- *     sınırlıdır (checkCreateRateLimit) — aşımda 429 rate_limited.
+ *     `type` → 400 invalid_type.
+ *   - POST /tickets/:id/attachments: `files[]` zorunlu, dosya sayısı/boyut/
+ *     tip cap'lerinin herhangi biri aşılırsa/ihlal edilirse 400/413 (bkz.
+ *     parseAttachmentIngestBody). Bilinmeyen mime/uzantı → 400
+ *     unsupported_file_type. Geçersiz base64 → 400 invalid_base64. Bu
+ *     validasyonun TAMAMI ağır (50mb) body-parser'dan ÖNCE değil — auth/
+ *     rate-limit `connectGuard` middleware'i ile parser'dan ÖNCE çalışır
+ *     (security fix: pre-auth DoS yüzeyi kapatıldı). Çoklu dosyada kısmi
+ *     başarısızlık (ör. 3 dosyadan 3.'sünde storage/DB hatası) SESSİZCE
+ *     kaybolmaz: o ana kadar eklenmiş dosyalar `{ ingested: [...], failed:
+ *     {fileName, error, message} }` ile birlikte döner (uygun 4xx/500 ile) —
+ *     Connect hangi dosyanın gerçekten eklendiğini görür, kör-retry yapmaz.
+ *     Hepsi başarılıysa `201 { ingested: [...] }`.
+ *   - İki YAZMA yolu da (POST /tickets, POST /tickets/:id/attachments) key
+ *     başına dakikada 30 istekle sınırlıdır (checkCreateRateLimit, PAYLAŞIMLI
+ *     sayaç) — aşımda 429 rate_limited.
  */
 
 const router = Router();
@@ -111,6 +131,20 @@ function checkCreateRateLimit(req, res) {
   bucket.push(now);
   createRateBuckets.set(key, bucket);
   return true;
+}
+
+// Security MEDIUM fix — POST /tickets/:id/attachments'ta ağır (50mb) body
+// parser'ı auth/rate-limit'ten ÖNCE çalışıyordu: kimliksiz bir saldırgan
+// hiçbir key vermeden 50MB'a kadar gövde bufferlatabiliyordu (pre-auth DoS
+// yüzeyi). connectGuard bunu Express MIDDLEWARE olarak (route'ta
+// `attachmentBodyParser`'dan ÖNCE) uygular — auth/rate-limit BAŞARISIZSA
+// ağır parser'a HİÇ GİRİLMEZ. checkConnectApiKey/checkCreateRateLimit zaten
+// kendi response'unu yazıp `false` döndüğü için burada yalnız zincirlemek
+// yeterli (aynı iki fonksiyon; kopya YOK).
+function connectGuard(req, res, next) {
+  if (!checkConnectApiKey(req, res)) return;
+  if (!checkCreateRateLimit(req, res)) return;
+  next();
 }
 
 // Case.status ASCII identifier kümesi (server/db/enumMap.js tek kaynak) —
@@ -197,11 +231,17 @@ const CONNECT_ERROR_STATUS = {
 };
 
 /**
- * Üç endpoint'in (GET /tickets, GET /tickets/:id, POST /tickets) PAYLAŞTIĞI
- * tek hata → HTTP yanıt çevirici (kopya YOK). ScopeError/ConnectResolverError
- * → CONNECT_ERROR_STATUS ile status + {error: code, message}.
- * CaseValidationError (caseRepository.create()'ten, yalnız POST) → kendi
- * status/code'unu taşır. Bilinmeyen hata → 500 + log (detay client'a sızmaz).
+ * Dört endpoint'in (GET /tickets, GET /tickets/:id, POST /tickets, POST
+ * /tickets/:id/attachments) PAYLAŞTIĞI tek hata → HTTP yanıt çevirici (kopya
+ * YOK). ScopeError/ConnectResolverError → CONNECT_ERROR_STATUS ile status +
+ * {error: code, message}. CaseValidationError (caseRepository.create()/
+ * ingestExternalAttachment()'tan) → kendi status/code'unu taşır. NOT:
+ * parseCreateTicketBody/parseAttachmentIngestBody'nin ürettiği gövde-
+ * validasyonu hataları (title_too_long, unsupported_file_type, vb.) BU
+ * FONKSİYONA hiç GİRMEZ — onlar throw etmeyen bir {error} return-value
+ * deseniyle route'ta doğrudan 400/413'e çevrilir (kendi status'larını zaten
+ * taşırlar; CONNECT_ERROR_STATUS'a taşınmaları GEREKSİZ olurdu). Bilinmeyen
+ * hata → 500 + log (detay client'a sızmaz).
  */
 function handleConnectApiError(res, err, logLabel) {
   if (err instanceof ScopeError || err instanceof ConnectResolverError) {
@@ -435,5 +475,258 @@ router.post('/tickets', async (req, res) => {
 //   senaryosu için: code='10005' yerine hiç var olmayan bir kod (422
 //   code_not_found) ya da (varsa) birden fazla AccountProject'e düşen bir
 //   kod (422 code_ambiguous) deneyin.
+
+// ─────────────────────────────────────────────────────────────────
+// POST /tickets/:id/attachments — Connect'ten dosya ekleme (server-to-server,
+// base64 gövde).
+//
+// ⚠️ PROD YAZMA YOLU — bu endpoint gerçek bir CaseAttachment INSERT eder +
+// storage'a dosya yazar. Smoke test bu route'u YALNIZ yazma-ETMEYEN yollarla
+// test eder (auth/scope-404/gövde-validasyonu); ingestExternalAttachment'ın
+// gerçek DB/storage çağrıları smoke'ta STUB'lanır (bkz. dosya sonu MANUEL
+// CANLI TEST yorumu + scripts/smoke-connect-tickets.mjs başlığı).
+//
+// Body: `Content-Type: application/json`, global 2mb body-parser limitini
+// AŞMASI beklenen (base64 + çoklu dosya) bir JSON — bu route KENDİ
+// (daha büyük limitli) express.json parser'ını kullanır; server/app.js bu
+// path'i global 2mb parser'dan MUAF TUTAR (bkz. app.js yorumu).
+// ─────────────────────────────────────────────────────────────────
+
+// 50mb — MAX_ATTACHMENT_TOTAL_BYTES (25MB decoded) base64'te ~33.3MB'a
+// şişer; JSON yapısal ek yükü + güvenlik payı ile 50mb'a yuvarlandı. Bu
+// yalnız parser'ın PARSE ETMEYİ REDDETMEYECEĞİ üst sınır — asıl semantik
+// cap'ler (dosya başı/istek toplamı) parseAttachmentIngestBody'de.
+//
+// GÜVENLİK (route sırası önemli): bu parser route'a `connectGuard`'DAN
+// SONRA takılır (bkz. router.post çağrısı altta) — auth/rate-limit
+// BAŞARISIZSA bu (ağır) parser'a HİÇ GİRİLMEZ. Önceki sürümde bu parser
+// auth'tan ÖNCE çalışıyordu: kimliksiz bir istemci hiç key vermeden 50MB'a
+// kadar gövde bufferlatabiliyordu (pre-auth DoS — security MEDIUM bulgusu).
+const attachmentBodyParser = json({ limit: '50mb' });
+
+// Tek istekte en fazla kaç dosya — "bir veya çok" ama sınırsız değil.
+const MAX_FILES_PER_REQUEST = 5;
+// İstek başına TOPLAM decode edilmiş boyut cap'i (birden fazla dosya
+// toplamı) — tek dosya cap'i CONNECT_ATTACHMENT_MAX_FILE_BYTES'tan
+// (server/db/caseRepository.js — TEK KAYNAK, audit nit) bağımsız ikinci
+// bir DoS/kötüye-kullanım tavanı.
+const MAX_ATTACHMENT_TOTAL_BYTES = 25 * 1024 * 1024;
+
+// Boşluk/satır sonu (yaygın MIME-stili 76-karakter satır kırma) tolere
+// edilir, ama içerik saf base64 alfabesi + padding olmalı.
+const BASE64_SHAPE_RX = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/**
+ * POST /tickets/:id/attachments gövde validasyonu — tek yerde, saf
+ * fonksiyon (route'tan ayrık, DB'siz test edilebilir). parseCreateTicketBody
+ * ile AYNI desen: throw ETMEZ, `{ error }` veya `{ value }` döner.
+ *
+ * @param {unknown} body - req.body. Beklenen şekil:
+ *   `{ files: [{ fileName, mimeType, contentBase64 }, ...] }`.
+ * @returns {{ error: { status: number, code: string, message: string } } |
+ *           { value: Array<{ fileName: string, mimeType: string, buffer: Buffer }> }}
+ */
+function parseAttachmentIngestBody(body) {
+  const safeBody = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  const files = safeBody.files;
+
+  if (!Array.isArray(files) || files.length === 0) {
+    return { error: { status: 400, code: 'missing_param', message: "'files' zorunlu ve boş olmayan bir dizi olmalı." } };
+  }
+  if (files.length > MAX_FILES_PER_REQUEST) {
+    return {
+      error: {
+        status: 400,
+        code: 'too_many_files',
+        message: `Tek istekte en fazla ${MAX_FILES_PER_REQUEST} dosya gönderilebilir (gelen: ${files.length}).`,
+      },
+    };
+  }
+
+  const parsed = [];
+  let totalBytes = 0;
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i] && typeof files[i] === 'object' ? files[i] : {};
+    const { fileName, mimeType, contentBase64 } = f;
+
+    if (typeof fileName !== 'string' || !fileName.trim()) {
+      return { error: { status: 400, code: 'missing_param', message: `files[${i}].fileName zorunlu.` } };
+    }
+    if (typeof mimeType !== 'string' || !mimeType.trim()) {
+      return { error: { status: 400, code: 'missing_param', message: `files[${i}].mimeType zorunlu.` } };
+    }
+    if (typeof contentBase64 !== 'string' || !contentBase64.trim()) {
+      return { error: { status: 400, code: 'missing_param', message: `files[${i}].contentBase64 zorunlu.` } };
+    }
+
+    // Tip whitelist — server/lib/uploadWhitelist.js::isAcceptedUpload
+    // (browser upload akışıyla AYNI fonksiyon, ayrı bir liste DUPLICATE
+    // edilmedi). ingestExternalAttachment BUNU TEKRAR kontrol eder
+    // (defense-in-depth, finalizeUpload'un requestUpload sonrası tekrar
+    // kontrolüyle AYNI desen) — burada erken 400 için.
+    if (!isAcceptedUpload(mimeType, fileName)) {
+      return {
+        error: {
+          status: 400,
+          code: 'unsupported_file_type',
+          message: `files[${i}] — desteklenmeyen dosya türü (${mimeType || fileName}).`,
+        },
+      };
+    }
+
+    const stripped = contentBase64.replace(/\s+/g, '');
+    if (!BASE64_SHAPE_RX.test(stripped) || stripped.length % 4 !== 0) {
+      return {
+        error: { status: 400, code: 'invalid_base64', message: `files[${i}].contentBase64 geçerli bir base64 değil.` },
+      };
+    }
+    const buffer = Buffer.from(stripped, 'base64');
+    if (buffer.length === 0) {
+      return {
+        error: { status: 400, code: 'invalid_base64', message: `files[${i}].contentBase64 decode edilince boş çıktı.` },
+      };
+    }
+    if (buffer.length > CONNECT_ATTACHMENT_MAX_FILE_BYTES) {
+      return {
+        error: {
+          status: 413,
+          code: 'file_too_large',
+          message: `files[${i}] boyutu üst sınırı aşıyor (max ${Math.round(CONNECT_ATTACHMENT_MAX_FILE_BYTES / (1024 * 1024))}MB, gelen ~${Math.round(buffer.length / (1024 * 1024))}MB).`,
+        },
+      };
+    }
+
+    totalBytes += buffer.length;
+    if (totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) {
+      return {
+        error: {
+          status: 413,
+          code: 'request_too_large',
+          message: `İstek toplam dosya boyutu üst sınırı aşıyor (max ${Math.round(MAX_ATTACHMENT_TOTAL_BYTES / (1024 * 1024))}MB).`,
+        },
+      };
+    }
+
+    parsed.push({ fileName: fileName.trim(), mimeType: mimeType.trim(), buffer });
+  }
+
+  return { value: parsed };
+}
+
+router.post('/tickets/:id/attachments', connectGuard, attachmentBodyParser, async (req, res) => {
+  const { scope, code, codes: codesParam } = req.query;
+  const caseNumber = req.params.id;
+
+  let authorizedCodes;
+  try {
+    authorizedCodes = await resolveScopeCodes({ scope, code, codesParam });
+  } catch (err) {
+    return handleConnectApiError(res, err, 'connect-api:attachments');
+  }
+
+  const parsed = parseAttachmentIngestBody(req.body);
+  if (parsed.error) {
+    return res.status(parsed.error.status).json({ error: parsed.error.code, message: parsed.error.message });
+  }
+
+  let resolvedCase;
+  try {
+    resolvedCase = await resolveAuthorizedCaseId(caseNumber, authorizedCodes);
+  } catch (err) {
+    return handleConnectApiError(res, err, 'connect-api:attachments');
+  }
+  if (!resolvedCase) {
+    // Case yok VEYA çağıranın yetkili kod setinde değil — GET /tickets/:id
+    // ile AYNI 404 (IDOR kapatma, varlık sızdırma yok).
+    return res.status(404).json({ error: 'not_found' });
+  }
+
+  // QA concern fix — kısmi başarısızlık artık SESSİZCE kaybolmaz. Tüm tip/
+  // boyut/sayı validasyonu zaten parseAttachmentIngestBody'de ÖN-yapıldığı
+  // için buradaki bir hata SADECE altyapı kaynaklı olabilir (storage/DB) —
+  // ama yine de olabilir (disk dolu, DB bağlantı sorunu, repo-katmanı
+  // CASE_FILE_MAX_COUNT'un tam bu sırada dolması vb.). SIRAYLA (paralel
+  // DEĞİL) işlenir — ingestExternalAttachment'ın kendi CASE_FILE_MAX_COUNT
+  // kontrolü her çağrıda güncel sayıyı okur; paralel çağrılar eski sayıyı
+  // görüp cap'i aşabilirdi. İlk hatada döngü DURUR; o ana kadar başarıyla
+  // eklenmiş dosyalar `ingested[]`'te GERİ ALINMADAN response'a dahil edilir
+  // — Connect hangi dosyanın gerçekten eklendiğini görür, kör-retry (ve
+  // olası duplicate) yapmaz.
+  const ingested = [];
+  let failure = null;
+  for (const f of parsed.value) {
+    try {
+      const file = await caseRepository.ingestExternalAttachment(resolvedCase.id, {
+        fileName: f.fileName,
+        mimeType: f.mimeType,
+        buffer: f.buffer,
+        uploadedByLabel: CONNECT_ACTOR_DISPLAY_NAME,
+        authorizedCodes, // repo-katmanı defense-in-depth simetrisi (audit nit)
+      });
+      if (!file) {
+        // Repo-katmanı IDOR re-check'i reddetti (normalde asla olmaz — route
+        // zaten resolveAuthorizedCaseId'den geçti) — 404 ile aynı aileden.
+        throw new CaseValidationError('Vaka artık erişilebilir değil.', { status: 404, code: 'not_found' });
+      }
+      ingested.push({
+        id: file.id,
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        fileSize: file.fileSize,
+        // GET detay ile AYNI HMAC download URL üreticisi (createDownloadUrl) —
+        // içerik gömme YOK, yalnız kısa ömürlü capability URL.
+        downloadUrl: createDownloadUrl(resolvedCase.id, file.id, file.fileUrl, file.fileName, undefined, file.mimeType),
+      });
+    } catch (err) {
+      failure = { fileName: f.fileName, err };
+      break;
+    }
+  }
+
+  const auditBase = {
+    scope,
+    ...(scope === 'merkez' ? { code } : {}),
+    ...(scope === 'codes' ? { codesCount: authorizedCodes.length } : {}),
+    caseNumber,
+    ingestedCount: ingested.length,
+  };
+
+  if (failure) {
+    const isKnownValidationError = failure.err instanceof CaseValidationError;
+    const status = isKnownValidationError ? (failure.err.status ?? 400) : 500;
+    const errorCode = isKnownValidationError ? failure.err.code : 'internal';
+    const errorMessage = isKnownValidationError ? failure.err.message : 'Sunucu hatası';
+    if (!isKnownValidationError) {
+      console.error('[connect-api:attachments]', failure.err);
+    }
+    console.log('[connect-api:attachments] audit (kısmi başarısızlık)', {
+      ...auditBase,
+      failedFileName: failure.fileName,
+      failedError: errorCode,
+    });
+    return res.status(status).json({
+      ingested,
+      failed: { fileName: failure.fileName, error: errorCode, message: errorMessage },
+    });
+  }
+
+  console.log('[connect-api:attachments] audit', auditBase);
+  res.status(201).json({ ingested });
+});
+
+// MANUEL CANLI TEST (bu dosyanın smoke script'i PROD'a create/upload
+// YAPMAZ — gerçek yüklemeyi kontrollü/tek-seferlik olarak elle çalıştırın):
+//
+//   # 1) küçük bir test dosyasını base64'e çevir:
+//   base64 -i test.txt | tr -d '\n' > /tmp/test.b64
+//   # 2) gönder (aynı OLD_/UNV_ caseNumber + doğru merkez/codes scope'u ile):
+//   curl -s -X POST "http://localhost:3101/api/connect/tickets/OLD_123456/attachments?scope=merkez&code=198" \
+//     -H "x-api-key: <gercek-key>" -H "Content-Type: application/json" \
+//     -d "{\"files\":[{\"fileName\":\"[CONNECT-TEST]-deneme.txt\",\"mimeType\":\"text/plain\",\"contentBase64\":\"$(cat /tmp/test.b64)\"}]}" | jq .
+//
+//   Test SONRASI: dönen `items[].id` (CaseAttachment.id) ile eki Varuna
+//   UI'ından (Case detay → Dosyalar) silin — CaseAttachment.delete zaten
+//   storage'daki dosyayı da temizler (bkz. caseRepository.js dosya silme
+//   akışı, removeObject).
 
 export default router;

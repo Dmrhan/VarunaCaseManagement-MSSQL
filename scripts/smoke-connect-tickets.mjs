@@ -1,18 +1,21 @@
-// Smoke test — Varuna↔Connect GET-liste + GET-detay + POST-create dilimleri
-// (server/routes/connectApi.js, server/db/connectResolver.js,
+// Smoke test — Varuna↔Connect GET-liste + GET-detay + POST-create +
+// attachment-ingest dilimleri (server/routes/connectApi.js,
+// server/db/connectResolver.js, server/db/caseRepository.js,
 // server/lib/connectMapper.js).
 //
-// ⚠️ POST /tickets (create) — bu script PROD'A ASLA CASE INSERT ETMEZ.
-// HTTP route testleri yalnız create-ETMEYEN yolları dener: auth (401),
-// zorunlu-alan/tip/uzunluk validasyonu (400) ve code-çözümleme
-// fail-closed'ı (422 code_not_found) — bu son test bile
-// caseRepository.create()'e ULAŞMADAN, resolveSingleProjectByCode'un
-// erken-throw'unda durur. `createConnectCase` bu dosyada YALNIZ bir
-// "wiring" birim testinde çağrılır ve o testte `caseRepository.create`
-// GEÇİCİ OLARAK STUB'LANIR (DB'ye gitmez, sahte bir Case döner) — orijinal
-// fonksiyon try/finally ile HER KOŞULDA geri yüklenir. Gerçek create
-// happy-path canlı ortamda kontrollü/manuel yapılır (bkz.
-// server/routes/connectApi.js dosya sonu curl yorumu).
+// ⚠️ POST /tickets (create) VE POST /tickets/:id/attachments (ingest) — bu
+// script PROD'A ASLA CASE/CaseAttachment INSERT ETMEZ, disk'e dosya YAZMAZ.
+// HTTP route testleri yalnız yazma-ETMEYEN yolları dener: auth (401),
+// scope/gövde validasyonu (400/413/404) ve code-çözümleme fail-closed'ı
+// (422 code_not_found) — bunlar caseRepository.create()/
+// ingestExternalAttachment()'a ULAŞMADAN erken döner. `createConnectCase` ve
+// `caseRepository.ingestExternalAttachment` bu dosyada YALNIZ "wiring" birim
+// testlerinde çağrılır; o testlerde `caseRepository.create` / `prisma.case.*`
+// / `prisma.caseAttachment.create` / `storageApi.saveObject` GEÇİCİ OLARAK
+// STUB'LANIR (DB'ye gitmez, diske yazmaz, sahte veriler döner) — orijinal
+// fonksiyonlar try/finally ile HER KOŞULDA geri yüklenir. Gerçek create/
+// upload happy-path canlı ortamda kontrollü/manuel yapılır (bkz.
+// server/routes/connectApi.js dosya sonu curl yorumları).
 //
 // Canlı DB'ye ÇOĞUNLUKLA DOKUNMAZ: connectResolver'ın validasyon adımları
 // (invalid merkez kodu / boş codes / boş authorizedCodes / IDOR guard /
@@ -38,6 +41,9 @@
 //   #   ÖN KOŞUL: prisma/migrations/20260727_case_origin_connect UYGULANMIŞ
 //   #   olmalı (CK_Case_origin constraint'i 'Connect' değerine izin vermeli),
 //   #   aksi halde POST her zaman 500 (constraint violation) döner.
+//   # POST attachment ingest (GERÇEK CaseAttachment INSERT + disk yazımı —
+//   # bkz. server/routes/connectApi.js dosya sonu için tam curl + test-eki
+//   # temizleme notu).
 
 import http from 'node:http';
 import assert from 'node:assert/strict';
@@ -54,16 +60,20 @@ import {
   resolveCodesForMerkez,
   findCasesByCodes,
   findCaseDetailByNumber,
+  resolveAuthorizedCaseId,
   isCodeAuthorized,
   pickSingleProjectMatch,
   resolveSingleProjectByCode,
   createConnectCase,
   CONNECT_CASE_CATEGORY,
   CONNECT_CASE_SUBCATEGORY,
+  CONNECT_ACTOR_DISPLAY_NAME,
   ConnectResolverError,
   DETAIL_CHILD_CAP,
 } from '../server/db/connectResolver.js';
-import { caseRepository } from '../server/db/caseRepository.js';
+import { caseRepository, CaseValidationError } from '../server/db/caseRepository.js';
+import { prisma } from '../server/db/client.js';
+import { storageApi } from '../server/db/storage.js';
 
 // mapCaseToConnectDetail'in ihtiyaç duyduğu zorunlu alanlarla minimal sahte
 // Case satırı — her yeni testte tüm alanları tekrar yazmamak için (Metz:
@@ -526,6 +536,198 @@ async function main() {
     assert.equal(await findCaseDetailByNumber(undefined, ['A']), null);
   });
 
+  await check(
+    "resolveAuthorizedCaseId — authorizedCodes/caseNumber boş → null, DB'ye gitmez (fail-closed, findCaseDetailByNumber ile aynı desen)",
+    async () => {
+      assert.equal(await resolveAuthorizedCaseId('UNV-1000042', []), null);
+      assert.equal(await resolveAuthorizedCaseId('UNV-1000042', null), null);
+      assert.equal(await resolveAuthorizedCaseId('', ['A']), null);
+      assert.equal(await resolveAuthorizedCaseId(null, ['A']), null);
+    },
+  );
+
+  await check(
+    "caseRepository.ingestExternalAttachment — wiring birim testi (prisma.case/caseAttachment + storageApi GEÇİCİ STUB'lanır, gerçek disk/DB YOK)",
+    async () => {
+      const originalFindUnique = prisma.case.findUnique;
+      const originalCaseUpdate = prisma.case.update;
+      const originalAttachmentCreate = prisma.caseAttachment.create;
+      const originalSaveObject = storageApi.saveObject;
+      const originalBuildPath = storageApi.buildPath;
+
+      let capturedFindUniqueWhere = null;
+      let capturedAttachmentData = null;
+      let capturedHistoryEntry = null;
+      let capturedSavedPath = null;
+      let capturedSavedBuffer = null;
+
+      prisma.case.findUnique = async ({ where }) => {
+        capturedFindUniqueWhere = where;
+        return { id: 'fake-case-id-1', companyId: 'fake-company-1', attachments: [] };
+      };
+      storageApi.buildPath = (caseId, attachmentId, fileName) => `cases/${caseId}/${attachmentId}-${fileName}`;
+      storageApi.saveObject = async (relPath, buffer) => {
+        capturedSavedPath = relPath;
+        capturedSavedBuffer = buffer;
+        // GERÇEK DİSK YAZMA YOK — bu stub yalnız argümanları yakalar.
+      };
+      prisma.caseAttachment.create = async ({ data }) => {
+        capturedAttachmentData = data;
+        return { ...data };
+      };
+      prisma.case.update = async ({ data }) => {
+        capturedHistoryEntry = data.history?.create ?? null;
+        return {};
+      };
+
+      try {
+        const fakeBuffer = Buffer.from('smoke test attachment content', 'utf8');
+        const result = await caseRepository.ingestExternalAttachment('fake-case-id-1', {
+          fileName: 'smoke-test.txt',
+          mimeType: 'text/plain',
+          buffer: fakeBuffer,
+          uploadedByLabel: CONNECT_ACTOR_DISPLAY_NAME,
+        });
+
+        assert.equal(capturedFindUniqueWhere?.id, 'fake-case-id-1', 'caseId ile Case sorgulanmadı');
+
+        assert.ok(capturedAttachmentData, 'prisma.caseAttachment.create hiç çağrılmadı');
+        assert.equal(capturedAttachmentData.caseId, 'fake-case-id-1');
+        assert.equal(capturedAttachmentData.fileName, 'smoke-test.txt');
+        assert.equal(capturedAttachmentData.mimeType, 'text/plain');
+        assert.equal(capturedAttachmentData.fileSize, fakeBuffer.length);
+        assert.equal(capturedAttachmentData.uploadedBy, CONNECT_ACTOR_DISPLAY_NAME);
+        assert.equal(capturedAttachmentData.uploadedByUserId, null, 'uploadedByUserId NULL olmalı (User FK ihlali yok)');
+
+        assert.ok(capturedSavedPath, 'storageApi.saveObject hiç çağrılmadı (gerçek disk yazılmadı)');
+        assert.equal(capturedSavedBuffer, fakeBuffer);
+
+        assert.ok(capturedHistoryEntry, 'Case history log hiç yazılmadı');
+        assert.equal(capturedHistoryEntry.actor, CONNECT_ACTOR_DISPLAY_NAME);
+        assert.equal(capturedHistoryEntry.actorUserId, null);
+        assert.equal(capturedHistoryEntry.actionType, 'FileUploaded');
+
+        assert.equal(result.fileName, 'smoke-test.txt');
+      } finally {
+        prisma.case.findUnique = originalFindUnique;
+        prisma.case.update = originalCaseUpdate;
+        prisma.caseAttachment.create = originalAttachmentCreate;
+        storageApi.saveObject = originalSaveObject;
+        storageApi.buildPath = originalBuildPath;
+      }
+    },
+  );
+
+  await check(
+    'caseRepository.ingestExternalAttachment — defense-in-depth: desteklenmeyen tip → CaseValidationError unsupported_file_type (stub)',
+    async () => {
+      const originalFindUnique = prisma.case.findUnique;
+      prisma.case.findUnique = async () => ({ id: 'fake-case-id-2', companyId: 'fake-company-1', attachments: [] });
+      try {
+        await assert.rejects(
+          () =>
+            caseRepository.ingestExternalAttachment('fake-case-id-2', {
+              fileName: 'malware.exe',
+              mimeType: 'application/octet-stream',
+              buffer: Buffer.from('x'),
+              uploadedByLabel: CONNECT_ACTOR_DISPLAY_NAME,
+            }),
+          (err) => err?.code === 'unsupported_file_type',
+        );
+      } finally {
+        prisma.case.findUnique = originalFindUnique;
+      }
+    },
+  );
+
+  await check(
+    'caseRepository.ingestExternalAttachment — defense-in-depth: CASE_FILE_MAX_COUNT (20) aşımı → CaseValidationError case_file_limit_reached (stub)',
+    async () => {
+      const originalFindUnique = prisma.case.findUnique;
+      prisma.case.findUnique = async () => ({
+        id: 'fake-case-id-3',
+        companyId: 'fake-company-1',
+        attachments: Array.from({ length: 20 }, (_, i) => ({ id: `att${i}` })),
+      });
+      try {
+        await assert.rejects(
+          () =>
+            caseRepository.ingestExternalAttachment('fake-case-id-3', {
+              fileName: 'ok.txt',
+              mimeType: 'text/plain',
+              buffer: Buffer.from('x'),
+              uploadedByLabel: CONNECT_ACTOR_DISPLAY_NAME,
+            }),
+          (err) => err?.code === 'case_file_limit_reached',
+        );
+      } finally {
+        prisma.case.findUnique = originalFindUnique;
+      }
+    },
+  );
+
+  await check(
+    "caseRepository.ingestExternalAttachment — storage hata yolu: saveObject throw ederse caseAttachment.create'e HİÇ GİDİLMEZ (orphan-DB-row yok, stub)",
+    async () => {
+      const originalFindUnique = prisma.case.findUnique;
+      const originalSaveObject = storageApi.saveObject;
+      const originalAttachmentCreate = prisma.caseAttachment.create;
+
+      let attachmentCreateCalled = false;
+      prisma.case.findUnique = async () => ({ id: 'fake-case-id-4', companyId: 'fake-company-1', attachments: [] });
+      storageApi.saveObject = async () => {
+        throw new Error('simulated disk full / storage outage');
+      };
+      prisma.caseAttachment.create = async (args) => {
+        attachmentCreateCalled = true;
+        return { ...args.data };
+      };
+
+      try {
+        await assert.rejects(
+          () =>
+            caseRepository.ingestExternalAttachment('fake-case-id-4', {
+              fileName: 'ok.txt',
+              mimeType: 'text/plain',
+              buffer: Buffer.from('x'),
+              uploadedByLabel: CONNECT_ACTOR_DISPLAY_NAME,
+            }),
+          (err) => err.message.includes('simulated disk full'),
+        );
+        assert.equal(attachmentCreateCalled, false, 'storage başarısız olduğu halde caseAttachment.create çağrıldı (orphan-DB-row riski)');
+      } finally {
+        prisma.case.findUnique = originalFindUnique;
+        storageApi.saveObject = originalSaveObject;
+        prisma.caseAttachment.create = originalAttachmentCreate;
+      }
+    },
+  );
+
+  await check(
+    "caseRepository.ingestExternalAttachment — repo-katmanı defense-in-depth simetrisi: authorizedCodes verilip proje kodu setin dışındaysa → null (route 404'e çevirir, stub)",
+    async () => {
+      const originalFindUnique = prisma.case.findUnique;
+      prisma.case.findUnique = async () => ({
+        id: 'fake-case-id-5',
+        companyId: 'fake-company-1',
+        attachments: [],
+        accountProject: { code: 'YETKISIZ-KOD' },
+      });
+      try {
+        const result = await caseRepository.ingestExternalAttachment('fake-case-id-5', {
+          fileName: 'ok.txt',
+          mimeType: 'text/plain',
+          buffer: Buffer.from('x'),
+          uploadedByLabel: CONNECT_ACTOR_DISPLAY_NAME,
+          authorizedCodes: ['BASKA-KOD'],
+        });
+        assert.equal(result, null, "yetkisiz authorizedCodes verildiğinde null dönmedi (repo-katmanı IDOR guard'ı çalışmıyor)");
+      } finally {
+        prisma.case.findUnique = originalFindUnique;
+      }
+    },
+  );
+
   console.log('\n== 3) connectApi route — auth + fail-closed 400/401 (canlı HTTP, DB dokunmadan) ==');
 
   const { default: app } = await import('../server/app.js');
@@ -860,6 +1062,240 @@ async function main() {
         assert.equal(body.error, 'code_not_found');
       },
     );
+
+    console.log(
+      "\n== 7) POST /tickets/:id/attachments (ingest) — auth + scope-404 + gövde validasyonu (⚠️ PROD'A YAZMA YOK) ==",
+    );
+
+    // Küçük, geçerli bir base64 dosya — yalnız şekil/validasyon testleri
+    // için (gerçek ingest'e HİÇ ULAŞMAZ — scope=codes ile fake bir code
+    // kullanıldığında resolveAuthorizedCaseId'e bile gidilmeden önce
+    // parseAttachmentIngestBody zaten kendi başına yeterli/yetersiz
+    // senaryoları test eder; case-var mı sorgusu yalnız "404" testinde
+    // gerçekten tetiklenir).
+    const SMALL_VALID_FILE = {
+      fileName: 'smoke-test.txt',
+      mimeType: 'text/plain',
+      contentBase64: Buffer.from('smoke test content').toString('base64'),
+    };
+
+    await check('POST /tickets/:id/attachments — key yok → 401 (paylaşılan checkConnectApiKey)', async () => {
+      const res = await fetch(`${base}/api/connect/tickets/UNV-1000042/attachments?scope=merkez&code=198`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: [SMALL_VALID_FILE] }),
+      });
+      assert.equal(res.status, 401);
+    });
+
+    await check('POST /tickets/:id/attachments — doğru key ama scope eksik → 400 invalid_scope', async () => {
+      const res = await fetch(`${base}/api/connect/tickets/UNV-1000042/attachments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+        body: JSON.stringify({ files: [SMALL_VALID_FILE] }),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.error, 'invalid_scope');
+    });
+
+    await check("POST /tickets/:id/attachments — 'files' eksik → 400 missing_param (scope=codes, DB'ye gitmeden)", async () => {
+      const res = await fetch(`${base}/api/connect/tickets/UNV-1000042/attachments?scope=codes&codes=ZZZ-ANY`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+        body: JSON.stringify({}),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.error, 'missing_param');
+    });
+
+    await check("POST /tickets/:id/attachments — 6 dosya (limit=5 aşımı) → 400 too_many_files", async () => {
+      const files = Array.from({ length: 6 }, (_, i) => ({ ...SMALL_VALID_FILE, fileName: `f${i}.txt` }));
+      const res = await fetch(`${base}/api/connect/tickets/UNV-1000042/attachments?scope=codes&codes=ZZZ-ANY`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+        body: JSON.stringify({ files }),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.error, 'too_many_files');
+    });
+
+    await check("POST /tickets/:id/attachments — desteklenmeyen dosya türü (.exe) → 400 unsupported_file_type", async () => {
+      const res = await fetch(`${base}/api/connect/tickets/UNV-1000042/attachments?scope=codes&codes=ZZZ-ANY`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+        body: JSON.stringify({
+          files: [{ fileName: 'malware.exe', mimeType: 'application/octet-stream', contentBase64: SMALL_VALID_FILE.contentBase64 }],
+        }),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.error, 'unsupported_file_type');
+    });
+
+    await check("POST /tickets/:id/attachments — geçersiz base64 → 400 invalid_base64", async () => {
+      const res = await fetch(`${base}/api/connect/tickets/UNV-1000042/attachments?scope=codes&codes=ZZZ-ANY`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+        body: JSON.stringify({
+          files: [{ fileName: 'not-base64.txt', mimeType: 'text/plain', contentBase64: '%%%not-valid-base64%%%' }],
+        }),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.error, 'invalid_base64');
+    });
+
+    await check("POST /tickets/:id/attachments — tek dosya üst sınırı (10MB) aşımı → 413 file_too_large", async () => {
+      // ~10.5MB decode edilmiş içerik — 10MB cap'inin hemen üstü.
+      const oversized = Buffer.alloc(10.5 * 1024 * 1024, 'a').toString('base64');
+      const res = await fetch(`${base}/api/connect/tickets/UNV-1000042/attachments?scope=codes&codes=ZZZ-ANY`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+        body: JSON.stringify({ files: [{ fileName: 'big.txt', mimeType: 'text/plain', contentBase64: oversized }] }),
+      });
+      assert.equal(res.status, 413);
+      const body = await res.json();
+      assert.equal(body.error, 'file_too_large');
+    });
+
+    await check(
+      "POST /tickets/:id/attachments — 3×9MB dosya (toplam 25MB üst sınırını aşar, her biri tek-dosya cap altında) → 413 request_too_large",
+      async () => {
+        const nineMb = Buffer.alloc(9 * 1024 * 1024, 'b').toString('base64');
+        const files = Array.from({ length: 3 }, (_, i) => ({ fileName: `f${i}.txt`, mimeType: 'text/plain', contentBase64: nineMb }));
+        const res = await fetch(`${base}/api/connect/tickets/UNV-1000042/attachments?scope=codes&codes=ZZZ-ANY`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+          body: JSON.stringify({ files }),
+        });
+        assert.equal(res.status, 413);
+        const body = await res.json();
+        assert.equal(body.error, 'request_too_large');
+      },
+    );
+
+    await check(
+      "canlı (salt-okuma) — POST /tickets/:id/attachments: var olmayan caseNumber → 404 not_found (ingestExternalAttachment'a hiç gidilmez)",
+      async () => {
+        const res = await fetchWithTimeout(
+          `${base}/api/connect/tickets/NOPE-DOES-NOT-EXIST-XYZ/attachments?scope=codes&codes=ZZZ-NONEXISTENT-CODE`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+            body: JSON.stringify({ files: [SMALL_VALID_FILE] }),
+          },
+        );
+        assert.equal(res.status, 404);
+        const body = await res.json();
+        assert.equal(body.error, 'not_found');
+      },
+    );
+
+    // Aşağıdaki 2 test GERÇEK bir case gerektirir (route'un tam döngüsünü —
+    // resolveAuthorizedCaseId dahil — egzersiz etmek için); liveCaseNumber
+    // section 5)'te (merkez 198 keşfi) zaten çözüldü. caseRepository.
+    // ingestExternalAttachment STUB'lanır — hiçbir gerçek CaseAttachment
+    // INSERT edilmez / diske yazılmaz, yalnız route'un kısmi-başarı/hata
+    // işleme mantığı test edilir.
+    await check(
+      'canlı case + STUB ingestExternalAttachment — mid-loop kısmi başarısızlık: 3 dosyadan 3.\'sü patlarsa ilk 2\'si ingested[]\'te döner + failed doğru (⚠️ hiçbir gerçek CaseAttachment INSERT edilmez)',
+      async () => {
+        assert.ok(liveCaseNumber, 'keşif adımı başarısız oldu — bu test koşulamaz');
+        const originalIngest = caseRepository.ingestExternalAttachment;
+        let callCount = 0;
+        caseRepository.ingestExternalAttachment = async (caseId, { fileName }) => {
+          callCount++;
+          if (callCount === 3) {
+            throw new Error('simulated infra failure (storage/DB) on 3rd file');
+          }
+          return {
+            id: `stub-att-${callCount}`,
+            fileName,
+            mimeType: 'text/plain',
+            fileSize: 10,
+            fileUrl: `cases/${caseId}/stub-${callCount}`,
+          };
+        };
+        try {
+          const files = [1, 2, 3].map((i) => ({ ...SMALL_VALID_FILE, fileName: `part${i}.txt` }));
+          const res = await fetchWithTimeout(
+            `${base}/api/connect/tickets/${encodeURIComponent(liveCaseNumber)}/attachments?scope=merkez&code=198`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+              body: JSON.stringify({ files }),
+            },
+          );
+          assert.equal(res.status, 500, 'infra hatası 500 dönmeli');
+          const body = await res.json();
+          assert.equal(body.ingested.length, 2, 'ilk 2 başarılı dosya ingested[]\'te kaybolmuş');
+          assert.equal(body.ingested[0].fileName, 'part1.txt');
+          assert.equal(body.ingested[1].fileName, 'part2.txt');
+          assert.equal(body.failed.fileName, 'part3.txt');
+          assert.equal(body.failed.error, 'internal');
+        } finally {
+          caseRepository.ingestExternalAttachment = originalIngest;
+        }
+      },
+    );
+
+    await check(
+      'canlı case + STUB ingestExternalAttachment — CaseValidationError → handleConnectApiError doğru 4xx\'e çevirir (⚠️ DB/disk\'e gitmeden)',
+      async () => {
+        assert.ok(liveCaseNumber, 'keşif adımı başarısız oldu — bu test koşulamaz');
+        const originalIngest = caseRepository.ingestExternalAttachment;
+        caseRepository.ingestExternalAttachment = async () => {
+          throw new CaseValidationError('Bu vakada en fazla 20 dosya olabilir.', {
+            status: 400,
+            code: 'case_file_limit_reached',
+          });
+        };
+        try {
+          const res = await fetchWithTimeout(
+            `${base}/api/connect/tickets/${encodeURIComponent(liveCaseNumber)}/attachments?scope=merkez&code=198`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+              body: JSON.stringify({ files: [SMALL_VALID_FILE] }),
+            },
+          );
+          assert.equal(res.status, 400);
+          const body = await res.json();
+          assert.equal(body.ingested.length, 0);
+          assert.equal(body.failed.error, 'case_file_limit_reached');
+        } finally {
+          caseRepository.ingestExternalAttachment = originalIngest;
+        }
+      },
+    );
+
+    // Rate-limit 429 — POST /tickets ve POST /tickets/:id/attachments AYNI
+    // key-bazlı bucket'ı paylaşır (checkCreateRateLimit). Bu noktaya kadar
+    // zaten onlarca POST isteği gönderildi (tam sayı testler değiştikçe
+    // kırılgan); bu yüzden KESİN limiti aşmak için BOL miktarda (35) YENİ
+    // istek gönderilir — en az birinin 429 dönmesi YETERLİ kanıt (mevcut
+    // bucket doluluğundan BAĞIMSIZ sağlam bir doğrulama). BUNDAN SONRA bu
+    // key ile gönderilecek her istek 429 döneceği için bu test BİLEREK
+    // dosyanın/bölümün EN SONUNA konur.
+    await check(
+      "rate-limit — POST /tickets/:id/attachments key başına dakika sınırını (30) aşınca 429 rate_limited (paylaşımlı sayaç)",
+      async () => {
+        const results = await Promise.all(
+          Array.from({ length: 35 }, () =>
+            fetchWithTimeout(`${base}/api/connect/tickets/UNV-1000042/attachments?scope=codes&codes=ZZZ-ANY`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.CONNECT_API_KEY },
+              body: JSON.stringify({}), // missing_param'a düşer ama rate-limit ÖNCE kontrol edilir
+            }),
+          ),
+        );
+        const statuses = results.map((r) => r.status);
+        assert.ok(statuses.includes(429), `35 istekten hiçbiri 429 dönmedi — rate-limit tetiklenmedi (statuses: ${statuses.join(',')})`);
+      },
+    );
   } finally {
     if (originalKey === undefined) delete process.env.CONNECT_API_KEY;
     else process.env.CONNECT_API_KEY = originalKey;
@@ -871,12 +1307,22 @@ async function main() {
     console.error('SMOKE TEST BAŞARISIZ — yukarıdaki FAIL satırlarına bakın.');
   } else {
     console.log(
-      'SMOKE TEST PASS (auth + fail-closed yollar çoğunlukla DB\'siz; birkaç test bu ortamda erişilebilir gerçek DB\'ye SALT-OKUMA timeout\'lu gider — bkz. 3)/5)/6) bölümleri; PROD\'A HİÇBİR Case INSERT EDİLMEDİ — createConnectCase yalnız caseRepository.create STUB\'lanmış wiring testinde çağrıldı).',
+      'SMOKE TEST PASS (auth + fail-closed yollar çoğunlukla DB\'siz; birkaç test bu ortamda erişilebilir gerçek DB\'ye SALT-OKUMA timeout\'lu gider — bkz. 3)/5)/6)/7) bölümleri; PROD\'A HİÇBİR Case/CaseAttachment INSERT EDİLMEDİ, DİSKE YAZILMADI — createConnectCase/ingestExternalAttachment yalnız STUB\'lanmış wiring testlerinde çağrıldı).',
     );
   }
 }
 
-main().catch((err) => {
-  console.error('FATAL:', err);
-  process.exitCode = 1;
-});
+main()
+  .catch((err) => {
+    console.error('FATAL:', err);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    // Prisma bağlantı havuzunu HER KOŞULDA (başarı/başarısızlık) hemen
+    // serbest bırak — bu script arka arkaya birçok kez çalıştırılabiliyor
+    // (iteratif geliştirme); disconnect etmeden process.exit'e güvenmek
+    // paylaşımlı bir DB'de (düşük connection_limit) havuz tükenmesine yol
+    // açabilir ("Timed out fetching a new connection from the connection
+    // pool" — _n4bmigrate.mjs de aynı desenle (finally + $disconnect) bitiyor).
+    await prisma.$disconnect();
+  });

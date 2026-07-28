@@ -52,9 +52,18 @@ if (corsOrigin) {
 // Faz 4 — dosya upload endpoint'i raw body bekler; global json parser
 // .json dosya yüklemelerini (Content-Type: application/json) yutmasın diye
 // bu path atlanır (route kendi express.raw parser'ını kullanır).
+//
+// Varuna↔Connect attachment ingest (POST /api/connect/tickets/:id/attachments)
+// — base64 gömülü dosya(lar) taşıyan bir JSON body; global 2mb limiti
+// 10MB'lık dosya cap'iyle (base64 ~%33 şişme + birden fazla dosya) uyumsuz.
+// Bu path de atlanır — route kendi (daha büyük limitli) express.json
+// parser'ını kullanır (bkz. server/routes/connectApi.js).
 const jsonParser = express.json({ limit: '2mb' });
 app.use((req, res, next) => {
   if (req.method === 'PUT' && /^\/api\/cases\/[^/]+\/files\/upload$/.test(req.path)) {
+    return next();
+  }
+  if (req.method === 'POST' && /^\/api\/connect\/tickets\/[^/]+\/attachments$/.test(req.path)) {
     return next();
   }
   return jsonParser(req, res, next);
