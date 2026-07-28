@@ -218,6 +218,13 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
   const [loading, setLoading] = useState(false);
   const [customerContext, setCustomerContext] = useState<CaseCustomerContext | null>(null);
   const [activeId, setActiveId] = useState(caseId);
+  // DetailTab'daki handleCommitDescription gibi async commit'lerin, yanıt
+  // döndüğünde hâlâ AKTİF vakaya mi ait olduğunu kontrol edebilmesi için —
+  // state değil ref: async closure'lar await sonrası bu ref'i okuyarak
+  // navigasyon sırasında değişmiş olabilecek en güncel activeId'yi görür
+  // (kendi closure'larındaki eski activeId değil).
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
 
   // Breadcrumb stack — geçmiş vaka navigasyonu için (max 3 level)
   // Eski item'lar burada birikir; ana breadcrumb item'ı = activeId
@@ -237,7 +244,18 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
     if (!item) return;
     if (appliedForCaseIdRef.current === item.id) return;
     appliedForCaseIdRef.current = item.id;
-    setTab(item.origin === 'E-posta' ? 'communication' : 'detail');
+
+    // Devredilmiş vakada Devir Notu paneli Detay sekmesinde, Açıklama'nın
+    // hemen altında gösteriliyor — devri alan ekip bunu vaka açılır açılmaz
+    // görsün diye, mail kökenli olsun olmasın varsayılan sekme Detay olur.
+    const initialTab: TabKey =
+      (item.transferCount ?? 0) > 0
+        ? 'detail'
+        : item.origin === 'E-posta'
+          ? 'communication'
+          : 'detail';
+
+    setTab(initialTab);
   }, [item]);
   const [previousCases, setPreviousCases] = useState<Case[]>([]);
   const [callActive, setCallActive] = useState(false);
@@ -1424,6 +1442,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
                 onTransitionApplied={(updated) => setItem(updated)}
                 kbEnabled={kbEnabled}
                 onCaseUpdated={(updated) => setItem(updated)}
+                activeIdRef={activeIdRef}
                 wideViewReadOnly={wideViewReadOnly}
               />
             )}
@@ -3593,6 +3612,7 @@ function DetailTab({
   onTransitionApplied,
   kbEnabled,
   onCaseUpdated,
+  activeIdRef,
   wideViewReadOnly,
 }: {
   item: Case;
@@ -3623,6 +3643,9 @@ function DetailTab({
   kbEnabled: boolean | null;
   /** Akıllı Tanımlar kaydı sonrası güncel Case'i üst state'e yaz. */
   onCaseUpdated: (updated: Case) => void;
+  /** Üstteki en güncel activeId — async commit yanıtlarının hâlâ aktif
+   *  vakaya ait olup olmadığını kontrol etmek için (bkz. handleCommitDescription). */
+  activeIdRef: { current: string };
   /** "Tümü" (wide, dar kapsam kanıtlanmamış) görünümde true — checklist,
    *  DevOps bağlantısı, dosya ekleme gibi mutasyonlar devre dışı bırakılır. */
   wideViewReadOnly: boolean;
@@ -3636,6 +3659,27 @@ function DetailTab({
   const canWriteCase =
     !!user && ['Agent', 'Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) &&
     !wideViewReadOnly;
+
+  // Açıklama alanı — diğer InlineEdit alanlarının aksine taslağa yazıp üstteki
+  // toplu "Kaydet"i beklemez; ✓'a basınca DOĞRUDAN backend'e kaydedilir.
+  // Kasıtlı istisna (kullanıcı talebi) — diğer alanlar mevcut taslak+toplu
+  // Kaydet akışında kalmaya devam ediyor.
+  async function handleCommitDescription(val: unknown) {
+    const caseIdAtCommit = item.id;
+    const updated = await caseService.update(caseIdAtCommit, { description: (val as string) ?? '' });
+    // updated undefined ise: apiFetch zaten hata toast'unu gösterdi — edit
+    // modunda kal, kullanıcı yazdığını kaybetmesin (handleSaveDrafts'taki
+    // aynı davranış).
+    if (!updated) return;
+    // Await sırasında breadcrumb/önceki-vaka ile başka bir vakaya geçilmiş
+    // olabilir (activeId değişir). Bu durumda yanıt artık ESKİ vakaya ait —
+    // üst state'e (setItem) uygulanırsa yeni açılan vakanın üzerine yazar.
+    // Kayıt backend'de zaten kalıcı oldu; sadece burada UYGULANMIYOR — vaka
+    // tekrar açıldığında sunucudan güncel haliyle gelecek.
+    if (activeIdRef.current !== caseIdAtCommit) return;
+    onCaseUpdated(updated);
+    onCancelEdit();
+  }
 
   // Kategori cascade — taslakta seçili kategoriye göre alt-kategori opsiyonları
   const activeCategory = (drafts.category ?? item.category) as string;
@@ -3738,7 +3782,7 @@ function DetailTab({
                 editing={editingField === 'description'}
                 isDraft={drafts.description !== undefined}
                 onStart={() => onStartEdit('description')}
-                onCommit={(val) => onCommitDraft('description', val)}
+                onCommit={(val) => void handleCommitDescription(val)}
                 onCancel={onCancelEdit}
                 disabled={!canEditField('description') || !canReadField('description') || isMaskedField('description')}
                 renderDisplay={(val) => displayValue('description', <ExpandableText text={String(val ?? '—')} className="whitespace-pre-wrap text-sm text-slate-700" />)}
@@ -4844,6 +4888,9 @@ function KpiSummaryStrip({ item, caseId }: { item: Case; caseId: string }) {
   if (item.resolvedAt) {
     parts.push({ key: 'resolved', node: <>Çözüm {formatDateTime(item.resolvedAt)}</> });
   }
+  if (item.assignedPersonName) {
+    parts.push({ key: 'assignedPerson', node: <>Atanan {item.assignedPersonName}</> });
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-200 bg-white px-4 py-1.5 text-xs text-slate-500 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted">
@@ -5008,7 +5055,10 @@ function InlineEdit({
           value={String(draft ?? '')}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={(e) => {
-            // Click outside iptal — eğer relatedTarget Kaydet/Voice butonuna gitmiyorsa
+            // Dışarı tıklama = iptal (edit modundan çık, draft atılır).
+            // Kaydetmenin TEK yolu ✓ butonu/Enter — relatedTarget o buton
+            // ise zaten kendi onMouseDown'ında commit ediyor ve blur bile
+            // tetiklenmiyor (preventDefault); burası yalnız güvenlik ağı.
             const next = e.relatedTarget as HTMLElement | null;
             if (next?.dataset?.role === 'commit-draft' || next?.dataset?.role === 'voice-input') {
               onCommit(draft);
@@ -5097,6 +5147,8 @@ function InlineEdit({
         value={String(draft ?? '')}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={(e) => {
+          // Dışarı tıklama = iptal (edit modundan çık, draft atılır).
+          // Kaydetmenin TEK yolu ✓ butonu/Enter.
           const next = e.relatedTarget as HTMLElement | null;
           if (next?.dataset?.role === 'commit-draft') {
             onCommit(draft);

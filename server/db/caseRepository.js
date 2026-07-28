@@ -1,6 +1,6 @@
 import { prisma } from './client.js';
 import { fromDb, toDb, toDbFilters, M_REQUEST } from './enumMap.js';
-import { createUploadUrl, createDownloadUrl, removeObject, verifyStorageToken } from './storage.js';
+import { createUploadUrl, createDownloadUrl, removeObject, verifyStorageToken, storageApi } from './storage.js';
 import { isAcceptedUpload } from '../lib/uploadWhitelist.js';
 import { checkCloseAllowed as checkApprovalCloseAllowed } from './approvalRepository.js';
 import { emitEvent as emitNotificationEvent } from './notificationRepository.js';
@@ -1319,6 +1319,35 @@ const TAGGING_FIELD_DEFS = [
   { prefix: 'closing', tag: 'ResolutionType', customField: 'resolutionType', taxonomyType: 'resolutionType' },
   { prefix: 'closing', tag: 'PermanentPrevention', customField: 'permanentPrevention', taxonomyType: 'permanentPrevention' },
 ];
+
+// Vaka başına maksimum ek sayısı — kanal (browser upload / Connect ingest)
+// FARK ETMEKSİZİN geçerli bir iş kuralı. requestUpload (browser, aşağıda)
+// VE ingestExternalAttachment (Connect, server-to-server) AYNI sabiti
+// paylaşır — tek kaynak (bkz. server/lib/uploadWhitelist.js docblock'undaki
+// CASE_FILE_MAX_COUNT referansı).
+const CASE_FILE_MAX_COUNT = 20;
+
+// Connect ingest'e özgü, browser flow'un 25MB'lık genel FILE_MAX_SIZE'ından
+// (requestUpload içinde) KASITLI olarak daha sıkı — JSON+base64 taşımanın
+// getirdiği ek yük payı (görev kararı, 10MB). TEK KAYNAK — export edilir;
+// server/routes/connectApi.js kendi (route-seviyesi, DB'ye gitmeden erken
+// ret) kontrolünde AYNI değeri reuse eder (audit nit: iki ayrı sabit aynı
+// değeri iki isimle tutmuyordu artık — defense-in-depth İKİ kontrol noktası
+// (route + repo) KALIR, yalnız değer tek kaynaktan gelir).
+export const CONNECT_ATTACHMENT_MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+// connectResolver.js::isCodeAuthorized ile AYNI mantık (trim + case-
+// insensitive tam eşleşme). BURADA küçük bir KOPYA olarak tutulur çünkü
+// connectResolver.js zaten BU dosyadan (caseRepository) import ediyor —
+// ters yönde bir import (caseRepository → connectResolver) DÖNGÜSEL olurdu.
+// Değişirse İKİ YERİ DE güncelle — küçük, nadiren değişecek saf bir fonksiyon.
+function isProjectCodeAuthorized(projectCode, authorizedCodes) {
+  if (typeof projectCode !== 'string') return false;
+  const normalized = projectCode.trim().toLowerCase();
+  if (!normalized) return false;
+  if (!Array.isArray(authorizedCodes)) return false;
+  return authorizedCodes.some((c) => typeof c === 'string' && c.trim().toLowerCase() === normalized);
+}
 
 export const caseRepository = {
   /**
@@ -3937,15 +3966,14 @@ export const caseRepository = {
     }
     if (!(await assertCaseInScope(id, allowedCompanyIds))) return null;
     const FILE_MAX_SIZE = 25 * 1024 * 1024;
-    const FILE_MAX_COUNT = 20;
 
     const c = await prisma.case.findUnique({
       where: { id },
       include: { attachments: true },
     });
     if (!c) return null;
-    if (c.attachments.length >= FILE_MAX_COUNT) {
-      return { error: `Bu vakada en fazla ${FILE_MAX_COUNT} dosya olabilir.` };
+    if (c.attachments.length >= CASE_FILE_MAX_COUNT) {
+      return { error: `Bu vakada en fazla ${CASE_FILE_MAX_COUNT} dosya olabilir.` };
     }
     if (input.fileSize > FILE_MAX_SIZE) {
       return { error: `Dosya boyutu üst sınırı ${Math.round(FILE_MAX_SIZE / (1024 * 1024))} MB.` };
@@ -4036,6 +4064,134 @@ export const caseRepository = {
       include: CASE_INCLUDE,
     });
     return { caseUpdated: await shapeWithProjectAvailability(caseUpdated), file };
+  },
+
+  /**
+   * Varuna↔Connect entegrasyonu — server-to-server dosya ekleme (POST
+   * /api/connect/tickets/:id/attachments, server/routes/connectApi.js).
+   *
+   * requestUpload/finalizeUpload'un İKİ-ADIMLI, tarayıcı-actor'a bağlı
+   * (JWT userId token binding, signed PUT URL) akışını KULLANMAZ — Connect
+   * zaten dosya bytes'ını (base64 decode edilmiş) TEK istekte taşıyor,
+   * signed-URL indirection'a gerek yok. Bunun yerine storage.js'in yazma
+   * primitifi (storageApi.saveObject — bkz. dosya başı yorumu, mutable
+   * yüzey ÖZELLİKLE test edilebilirlik için) + AYNI path şeması
+   * (storageApi.buildPath) doğrudan kullanılır, sonra CaseAttachment satırı +
+   * history log finalizeUpload ile SİMETRİK şekilde yazılır.
+   *
+   * İş kuralları BYPASS EDİLMEZ: CASE_FILE_MAX_COUNT (paylaşımlı sabit,
+   * requestUpload ile AYNI) + isAcceptedUpload (whitelist, AYNI fonksiyon,
+   * server/routes/connectApi.js zaten bir kez kontrol etmiş olsa da burada
+   * defense-in-depth olarak TEKRAR — finalizeUpload'un kendi requestUpload
+   * sonrası tekrar kontrol etme deseniyle AYNI) + CONNECT_ATTACHMENT_MAX_SIZE
+   * (10MB, görev kararı — genel 25MB'lık FILE_MAX_SIZE'tan KASITLI daha sıkı,
+   * JSON+base64 taşımanın getirdiği ek yük payı).
+   *
+   * NOT (bilinen sınır): caller (route) birden fazla dosyayı SIRAYLA bu
+   * metodu çağırarak ekler; bir dosya validasyonu ortada reddederse ÖNCEKİ
+   * başarıyla eklenmiş dosyalar GERİ ALINMAZ (transaction yok — disk+DB
+   * atomik değil, finalizeUpload ile aynı sınırlama). Route bunu 4xx ile
+   * durdurur; Connect eksik kalan dosyaları ayrıca tekrar gönderebilir.
+   *
+   * @param {string} caseId - Case.id (cuid, caseNumber DEĞİL — çağıran
+   *   connectResolver.js::resolveAuthorizedCaseId zaten caseNumber→id +
+   *   IDOR çözümlemesini yapmış olmalı).
+   * @param {object} params
+   * @param {string} params.fileName
+   * @param {string} params.mimeType
+   * @param {Buffer} params.buffer - decode edilmiş dosya bytes'ı (route
+   *   zaten base64 decode + boyut/tip ön-kontrolünü yapmış olmalı; burası
+   *   defense-in-depth katmanıdır, tek doğrulama noktası DEĞİL).
+   * @param {string} params.uploadedByLabel - denormalized "kim yükledi" adı
+   *   (Connect için CONNECT_ACTOR_DISPLAY_NAME — gerçek User YOK,
+   *   uploadedByUserId NULL kalır, User FK ihlali olmaz).
+   * @param {string[]} [params.authorizedCodes] - OPSİYONEL — verilirse
+   *   Case'in accountProject.code'u bu sette olmalı (finalizeUpload'un
+   *   assertCaseInScope ile yaptığı repo-katmanı scope doğrulamasıyla AYNI
+   *   simetri, audit nit). Verilmezse (undefined) bu kontrol ATLANIR —
+   *   geriye dönük uyumlu, çağıran zaten kendi IDOR guard'ını (ör.
+   *   resolveAuthorizedCaseId) geçmiş olabilir.
+   * @returns {Promise<object|null>} oluşturulan CaseAttachment satırı; Case
+   *   bulunamazsa VEYA authorizedCodes verilmiş ve yetkisizse null (route
+   *   404'e çevirir — ama normalde route zaten çağırmadan önce case
+   *   varlığını/yetkisini doğrulamış olur, burası defense-in-depth).
+   * @throws {CaseValidationError} dosya sayısı/tip/boyut ihlali (400/413).
+   */
+  async ingestExternalAttachment(caseId, { fileName, mimeType, buffer, uploadedByLabel, authorizedCodes }) {
+    const c = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: {
+        id: true,
+        companyId: true,
+        attachments: { select: { id: true } },
+        accountProject: { select: { code: true } },
+      },
+    });
+    if (!c) return null;
+
+    if (authorizedCodes !== undefined && !isProjectCodeAuthorized(c.accountProject?.code ?? null, authorizedCodes)) {
+      // IDOR kapatma (repo-katmanı, defense-in-depth) — route zaten
+      // resolveAuthorizedCaseId ile aynı kontrolü yapmış olmalı; bu yalnız
+      // simetri/ikinci savunma katmanı.
+      return null;
+    }
+
+    if (c.attachments.length >= CASE_FILE_MAX_COUNT) {
+      throw new CaseValidationError(`Bu vakada en fazla ${CASE_FILE_MAX_COUNT} dosya olabilir.`, {
+        status: 400,
+        code: 'case_file_limit_reached',
+      });
+    }
+    if (!isAcceptedUpload(mimeType, fileName)) {
+      throw new CaseValidationError('Bu dosya türü kabul edilmiyor.', {
+        status: 400,
+        code: 'unsupported_file_type',
+      });
+    }
+    if (buffer.length > CONNECT_ATTACHMENT_MAX_FILE_BYTES) {
+      throw new CaseValidationError(
+        `Dosya boyutu üst sınırı ${Math.round(CONNECT_ATTACHMENT_MAX_FILE_BYTES / (1024 * 1024))} MB.`,
+        { status: 413, code: 'file_too_large' },
+      );
+    }
+
+    const attachmentId = `cmsa_${crypto.randomBytes(12).toString('hex')}`;
+    const relPath = storageApi.buildPath(caseId, attachmentId, fileName);
+    await storageApi.saveObject(relPath, buffer);
+
+    const file = await prisma.caseAttachment.create({
+      data: {
+        id: attachmentId,
+        caseId,
+        companyId: c.companyId,
+        fileName,
+        fileSize: buffer.length,
+        mimeType,
+        fileUrl: relPath,
+        uploadedBy: uploadedByLabel,
+        uploadedByUserId: null,
+      },
+    });
+
+    await prisma.case.update({
+      where: { id: caseId },
+      data: {
+        updatedAt: new Date(),
+        history: {
+          create: {
+            companyId: c.companyId,
+            action: 'Dosya yüklendi (Connect)',
+            actionType: 'FileUploaded',
+            fieldName: 'files',
+            toValue: file.fileName,
+            actor: uploadedByLabel,
+            actorUserId: null,
+          },
+        },
+      },
+    });
+
+    return file;
   },
 
   /** Download için kısa ömürlü token'lı URL üret (local disk; Faz 4). */
