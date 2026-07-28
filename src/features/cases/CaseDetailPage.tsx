@@ -218,6 +218,13 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
   const [loading, setLoading] = useState(false);
   const [customerContext, setCustomerContext] = useState<CaseCustomerContext | null>(null);
   const [activeId, setActiveId] = useState(caseId);
+  // DetailTab'daki handleCommitDescription gibi async commit'lerin, yanıt
+  // döndüğünde hâlâ AKTİF vakaya mi ait olduğunu kontrol edebilmesi için —
+  // state değil ref: async closure'lar await sonrası bu ref'i okuyarak
+  // navigasyon sırasında değişmiş olabilecek en güncel activeId'yi görür
+  // (kendi closure'larındaki eski activeId değil).
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
 
   // Breadcrumb stack — geçmiş vaka navigasyonu için (max 3 level)
   // Eski item'lar burada birikir; ana breadcrumb item'ı = activeId
@@ -1435,6 +1442,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, 
                 onTransitionApplied={(updated) => setItem(updated)}
                 kbEnabled={kbEnabled}
                 onCaseUpdated={(updated) => setItem(updated)}
+                activeIdRef={activeIdRef}
                 wideViewReadOnly={wideViewReadOnly}
               />
             )}
@@ -3604,6 +3612,7 @@ function DetailTab({
   onTransitionApplied,
   kbEnabled,
   onCaseUpdated,
+  activeIdRef,
   wideViewReadOnly,
 }: {
   item: Case;
@@ -3634,6 +3643,9 @@ function DetailTab({
   kbEnabled: boolean | null;
   /** Akıllı Tanımlar kaydı sonrası güncel Case'i üst state'e yaz. */
   onCaseUpdated: (updated: Case) => void;
+  /** Üstteki en güncel activeId — async commit yanıtlarının hâlâ aktif
+   *  vakaya ait olup olmadığını kontrol etmek için (bkz. handleCommitDescription). */
+  activeIdRef: { current: string };
   /** "Tümü" (wide, dar kapsam kanıtlanmamış) görünümde true — checklist,
    *  DevOps bağlantısı, dosya ekleme gibi mutasyonlar devre dışı bırakılır. */
   wideViewReadOnly: boolean;
@@ -3653,14 +3665,20 @@ function DetailTab({
   // Kasıtlı istisna (kullanıcı talebi) — diğer alanlar mevcut taslak+toplu
   // Kaydet akışında kalmaya devam ediyor.
   async function handleCommitDescription(val: unknown) {
-    const updated = await caseService.update(item.id, { description: (val as string) ?? '' });
+    const caseIdAtCommit = item.id;
+    const updated = await caseService.update(caseIdAtCommit, { description: (val as string) ?? '' });
     // updated undefined ise: apiFetch zaten hata toast'unu gösterdi — edit
     // modunda kal, kullanıcı yazdığını kaybetmesin (handleSaveDrafts'taki
     // aynı davranış).
-    if (updated) {
-      onCaseUpdated(updated);
-      onCancelEdit();
-    }
+    if (!updated) return;
+    // Await sırasında breadcrumb/önceki-vaka ile başka bir vakaya geçilmiş
+    // olabilir (activeId değişir). Bu durumda yanıt artık ESKİ vakaya ait —
+    // üst state'e (setItem) uygulanırsa yeni açılan vakanın üzerine yazar.
+    // Kayıt backend'de zaten kalıcı oldu; sadece burada UYGULANMIYOR — vaka
+    // tekrar açıldığında sunucudan güncel haliyle gelecek.
+    if (activeIdRef.current !== caseIdAtCommit) return;
+    onCaseUpdated(updated);
+    onCancelEdit();
   }
 
   // Kategori cascade — taslakta seçili kategoriye göre alt-kategori opsiyonları
