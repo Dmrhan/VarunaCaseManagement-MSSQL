@@ -7,6 +7,7 @@ import adminRouter from './routes/admin.js';
 import analyticsRouter from './routes/analytics.js';
 import authRouter from './routes/auth.js';
 import cronRouter from './routes/cron.js';
+import connectApiRouter from './routes/connectApi.js';
 import myRouter from './routes/my.js';
 import accountsRouter from './routes/accounts.js';
 import externalKbRouter from './routes/externalKb.js';
@@ -51,9 +52,18 @@ if (corsOrigin) {
 // Faz 4 — dosya upload endpoint'i raw body bekler; global json parser
 // .json dosya yüklemelerini (Content-Type: application/json) yutmasın diye
 // bu path atlanır (route kendi express.raw parser'ını kullanır).
+//
+// Varuna↔Connect attachment ingest (POST /api/connect/tickets/:id/attachments)
+// — base64 gömülü dosya(lar) taşıyan bir JSON body; global 2mb limiti
+// 10MB'lık dosya cap'iyle (base64 ~%33 şişme + birden fazla dosya) uyumsuz.
+// Bu path de atlanır — route kendi (daha büyük limitli) express.json
+// parser'ını kullanır (bkz. server/routes/connectApi.js).
 const jsonParser = express.json({ limit: '2mb' });
 app.use((req, res, next) => {
   if (req.method === 'PUT' && /^\/api\/cases\/[^/]+\/files\/upload$/.test(req.path)) {
+    return next();
+  }
+  if (req.method === 'POST' && /^\/api\/connect\/tickets\/[^/]+\/attachments$/.test(req.path)) {
     return next();
   }
   return jsonParser(req, res, next);
@@ -96,6 +106,10 @@ app.use('/api/admin/imports', importsRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/cron', cronRouter);
+// Varuna↔Connect entegrasyonu — ilk dilim (GET-liste). Kendi api-key
+// guard'ı var (CONNECT_API_KEY, cron.js ile aynı stil); global auth
+// zincirine girmez (bkz. server/routes/connectApi.js).
+app.use('/api/connect', connectApiRouter);
 app.use('/api/my', myRouter);
 app.use('/api/accounts', accountsRouter);
 app.use('/api/external-kb', externalKbRouter);
