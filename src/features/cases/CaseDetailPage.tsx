@@ -4870,6 +4870,9 @@ function KpiSummaryStrip({ item, caseId }: { item: Case; caseId: string }) {
   if (item.resolvedAt) {
     parts.push({ key: 'resolved', node: <>Çözüm {formatDateTime(item.resolvedAt)}</> });
   }
+  if (item.assignedPersonName) {
+    parts.push({ key: 'assignedPerson', node: <>Atanan {item.assignedPersonName}</> });
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-200 bg-white px-4 py-1.5 text-xs text-slate-500 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted">
