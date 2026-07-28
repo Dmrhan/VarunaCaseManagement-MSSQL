@@ -39,6 +39,18 @@ const SOURCE_BADGE: Record<NonNullable<Suggestion['source']>, { label: string; c
   team: { label: 'ekip', cls: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' },
 };
 
+// Faz 2 sürükle-bırak — chip'in kaynaktan SİLİNMESİ, dropEffect'e değil bir
+// ContactPicker instance'ının AÇIKÇA kabul ettiğine bağlı. dropEffect tek
+// başına güvenilmez: chip'in text/plain payload'ı composer'daki BAŞKA
+// droppable'lar (örn. mail gövdesi RichTextEditor) tarafından da kabul
+// edilebiliyor — o durumda hiçbir ContactPicker'ın onDrop'u çalışmadığı
+// hâlde dropEffect yine 'move' görünüp chip'i kaynaktan siliyordu. Bunun
+// yerine: dragStart'ta üretilen id, hedefin onDrop'unda (yalnız gerçekten
+// yeni bir kayıt eklendiğinde) bu Set'e eklenir; kaynağın onDragEnd'i
+// SADECE bu id burada varsa siler. Sayfadaki tüm ContactPicker instance'ları
+// arasında modül seviyesinde paylaşılır.
+const acceptedDragIds = new Set<string>();
+
 interface Props {
   label: string;
   values: ContactPickerValue[];
@@ -75,20 +87,13 @@ export function ContactPicker({ label, values, onChange, suggestions = [], disab
   const [openSug, setOpenSug] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Faz 2 — sürükle-bırak. Bu instance'a özgü kaynak kimliği: bir chip
-  // AYNI ContactPicker'a geri bırakılırsa ("self-drop") kaynak onDragEnd'i
-  // chip'i silmemeli — dropEffect tek başına self/cross-instance ayrımını
-  // yapamaz (her iki durumda da onDragOver 'move' set eder). Bu yüzden
-  // dragStart'ta yazılan source id, drop anında karşılaştırılıyor.
-  const sourceIdRef = useRef<string | undefined>(undefined);
-  if (!sourceIdRef.current) {
-    sourceIdRef.current = `cp_${Math.random().toString(36).slice(2)}`;
-  }
-  // Self-drop tespit edilince set edilir; AYNI instance'ın onDragEnd'i
-  // bunu tüketip (false'a çevirip) chip'i silmekten vazgeçer. Drop her
-  // zaman dragEnd'den ÖNCE fırlar (HTML5 spec garantisi), o yüzden bu
-  // ref güvenilir bir senkron sinyal.
-  const justHandledSelfDropRef = useRef(false);
+  // Sürüklenmekte olan chip'in bu drag işlemine özgü kimliği. dragStart'ta
+  // üretilip HEM dataTransfer'a (hedefin drop'ta okuyup kabul id'si olarak
+  // kullanması için) HEM bu ref'e yazılır — kaynağın kendi onDragEnd'i bu
+  // id'yi dataTransfer'dan TEKRAR OKUMAZ (drop sonrası dataTransfer bazı
+  // tarayıcılarda "protected mode"a geçtiği için getData() dragend'de
+  // güvenilir değil); zaten ürettiği değeri ref'ten kullanır.
+  const currentDragIdRef = useRef<string | null>(null);
 
   // Gmail-benzeri chip seçimi — address bazlı (index DEĞİL): bir chip
   // silinip aradakiler kayınca index'ler kayar, address bazlı seçim bu
@@ -219,9 +224,6 @@ export function ContactPicker({ label, values, onChange, suggestions = [], disab
           e.preventDefault();
           setSelectedAddresses(new Set());
 
-          const sourceId = e.dataTransfer.getData('application/x-varuna-contact-source');
-          const isSelfDrop = !!sourceId && sourceId === sourceIdRef.current;
-
           let parsed: ContactPickerValue | null = null;
           const contactJson = e.dataTransfer.getData('application/x-varuna-contact');
           if (contactJson) {
@@ -237,29 +239,20 @@ export function ContactPicker({ label, values, onChange, suggestions = [], disab
           if (!parsed) {
             parsed = parseEntry(e.dataTransfer.getData('text/plain'));
           }
-          if (!parsed) {
-            // Geçersiz veri — kaynak (varsa) chip'i silmesin diye 'none' işaretle.
-            e.dataTransfer.dropEffect = 'none';
-            return;
-          }
+          if (!parsed) return;
 
-          if (isSelfDrop) {
-            // Aynı instance'a bırakıldı — chip zaten values içinde, hiçbir
-            // şey eklenmez. Kaynağın (=bu instance'ın) onDragEnd'i bu flag'i
-            // görüp chip'i SİLMEYECEK.
-            justHandledSelfDropRef.current = true;
-            return;
-          }
-
+          // Hedefte zaten var (self-drop dahil — self-drop'ta chip zaten bu
+          // values içinde durur, hiç kaldırılmamıştır) — eklenmeyecek VE
+          // kaynağa kabul onayı verilmeyecek, ki chip kaybolmasın.
           const duplicate = values.some((v) => v.address.toLowerCase() === (parsed as ContactPickerValue).address.toLowerCase());
-          if (duplicate) {
-            // Hedefte zaten var (dedupe) — eklenmeyecek. Kaynak da chip'i
-            // SİLMESİN diye dropEffect'i 'none' yap (aksi halde chip hiçbir
-            // yerde kalmadan kaybolurdu).
-            e.dataTransfer.dropEffect = 'none';
-            return;
-          }
+          if (duplicate) return;
+
           onChange([...values, parsed]);
+          // Kaynağa açık "kabul edildi" onayı — SADECE gerçekten yeni bir
+          // kayıt eklendiğinde işaretlenir; kaynağın onDragEnd'i chip'i
+          // ancak bu onayı görürse siler.
+          const dragId = e.dataTransfer.getData('application/x-varuna-drag-id');
+          if (dragId) acceptedDragIds.add(dragId);
         }}
       >
         {values.map((v, i) => {
@@ -275,21 +268,24 @@ export function ContactPicker({ label, values, onChange, suggestions = [], disab
               if (disabled) return;
               e.stopPropagation();
               e.dataTransfer.effectAllowed = 'move';
+              const dragId = `drag_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+              currentDragIdRef.current = dragId;
               e.dataTransfer.setData('text/plain', v.address);
               e.dataTransfer.setData('application/x-varuna-contact', JSON.stringify(v));
-              e.dataTransfer.setData('application/x-varuna-contact-source', sourceIdRef.current ?? '');
+              e.dataTransfer.setData('application/x-varuna-drag-id', dragId);
             }}
-            onDragEnd={(e) => {
+            onDragEnd={() => {
               if (disabled) return;
-              if (justHandledSelfDropRef.current) {
-                // Self-drop — bu instance'ın onDrop'u zaten işaretledi, silme.
-                justHandledSelfDropRef.current = false;
-                return;
-              }
-              // Cross-instance başarılı taşıma → hedef kabul etti (dropEffect
-              // 'move'). Reddedildiyse (dedupe/parse hatası) hedef 'none' set
-              // etmiştir — o zaman kaynakta da kalır, chip kaybolmaz.
-              if (e.dataTransfer.dropEffect === 'move') {
+              const dragId = currentDragIdRef.current;
+              currentDragIdRef.current = null;
+              if (!dragId) return;
+              // Chip yalnızca gerçek bir ContactPicker instance'ı bu id'yi
+              // açıkça kabul ettiyse (yeni kayıt olarak eklediyse) kaynaktan
+              // silinir. Self-drop, dedupe veya ContactPicker OLMAYAN bir
+              // hedefe (örn. mail gövdesi) bırakılma durumunda id hiç
+              // eklenmemiş olur — chip kaynakta kalır.
+              if (acceptedDragIds.has(dragId)) {
+                acceptedDragIds.delete(dragId);
                 onChange(values.filter((_, idx) => idx !== i));
               }
             }}
