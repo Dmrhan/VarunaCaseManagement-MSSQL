@@ -54,6 +54,7 @@ import {
   CONNECT_TYPE_TO_REQUEST_TYPE,
   toConnectStatus,
   STATUS_CROSSWALK,
+  desensitizeTeamJargon,
 } from '../server/lib/connectMapper.js';
 import { M_STATUS, M_REQUEST } from '../server/db/enumMap.js';
 import {
@@ -61,6 +62,8 @@ import {
   findCasesByCodes,
   findCaseDetailByNumber,
   resolveAuthorizedCaseId,
+  resolveCreatorDisplayName,
+  resolveWaitReason,
   isCodeAuthorized,
   pickSingleProjectMatch,
   resolveSingleProjectByCode,
@@ -228,8 +231,24 @@ async function main() {
             { id: 'n1', authorName: 'Mehmet Agent', content: 'Kontrol ediyorum.', createdAt: new Date('2026-07-20T11:00:00.000Z') },
           ],
           history: [
-            { fromValue: 'Açık', toValue: 'İncelemede', at: new Date('2026-07-20T10:05:00.000Z'), actor: 'Mehmet Agent' },
-            { fromValue: 'İncelemede', toValue: 'Çözüldü', at: new Date('2026-07-21T11:30:00.000Z'), actor: 'Mehmet Agent' },
+            {
+              actionType: 'StatusChange',
+              action: 'Statü değişti',
+              fromValue: 'Açık',
+              toValue: 'İncelemede',
+              note: null,
+              at: new Date('2026-07-20T10:05:00.000Z'),
+              actor: 'Mehmet Agent',
+            },
+            {
+              actionType: 'StatusChange',
+              action: 'Statü değişti',
+              fromValue: 'İncelemede',
+              toValue: 'Çözüldü',
+              note: null,
+              at: new Date('2026-07-21T11:30:00.000Z'),
+              actor: 'Mehmet Agent',
+            },
           ],
           attachments: [
             {
@@ -264,6 +283,10 @@ async function main() {
         assert.equal(detail.history.length, 2);
         assert.equal(detail.history[0].fromStatus, 'Yeni Kayıt');
         assert.equal(detail.history[0].toStatus, 'Üzerinde Çalışılıyor');
+        assert.equal(detail.history[0].type, 'StatusChange');
+        assert.equal(detail.history[0].action, 'Statü değişti');
+        assert.equal(detail.history[0].from, 'Açık');
+        assert.equal(detail.history[0].to, 'İncelemede');
         assert.equal(detail.history[1].toStatus, 'Kapatıldı');
         assert.equal(detail.history[1].by, 'Mehmet Agent');
 
@@ -277,6 +300,155 @@ async function main() {
         if (originalJwtSecret === undefined) delete process.env.JWT_SECRET;
         else process.env.JWT_SECRET = originalJwtSecret;
       }
+    },
+  );
+
+  await check(
+    'mapCaseToConnectDetail — Transfer/CaseCreated aktiviteleri: ham from/to + note geçer, fromStatus/toStatus crosswalk\'a SOKULMAZ (gereksiz warn yok)',
+    () => {
+      const warnCalls = [];
+      const originalWarn = console.warn;
+      console.warn = (...args) => warnCalls.push(args.join(' '));
+      try {
+        const fakeRow = makeFakeDetailRow({
+          history: [
+            {
+              actionType: 'CaseCreated',
+              action: 'Vaka oluşturuldu',
+              fromValue: null,
+              toValue: null,
+              note: null,
+              at: new Date('2026-07-20T09:00:00.000Z'),
+              actor: 'Ayşe Yılmaz',
+            },
+            {
+              actionType: 'Transfer',
+              // Gerçek Varuna takım adları (bkz. caseRepository.js Team seed) —
+              // "Destek L1"/"Destek L2" DEĞİL, "Univera L1"/"Univera L2".
+              action: '↔ Vaka aktarıldı: Univera L1 → Univera L2',
+              fromValue: 'Univera L1',
+              toValue: 'Univera L2',
+              note: 'Gerekçe: Uzmanlık — konuyu size sunuyorum\n\nKişi: Yiğit Bayar → Damla Bülbül',
+              at: new Date('2026-07-20T10:00:00.000Z'),
+              actor: 'Mehmet Agent',
+            },
+          ],
+        });
+        const detail = mapCaseToConnectDetail(fakeRow);
+        assert.equal(detail.history.length, 2);
+
+        const created = detail.history[0];
+        assert.equal(created.type, 'CaseCreated');
+        assert.equal(created.action, 'Vaka oluşturuldu');
+        assert.equal(created.fromStatus, null, 'CaseCreated status-crosswalk\'a girmemeli');
+        assert.equal(created.toStatus, null);
+
+        const transfer = detail.history[1];
+        assert.equal(transfer.type, 'Transfer');
+        // Security veto (2026-07-29, HIGH) — iç ekip kodu (Univera L1/L2)
+        // müşteri-dostu etikete çevrilmiş dönmeli (bkz. desensitizeTeamJargon).
+        assert.equal(transfer.from, 'Çağrı Merkezi', 'Univera L1 → Çağrı Merkezi çevrilmedi');
+        assert.equal(transfer.to, 'Yazılım Destek', 'Univera L2 → Yazılım Destek çevrilmedi');
+        assert.equal(transfer.action, '↔ Vaka aktarıldı: Çağrı Merkezi → Yazılım Destek');
+        assert.equal(transfer.fromStatus, null, 'Transfer takım adı status-crosswalk\'a girmemeli');
+        assert.equal(transfer.toStatus, null);
+        // Kişi adları (kimden kime) AYNEN kalmalı — yalnız ekip kodu çevrilir.
+        assert.equal(transfer.note, 'Gerekçe: Uzmanlık — konuyu size sunuyorum\n\nKişi: Yiğit Bayar → Damla Bülbül');
+        assert.equal(transfer.by, 'Mehmet Agent');
+
+        assert.deepEqual(warnCalls, [], 'Transfer/CaseCreated takım adları status-crosswalk uyarısı TETİKLEMEMELİ');
+      } finally {
+        console.warn = originalWarn;
+      }
+    },
+  );
+
+  await check(
+    'desensitizeTeamJargon — Security veto (2026-07-29, HIGH): iç ekip/tier kodları (L1/L2) müşteri-dostu etikete çevrilir, kişi adları ETKİLENMEZ',
+    () => {
+      // Temel takım adları.
+      assert.equal(desensitizeTeamJargon('Univera L1'), 'Çağrı Merkezi');
+      assert.equal(desensitizeTeamJargon('Univera L2'), 'Yazılım Destek');
+      // Alt takımlar — uzun/özgül desen ÖNCE eşleşmeli (yarım/bozuk çeviri YOK).
+      assert.equal(desensitizeTeamJargon('Univera L2 Uzman Destek'), 'Yazılım Destek (Uzman)');
+      assert.equal(desensitizeTeamJargon('Univera L2 Yurtdışı'), 'Yazılım Destek (Yurtdışı)');
+      // Action cümlesi içinde geçtiğinde de doğru çevrilir.
+      assert.equal(
+        desensitizeTeamJargon('↔ Vaka aktarıldı: Univera L1 → Univera L2'),
+        '↔ Vaka aktarıldı: Çağrı Merkezi → Yazılım Destek',
+      );
+      // Smart Ticket devir notundaki "L1 Notu:" literal işaretleyicisi.
+      assert.equal(
+        desensitizeTeamJargon('L1 Notu:\ndanone tikveşli projesi...'),
+        'Çağrı Merkezi Notu:\ndanone tikveşli projesi...',
+      );
+      // AI'nin ürettiği serbest-metin özette (Smart Ticket composedSummary)
+      // geçen STANDALONE "L1" token'ı — tam-dize tabloda YOK, word-boundary
+      // regex ikinci geçişte yakalamalı.
+      assert.equal(
+        desensitizeTeamJargon('L1 çözüm adımı kaydı yok.'),
+        'Çağrı Merkezi çözüm adımı kaydı yok.',
+      );
+      // False-positive KORUMASI — "L1"/"L2" başka bir kelimenin İÇİNDE
+      // geçerse (word boundary yok) YAKALANMAMALI.
+      assert.equal(desensitizeTeamJargon('URL2 parametresi geçersiz'), 'URL2 parametresi geçersiz');
+      // Kişi adları (kimden kime) — jargon tablosunda YOK, ETKİLENMEMELİ.
+      assert.equal(
+        desensitizeTeamJargon('Kişi: Yiğit Bayar → Damla Bülbül'),
+        'Kişi: Yiğit Bayar → Damla Bülbül',
+      );
+      // Jargon içermeyen diğer gerçek takım adları (zaten müşteri-dostu) —
+      // ETKİLENMEMELİ.
+      assert.equal(desensitizeTeamJargon('Univera Operasyon Destek'), 'Univera Operasyon Destek');
+      assert.equal(desensitizeTeamJargon('Customer Success'), 'Customer Success');
+      // Defensive — null/undefined/non-string olduğu gibi döner (throw YOK).
+      assert.equal(desensitizeTeamJargon(null), null);
+      assert.equal(desensitizeTeamJargon(undefined), undefined);
+      assert.equal(desensitizeTeamJargon(''), '');
+    },
+  );
+
+  await check(
+    'resolveCreatorDisplayName — createdBy.fullName öncelikli, yoksa CaseCreated aktivitesinin actor\'ı, hiçbiri yoksa null',
+    () => {
+      assert.equal(
+        resolveCreatorDisplayName({ createdBy: { fullName: 'Ayşe Yılmaz' }, history: [] }),
+        'Ayşe Yılmaz',
+      );
+      assert.equal(
+        resolveCreatorDisplayName({
+          createdBy: null,
+          history: [{ actionType: 'CaseCreated', actor: 'Connect Entegrasyonu' }],
+        }),
+        'Connect Entegrasyonu',
+      );
+      assert.equal(resolveCreatorDisplayName({ createdBy: null, history: [] }), null);
+      assert.equal(resolveCreatorDisplayName({}), null);
+    },
+  );
+
+  await check(
+    'resolveWaitReason — yalnız ThirdPartyWaiting statüsünde dolu döner (stale thirdPartyNote başka statüde sızmaz)',
+    () => {
+      assert.deepEqual(
+        resolveWaitReason({ status: 'ThirdPartyWaiting', thirdPartyName: 'Lojistik A.Ş.', thirdPartyNote: 'Kargo takip bekleniyor.' }),
+        { waitReason: 'Kargo takip bekleniyor.', thirdPartyName: 'Lojistik A.Ş.' },
+      );
+      // Not girilmemiş (requiresNote=false tanım) — yalnız 3. parti adı.
+      assert.deepEqual(
+        resolveWaitReason({ status: 'ThirdPartyWaiting', thirdPartyName: 'Lojistik A.Ş.', thirdPartyNote: null }),
+        { waitReason: 'Lojistik A.Ş.', thirdPartyName: 'Lojistik A.Ş.' },
+      );
+      // Statüden çıkılmış — thirdPartyNote kalıcı (schema yorumu) ama STALE,
+      // gösterilmemeli.
+      assert.deepEqual(
+        resolveWaitReason({ status: 'Incelemede', thirdPartyName: null, thirdPartyNote: 'Eski bekleme nedeni.' }),
+        { waitReason: null, thirdPartyName: null },
+      );
+      assert.deepEqual(
+        resolveWaitReason({ status: 'Acik', thirdPartyName: null, thirdPartyNote: null }),
+        { waitReason: null, thirdPartyName: null },
+      );
     },
   );
 
@@ -297,6 +469,7 @@ async function main() {
         const fakeRow = makeFakeDetailRow({
           history: [
             {
+              actionType: 'StatusChange',
               // Küçük harf — M_STATUS anahtarları TAM "Açık" (case-sensitive
               // object key lookup) — "açık" hiçbir tabloda eşleşmez.
               fromValue: 'açık',
