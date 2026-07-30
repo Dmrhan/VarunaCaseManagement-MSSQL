@@ -184,6 +184,17 @@ const CASE_DETAIL_SELECT = {
   ...CASE_SELECT,
   resolutionNote: true,
   accountProject: { select: { code: true } },
+  // Oluşturan (creator) — User FK varsa canlı fullName (bkz. findCaseDetailByNumber
+  // creator çözümü); FK yoksa (eski satır/User silinmiş) history'deki
+  // CaseCreated aktivitesinin actor'ına düşülür.
+  createdBy: { select: { fullName: true } },
+  // 3. parti bekleme durumu/nedeni — yalnız status='ThirdPartyWaiting' iken
+  // ANLAMLI (bkz. findCaseDetailByNumber waitReason çözümü): thirdPartyNote
+  // statüden çıkılınca TEMİZLENMEZ (kalıcı/raporlanabilir alan, schema
+  // yorumu), bu yüzden gösterim status'a göre GATE'lenir — stale bir "bekleme
+  // nedeni" başka bir statüde sızdırılmaz.
+  thirdPartyName: true,
+  thirdPartyNote: true,
   // Yalnız MÜŞTERİYE-GÖRÜNÜR notlar (visibility='Customer') — iç/agent-only
   // notlar (default 'Internal') Connect'e ASLA gitmez. DB seviyesinde
   // filtrelenir (app-layer'a hiç yüklenmez — savunma derinliği).
@@ -193,14 +204,18 @@ const CASE_DETAIL_SELECT = {
     take: DETAIL_CHILD_CAP,
     select: { id: true, authorName: true, content: true, createdAt: true },
   },
-  // Yalnız durum geçişleri (actionType='StatusChange') — diğer CaseActivity
-  // türleri (atama/checklist/iç saha güncellemeleri vb.) iç operasyonel
-  // detaydır, Connect'e sızdırılmaz.
+  // Durum geçişleri + devir/atama + açılış (actionType IN StatusChange/
+  // Transfer/CaseCreated) — kullanıcı isteği (2026-07-29): devir notları
+  // müşteriye "talep geçmişi"nde görünsün. Diğer CaseActivity türleri
+  // (checklist/iç saha FieldUpdate'leri vb.) hâlâ iç operasyonel detaydır,
+  // Connect'e sızdırılmaz. `note` BİLİNÇLİ olarak seçilir — devir/bekletme
+  // notları müşteriye gösterilecek (CaseNote visibility='Customer' filtresi
+  // bu karardan AYRI, aynen kalır — bkz. dosya başı yorumu).
   history: {
-    where: { actionType: 'StatusChange' },
+    where: { actionType: { in: ['StatusChange', 'Transfer', 'CaseCreated'] } },
     orderBy: { at: 'desc' },
     take: DETAIL_CHILD_CAP,
-    select: { fromValue: true, toValue: true, at: true, actor: true },
+    select: { actionType: true, action: true, fromValue: true, toValue: true, note: true, at: true, actor: true },
   },
   attachments: {
     orderBy: { uploadedAt: 'desc' },
@@ -208,6 +223,50 @@ const CASE_DETAIL_SELECT = {
     select: { id: true, fileName: true, fileSize: true, mimeType: true, fileUrl: true, uploadedBy: true, uploadedAt: true },
   },
 };
+
+// Case.status ASCII — yalnız bu statüdeyken thirdPartyName/thirdPartyNote
+// "güncel bekleme nedeni" olarak gösterilir (bkz. CASE_DETAIL_SELECT yorumu).
+const THIRD_PARTY_WAIT_STATUS = 'ThirdPartyWaiting';
+
+/**
+ * Case detay satırından "oluşturan" görüntü adını çözer — saf fonksiyon,
+ * DB'siz test edilebilir. Öncelik: canlı User.fullName (createdBy FK) →
+ * yoksa history'deki CaseCreated aktivitesinin actor'ı (free-text, eski
+ * kayıtlarda FK boş olabilir) → hiçbiri yoksa null.
+ *
+ * @param {{createdBy?: {fullName?: string|null}|null, history?: Array<{actionType?: string|null, actor?: string|null}>}} caseRow
+ * @returns {string|null}
+ */
+export function resolveCreatorDisplayName(caseRow) {
+  const fromUser = caseRow?.createdBy?.fullName?.trim();
+  if (fromUser) return fromUser;
+  const createdActivity = Array.isArray(caseRow?.history)
+    ? caseRow.history.find((h) => h.actionType === 'CaseCreated')
+    : null;
+  const fromActivity = createdActivity?.actor?.trim();
+  return fromActivity || null;
+}
+
+/**
+ * Case detay satırından bekleme durumu/nedenini çözer — saf fonksiyon.
+ * Yalnız status='ThirdPartyWaiting' iken dolu döner (bkz. CASE_DETAIL_SELECT
+ * yorumu — thirdPartyNote statüden çıkılınca temizlenmediği için stale bir
+ * neden başka bir statüde sızmasın diye gate'lenir).
+ *
+ * @param {{status?: string|null, thirdPartyName?: string|null, thirdPartyNote?: string|null}} caseRow
+ * @returns {{waitReason: string|null, thirdPartyName: string|null}}
+ */
+export function resolveWaitReason(caseRow) {
+  if (caseRow?.status !== THIRD_PARTY_WAIT_STATUS) {
+    return { waitReason: null, thirdPartyName: null };
+  }
+  const thirdPartyName = caseRow.thirdPartyName?.trim() || null;
+  const note = caseRow.thirdPartyNote?.trim() || null;
+  // Prominent gösterim metni — not varsa not, yoksa yalnız 3. parti adı
+  // (henüz açıklama girilmemiş olabilir, requiresNote=false tanımlarda).
+  const waitReason = note || thirdPartyName || null;
+  return { waitReason, thirdPartyName };
+}
 
 /**
  * IDOR guard — saf fonksiyon, DB'siz test edilebilir (bkz.
@@ -274,8 +333,18 @@ export async function findCaseDetailByNumber(caseNumber, authorizedCodes) {
   // history/notes/attachments DB'de `orderBy: 'desc'` + cap ile çekildi
   // (cap tetiklenirse "en yeni N" korunsun diye); doğal okuma sırası için
   // (eski→yeni) burada ters çevrilir.
+  //
+  // creator/waitReason — caseRow.history (henüz reverse edilmeden, ham
+  // desc sırada) üzerinden çözülür; sıra creator/waitReason'ın kendi
+  // mantığı için önemsiz (yalnız CaseCreated araması / status kontrolü).
+  const creator = resolveCreatorDisplayName(caseRow);
+  const { waitReason, thirdPartyName } = resolveWaitReason(caseRow);
+
   return {
     ...caseRow,
+    creator,
+    waitReason,
+    thirdPartyName,
     notes: [...caseRow.notes].reverse(),
     history: [...caseRow.history].reverse(),
     attachments: [...caseRow.attachments].reverse(),
