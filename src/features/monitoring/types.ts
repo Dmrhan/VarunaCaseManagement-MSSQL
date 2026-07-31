@@ -10,6 +10,8 @@ export interface FunnelMetrics {
 }
 
 export interface Summary extends FunnelMetrics {
+  devamEden: number;
+  digerKok: number;
   ortCozumSaat: number | null;
 }
 
@@ -21,10 +23,18 @@ export interface BreakdownRow extends FunnelMetrics {
   key: string;
 }
 
+export interface BreakdownResponse {
+  rows: BreakdownRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface FiltersResponse {
   bounds: { minYil: number | null; maxYil: number | null; sonTarih: string | null };
   projeler: { key: string; c: number }[];
   tipler: { key: string; c: number }[];
+  meta: { refreshedAt: string | null; satirSayisi: number | null } | null;
 }
 
 export interface MonitoringFilters {

@@ -19,7 +19,10 @@ const router = Router();
 router.use(verifyJwt);
 const requireManager = requireRole('Supervisor', 'Admin', 'SystemAdmin');
 
-const VIEW = 'dbo.vw_TicketLifecycle_All';
+// Materialize snapshot (perf) — canlı view her sorguda linked-server(TFS)+cross-DB(KA)
+// join'i tekrarladığı için 30-40sn sürüyordu; bu fiziksel indeksli tablo milisaniye.
+// Yenileme: dbo.usp_Refresh_rpt_TicketLifecycle (gecelik SQL Agent job).
+const VIEW = 'dbo.rpt_TicketLifecycle';
 
 // Funnel metrikleri — her endpoint aynı tanımı kullanır (bit → int cast, SUM için)
 const METRICS = `
@@ -78,7 +81,11 @@ function buildWhere(qp) {
 router.get('/summary', requireManager, async (req, res) => {
   try {
     const rows = await prisma.$queryRawUnsafe(
-      `SELECT ${METRICS}, AVG(CAST(CozumSuresiDk AS float)) / 60.0 AS ortCozumSaat FROM ${VIEW} ${buildWhere(req.query)}`,
+      `SELECT ${METRICS},
+         SUM(CASE WHEN KodlamaSonucu = N'Devam Ediyor'   THEN 1 ELSE 0 END) AS devamEden,
+         SUM(CASE WHEN KodlamaSonucu = N'Diğer Kök-Neden' THEN 1 ELSE 0 END) AS digerKok,
+         AVG(CAST(CozumSuresiDk AS float)) / 60.0 AS ortCozumSaat
+       FROM ${VIEW} ${buildWhere(req.query)}`,
     );
     res.json(serialize(rows[0]));
   } catch (err) {
@@ -101,17 +108,25 @@ router.get('/timeseries', requireManager, async (req, res) => {
   }
 });
 
-/** GET /api/monitoring/breakdown?dimension=Proje|Dist|KokNeden|...&top=N — boyut kırılımı (drill-down motoru) */
+/** GET /api/monitoring/breakdown?dimension=Proje|Dist|...&page=1&pageSize=20 — boyut kırılımı (SAYFALI) */
 router.get('/breakdown', requireManager, async (req, res) => {
   try {
     const col = DIMENSIONS[req.query.dimension];
     if (!col) return res.status(400).json({ error: 'bad_dimension', message: 'Geçersiz boyut.' });
-    const top = Math.min(500, Math.max(1, parseInt(req.query.top, 10) || 50));
-    const rows = await prisma.$queryRawUnsafe(
-      `SELECT TOP ${top} ISNULL(CAST(${col} AS nvarchar(200)), N'(boş)') AS [key], ${METRICS}
-       FROM ${VIEW} ${buildWhere(req.query)} GROUP BY ${col} ORDER BY COUNT(*) DESC`,
-    );
-    res.json(rows.map(serialize));
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(500, Math.max(1, parseInt(req.query.pageSize, 10) || 20));
+    const where = buildWhere(req.query);
+    const [rows, totalRow] = await Promise.all([
+      // Sıralama tie-break'i (${col} ASC) → sayfalar arasında satır kaymasın
+      prisma.$queryRawUnsafe(
+        `SELECT ISNULL(CAST(${col} AS nvarchar(400)), N'(boş)') AS [key], ${METRICS}
+         FROM ${VIEW} ${where} GROUP BY ${col}
+         ORDER BY COUNT(*) DESC, ${col} ASC
+         OFFSET ${(page - 1) * pageSize} ROWS FETCH NEXT ${pageSize} ROWS ONLY`,
+      ),
+      prisma.$queryRawUnsafe(`SELECT COUNT(*) AS total FROM (SELECT 1 AS x FROM ${VIEW} ${where} GROUP BY ${col}) t`),
+    ]);
+    res.json({ rows: rows.map(serialize), total: num(totalRow[0].total), page, pageSize });
   } catch (err) {
     console.error('[monitoring:breakdown]', err);
     res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
@@ -122,15 +137,18 @@ router.get('/breakdown', requireManager, async (req, res) => {
 router.get('/filters', requireManager, async (req, res) => {
   try {
     const base = `FROM ${VIEW} WHERE Sirket = N'UNIVERA'`;
-    const [bounds, projeler, tipler] = await Promise.all([
+    const [bounds, projeler, tipler, meta] = await Promise.all([
       prisma.$queryRawUnsafe(`SELECT MIN(Yil) AS minYil, MAX(Yil) AS maxYil, CONVERT(varchar(10), MAX(AcilisTarihi), 23) AS sonTarih ${base}`),
       prisma.$queryRawUnsafe(`SELECT TOP 200 Proje AS [key], COUNT(*) AS c ${base} AND Proje <> N'(Atanmamış)' GROUP BY Proje ORDER BY COUNT(*) DESC`),
       prisma.$queryRawUnsafe(`SELECT Tipi AS [key], COUNT(*) AS c ${base} AND Tipi IS NOT NULL GROUP BY Tipi ORDER BY COUNT(*) DESC`),
+      // Snapshot tazeliği (rpt tablosu yoksa boş döner — dashboard yine çalışır)
+      prisma.$queryRawUnsafe(`SELECT TOP 1 CONVERT(varchar(19), refreshedAt, 120) AS refreshedAt, satirSayisi FROM dbo.rpt_TicketLifecycle_meta WHERE id = 1`).catch(() => []),
     ]);
     res.json({
       bounds: serialize(bounds[0]),
       projeler: projeler.map(serialize),
       tipler: tipler.map(serialize),
+      meta: meta[0] ? serialize(meta[0]) : null,
     });
   } catch (err) {
     console.error('[monitoring:filters]', err);
