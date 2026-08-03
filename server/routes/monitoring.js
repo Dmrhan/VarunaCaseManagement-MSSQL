@@ -74,6 +74,10 @@ function buildWhere(qp) {
   if (typeof qp.dist === 'string' && qp.dist) w.push(`Dist = ${esc(qp.dist)}`);
   if (qp.onlyL2 === '1') w.push(`UlastiL2 = 1`);
   if (qp.onlyYazilim === '1') w.push(`YazilimaAcildi = 1`);
+  if (qp.onlyKodlandi === '1') w.push(`Kodlandi = 1`);
+  // Hedef ekip: Dev (Univera Defect) / BI (DinRap). Rapor blokları için.
+  if (qp.hedef === 'dev') w.push(`YazilimaAcildi = 1 AND TfsTipi COLLATE DATABASE_DEFAULT = N'Univera Defect'`);
+  else if (qp.hedef === 'bi') w.push(`YazilimaAcildi = 1 AND TfsTipi COLLATE DATABASE_DEFAULT LIKE N'%DinRap%'`);
   return 'WHERE ' + w.join(' AND ');
 }
 
@@ -152,6 +156,53 @@ router.get('/filters', requireManager, async (req, res) => {
     });
   } catch (err) {
     console.error('[monitoring:filters]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+/**
+ * GET /api/monitoring/report/pivot?dimension=Proje&... — RAPORLAMA pivot bloğu.
+ * Boyut (satır) × ay (sütun) sayı matrisi + Toplam satırı. Excel raporlarının
+ * her bloğu bu endpoint'ten (blok'a özel filtrelerle) çekilir; %/oran/ortalama
+ * frontend'de hesaplanır.
+ */
+router.get('/report/pivot', requireManager, async (req, res) => {
+  try {
+    const col = DIMENSIONS[req.query.dimension];
+    if (!col) return res.status(400).json({ error: 'bad_dimension', message: 'Geçersiz boyut.' });
+    // Proje boyutunda: resmi proje listesinde OLMAYANLARI 'Diğer' altında topla
+    // (raporda kalabalık yapmasın). Köprü = next4biz proje alt-isimleri
+    // (TBL_ORTAK_DIGER_PROJE_ISIMLERI, KA eşleşmesiyle aynı). UNIPORT.TBLPROJE
+    // isimleri parçalı olduğu için (Nestle→Nestle Retail/Food…) exact-match yerine
+    // bu köprü kullanılır — tüm gerçek projeleri tanır, junk/test'i Diğer'e atar.
+    const keyExpr = req.query.dimension === 'Proje'
+      ? `CASE WHEN Proje COLLATE DATABASE_DEFAULT IN (SELECT OPI.TXTISIM COLLATE DATABASE_DEFAULT FROM [VeriOkumaDonusum].[dbo].TBL_ORTAK_DIGER_PROJE_ISIMLERI OPI WHERE OPI.LNGDIGERPROJETIPKOD = 1) THEN Proje ELSE N'Diğer' END`
+      : `ISNULL(CAST(${col} AS nvarchar(400)), N'(boş)')`;
+    // Alt-sorgu GROUP BY'de olamaz → [key]'i iç SELECT'te hesapla, dışta grupla.
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT [key], yil, ay, COUNT(*) AS c FROM (
+         SELECT ${keyExpr} AS [key], Yil AS yil, Ay AS ay FROM ${VIEW} ${buildWhere(req.query)}
+       ) t GROUP BY [key], yil, ay`,
+    );
+    // Dönemler (Yil-Ay) sıralı; her satır bu dönemlere hizalı values dizisi + total.
+    const periods = [...new Set(rows.map((r) => `${num(r.yil)}-${String(num(r.ay)).padStart(2, '0')}`))].sort();
+    const pIdx = Object.fromEntries(periods.map((p, i) => [p, i]));
+    const map = new Map();
+    for (const r of rows) {
+      if (!map.has(r.key)) map.set(r.key, { key: r.key, values: new Array(periods.length).fill(0), total: 0 });
+      const row = map.get(r.key);
+      const c = num(r.c);
+      row.values[pIdx[`${num(r.yil)}-${String(num(r.ay)).padStart(2, '0')}`]] = c;
+      row.total += c;
+    }
+    const out = [...map.values()].sort((a, b) => b.total - a.total);
+    const totalRow = {
+      values: periods.map((_, i) => out.reduce((s, r) => s + r.values[i], 0)),
+      total: out.reduce((s, r) => s + r.total, 0),
+    };
+    res.json({ periods, rows: out, totalRow });
+  } catch (err) {
+    console.error('[monitoring:pivot]', err);
     res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
   }
 });

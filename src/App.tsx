@@ -93,6 +93,10 @@ const CsSlaDashboardPage = lazy(() =>
 const MonitoringPage = lazy(() =>
   import('./features/monitoring/MonitoringPage').then((m) => ({ default: m.MonitoringPage })),
 );
+// Raporlar (izole feature) — manuel Bildirim Sayıları Excel'inin birebir otomasyonu
+const ReportsPage = lazy(() =>
+  import('./features/reporting/ReportsPage').then((m) => ({ default: m.ReportsPage })),
+);
 import { AdminDataImportPage } from './features/admin/AdminDataImportPage';
 import { KnowledgeBasePage } from './features/kb/KnowledgeBasePage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
@@ -112,7 +116,7 @@ import { accountService } from './services/accountService';
 import { SOFTPHONE_ANSWERED_EVENT, SOFTPHONE_INCOMING_EVENT, useSoftphone } from './contexts/SoftphoneContext';
 import { CaseTaggingReviewPage } from './features/analytics/CaseTaggingReviewPage';
 
-type View = 'my-home' | 'cases' | 'dashboard' | 'cs-sla-dashboard' | 'monitoring' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'analytics-people-performance' | 'case-report-studio' | 'monthly-bulletin' | 'root-cause-report' | 'tagging-review' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | 'system-health' | AdminView;
+type View = 'my-home' | 'cases' | 'dashboard' | 'cs-sla-dashboard' | 'monitoring' | 'reporting' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'analytics-people-performance' | 'case-report-studio' | 'monthly-bulletin' | 'root-cause-report' | 'tagging-review' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | 'system-health' | AdminView;
 
 interface NavItem {
   key: View;
@@ -447,8 +451,10 @@ export default function App() {
   const showRootCauseReport = !!user && canShowView('root-cause-report', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showTaggingReview = !!user && canShowView('tagging-review', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showMonitoring = !!user && canShowView('monitoring', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
+  const showReporting = !!user && canShowView('reporting', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showReportsSection = sidebarExpanded && (
     showMonitoring ||
+    showReporting ||
     showAiUsage ||
     showQaScores ||
     showPeoplePerformance ||
@@ -937,6 +943,25 @@ export default function App() {
               </button>
             )}
 
+            {/* Raporlar — birebir Bildirim Sayıları (Supervisor / Admin / SystemAdmin) */}
+            {showReporting && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('reporting')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'reporting'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="Raporlar — Bildirim Sayıları"
+              >
+                <FileSpreadsheet size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">Raporlar</span>}
+              </button>
+            )}
+
             {/* AI Kullanım Panosu — Supervisor / Admin / SystemAdmin */}
             {showAiUsage && (
               <button
@@ -1218,6 +1243,11 @@ export default function App() {
           {view === 'monitoring' && (
             <Suspense fallback={<p className="p-4 text-sm text-slate-400">Monitoring yükleniyor…</p>}>
               <MonitoringPage />
+            </Suspense>
+          )}
+          {view === 'reporting' && (
+            <Suspense fallback={<p className="p-4 text-sm text-slate-400">Raporlar yükleniyor…</p>}>
+              <ReportsPage />
             </Suspense>
           )}
           {(view === 'analytics-people-performance' || (isDetail && caseDetailOrigin === 'analytics-people-performance')) && (
