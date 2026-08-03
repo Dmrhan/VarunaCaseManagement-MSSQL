@@ -40,9 +40,11 @@ const PRESETS: { key: Preset; label: string }[] = [
   { key: 'month', label: 'Bu Ay' }, { key: 'year', label: 'Bu Yıl' },
 ];
 const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-// Preset → tarih aralığı (bulunduğumuz dönem) + trend granülü
-function presetRange(p: Preset): { from: string; to: string; grain: Grain } {
-  const now = new Date();
+// Preset → tarih aralığı (bulunduğumuz dönem) + trend granülü.
+// anchorIso = "bugün" referansı: verinin SON günü (snapshot bugünü). Yoksa takvim bugünü.
+// Snapshot Tem-31'de bitip takvim Ağustos'ta olunca "Bugün/Bu Ay" boş kalmasın diye.
+function presetRange(p: Preset, anchorIso?: string): { from: string; to: string; grain: Grain } {
+  const now = anchorIso ? new Date(`${anchorIso}T12:00:00`) : new Date();
   const today = isoLocal(now);
   if (p === 'day') return { from: today, to: today, grain: 'day' };
   if (p === 'week') {
@@ -82,7 +84,19 @@ export function MonitoringPage() {
   const mainReqRef = useRef(0);
   const bdReqRef = useRef(0);
 
-  useEffect(() => { void monitoringService.getFilters().then((r) => r && setOpts(r)); }, []);
+  useEffect(() => {
+    void monitoringService.getFilters().then((r) => {
+      if (!r) return;
+      setOpts(r);
+      // Preset'leri VERİNİN SON GÜNÜNE sabitle (ilk preset 'year'): snapshot Tem-31'de
+      // biter, takvim Ağustos'ta → "Bu Yıl/Bu Ay/Bugün" dolu gelsin.
+      if (r.bounds?.sonTarih) {
+        const rng = presetRange('year', r.bounds.sonTarih);
+        setFilters((f) => ({ ...f, from: rng.from, to: rng.to }));
+        setGrain(rng.grain);
+      }
+    });
+  }, []);
 
   // Özet + zaman serisi + iki bar — sayfalamadan bağımsız
   const loadMain = useCallback(async () => {
@@ -126,7 +140,7 @@ export function MonitoringPage() {
 
   // Dönem preset'i: bulunduğumuz gün/hafta/ay/yıl → TÜM ekranlar o aralığı alır
   const applyPreset = (p: Preset) => {
-    const r = presetRange(p);
+    const r = presetRange(p, opts?.bounds?.sonTarih ?? undefined); // "bugün" = verinin son günü
     setFilters((f) => ({ ...f, from: r.from, to: r.to, all: undefined }));
     setGrain(r.grain);
     setPreset(p);
@@ -135,6 +149,10 @@ export function MonitoringPage() {
   // Elle tarih girilince preset iptal; trend granülü aralığa göre otomatik
   const setDate = (p: Partial<MonitoringFilters>) => {
     const nf = { ...filters, ...p };
+    // başlangıç > bitiş olmasın (boş aralık → veri gelmez): değişeni referans al, diğerini çek
+    if (nf.from && nf.to && nf.from > nf.to) {
+      if ('from' in p) nf.to = nf.from; else nf.from = nf.to;
+    }
     setFilters(nf);
     setGrain(autoGrain(nf.from, nf.to));
     setPreset(null);
