@@ -1786,6 +1786,34 @@ export const caseRepository = {
   },
 
   /**
+   * get()'in kapsam/erişim kontrolü ile AYNISI (allowedCompanyIds +
+   * isArchived guard) ama notes/attachments/history/callLogs (CASE_INCLUDE)
+   * dahil etmeden — yalnız {id, companyId}. Yetki kontrolü yapan
+   * çağrı yerleri (assertCaseResourcePolicy, assertCaseCloseRequiredFields
+   * vb.) döndürülen case'ten yalnız companyId'yi okuyor; onlara tam
+   * CASE_INCLUDE fetch'i vermek gereksiz bir maliyet.
+   *
+   * Perf fix — "İptal Et"/"Çözüldü" gibi close aksiyonlarında route bu iki
+   * assert fonksiyonunu ARKA ARKAYA çağırıyor; ikisi de eskiden get() (tam
+   * include) çağırıyordu → aynı vaka aynı istekte 2 kez ağır şekilde
+   * çekiliyordu (ölçüm: ~590ms sadece bu tekrar için, notu/geçmişi daha
+   * kalabalık vakalarda çok daha fazla). getScopeOnly ile her iki çağrı da
+   * hafifliyor.
+   */
+  async getScopeOnly(id, allowedCompanyIds, actorRole) {
+    const c = await prisma.case.findUnique({
+      where: { id },
+      select: { id: true, companyId: true, isArchived: true },
+    });
+    if (!c) return null;
+    if (allowedCompanyIds && !allowedCompanyIds.includes(c.companyId)) {
+      throw new CaseAccessError();
+    }
+    if (c.isArchived && actorRole !== 'SystemAdmin') return null;
+    return c;
+  },
+
+  /**
    * Vaka açılış atama bildirimi (çan + ActionItem) — TEK KAYNAK.
    * create() içinden (default) veya deferAssignmentNotify ile ertelendiyse
    * caller'dan (intake, dedupe checkpoint SONRASI) çağrılır.
