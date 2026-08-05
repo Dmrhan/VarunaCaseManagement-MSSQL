@@ -67,7 +67,9 @@ const SETS = {
   etkilenenNesne: o.etkilenen_nesne.values,
   etki: o.etki.values,
   kokNedenGrubu: c.kok_neden.groups.map((g) => g.group),
-  kokNedenDetayi: c.kok_neden.groups.flatMap((g) => g.details),
+  // v4 şema — details artık {label, cozum_tipleri} nesnesi; label çıkarılmadan
+  // geçince normalize()'a düz string yerine obje gider (bkz. commit 124c9a6).
+  kokNedenDetayi: c.kok_neden.groups.flatMap((g) => g.details.map((d) => d.label)),
   cozumTipi: c.cozum_tipi.values,
   kaliciOnlem: c.kalici_onlem.values,
 };
