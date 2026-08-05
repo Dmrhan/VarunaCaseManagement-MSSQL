@@ -324,7 +324,10 @@ async function assertCaseResourcePolicy(req, { resourceKey, action, baselineAllo
   const resourceEnabled = isAuthorizationResourceEnforcementEnabled();
   const securityFilterEnabled = isAuthorizationSecurityFilterEnforcementEnabled();
   if (!resourceEnabled && !securityFilterEnabled) return null;
-  const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
+  // Perf fix — burada yalnız companyId (scope kontrolü) lazım; tam
+  // CASE_INCLUDE (notes/attachments/history/callLogs) getirmenin karşılığı
+  // yok. bkz. caseRepository.getScopeOnly.
+  const c = await caseRepository.getScopeOnly(req.params.id, req.user.allowedCompanyIds, req.user.role);
   if (!c) {
     throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
   }
@@ -540,7 +543,9 @@ async function assertCaseCloseRequiredFields(req, { nextStatus, payload }) {
   if (!isAuthorizationFieldEnforcementEnabled()) return null;
   const fields = closeFieldCandidatesFor(nextStatus);
   if (fields.length === 0) return null;
-  const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
+  // Perf fix — bkz. assertCaseResourcePolicy'deki aynı not; yalnız companyId
+  // kullanılıyor, tam include gereksiz.
+  const c = await caseRepository.getScopeOnly(req.params.id, req.user.allowedCompanyIds, req.user.role);
   if (!c) {
     throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
   }
