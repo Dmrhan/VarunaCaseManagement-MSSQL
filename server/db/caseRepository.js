@@ -3139,12 +3139,40 @@ export const caseRepository = {
         },
       });
 
+      const row = await prisma.case.findUnique({ where: { id: caseId } });
+
+      // Ürün kararı — her DevOps kaydı hata/defect kabul edilir: work item
+      // bağlanınca Talep Türü otomatik "Hata"ya çekilir, mevcut değer ne
+      // olursa olsun ezilir. Zaten "Hata" ise no-op (gereksiz update/log
+      // yok — aynı vakaya birden fazla work item bağlanabiliyor).
+      // Tek yönlü: unlinkDevops'ta bilinçli karşılığı YOK, aşağıdaki SLA
+      // uzatma emsaliyle aynı prensip (U-E — geri daraltma yok).
+      if (row && row.requestType !== 'Hata') {
+        await prisma.case.update({
+          where: { id: caseId },
+          data: {
+            requestType: 'Hata',
+            history: {
+              create: [{
+                companyId,
+                actionType: 'FieldUpdate',
+                fieldName: 'requestType',
+                fromValue: row.requestType,
+                toValue: 'Hata',
+                action: 'Talep Türü otomatik güncellendi (DevOps bağlantısı)',
+                actor: actor.displayName,
+                actorUserId: actor.userId ?? null,
+              }],
+            },
+          },
+        });
+      }
+
       // Uzatılmış SLA v1 — koşulun İKİNCİ yarısı sonradan tamamlanabilir:
       // vaka ZATEN bayraklı 3. partide beklerken DevOps kaydı şimdi
       // bağlandıysa uzatma bu olayla tetiklenir. Kendi içinde atomik:
       // due + damga + ihlal + history TEK update. unlinkDevops'ta bilinçli
       // karşılığı YOK (U-E — geri daraltma yok).
-      const row = await prisma.case.findUnique({ where: { id: caseId } });
       if (row?.status === 'ThirdPartyWaiting' && row.thirdPartyId && row.slaTargetSource !== 'extended') {
         const tp = await prisma.thirdParty.findUnique({
           where: { id: row.thirdPartyId },
