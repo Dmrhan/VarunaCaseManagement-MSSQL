@@ -3875,7 +3875,7 @@ function DetailTab({
       {/* PR-D3 — Azure DevOps İş Öğeleri.
           Backend ALLOWLIST guard'lı (16 alan). Read role-gate ile arşivli case
           için SystemAdmin görür, diğer roller 404. Bağla/Kaldır case-write. */}
-      <DevOpsSection caseId={item.id} canWrite={canWriteCase} />
+      <DevOpsSection caseId={item.id} canWrite={canWriteCase} onCaseUpdated={onCaseUpdated} />
 
       {/* Adım-2 #5 — "Müşteri & Sınıflandırma" → "Sınıflandırma":
           Şirket/Müşteri sol panelde zaten var (duplikasyon kaldırıldı).
