@@ -1,20 +1,27 @@
 /**
  * smoke-pattern-alert-summary-batched.js — statik guard.
  *
- * Bug: queryPatternAlertSummary (server/analytics/operationsAggregator.js),
+ * Bug 1: queryPatternAlertSummary (server/analytics/operationsAggregator.js),
  * "Performans" panosu / RUNA AI ops uçları / Aylık Bülten açıldığında her
- * AKTİF örüntü alarmı için AYRI bir prisma.case.count() atıyordu
- * (Promise.all ile paralel). 255 aktif alarmda bu 255 eşzamanlı sorguya
- * denk geliyordu — hepsi Case tablosunun yakın tarihli bölgesine düşüp
- * PAGELATCH_UP kilitlenmesi yaratıyordu (canlıda yakalandı: 20+ sorgu
- * birbirini kilitleyip başka bir sistemin — Power BI refresh — sorgusunu
- * bile 29sn bekletti).
+ * AKTİF örüntü alarmı için AYRI, SINIRSIZ eşzamanlı bir prisma.case.count()
+ * atıyordu. 255+ aktif alarmda bu 255+ eşzamanlı sorguya denk geliyordu —
+ * hepsi Case tablosunun yakın tarihli bölgesine düşüp PAGELATCH_UP
+ * kilitlenmesi yaratıyordu (canlıda yakalandı: 20+ sorgu birbirini
+ * kilitleyip başka bir sistemin — Power BI refresh — sorgusunu bile 29sn
+ * bekletti).
  *
- * Fix: tüm alarmların pencerelerini (detectedAt - windowMinutes .. detectedAt)
- * kapsayan TEK bir aralıkla adaylar bir kere çekiliyor, sayım bellekte
- * (companyId, category) anahtarıyla gruplanıp her alarmın kendi dar
- * penceresine göre yapılıyor. Doğrulama: aynı veri üzerinde eski/yeni
- * sonuçlar birebir aynı çıktı (255/255 eşleşme), süre 7977ms → 761ms.
+ * İlk düzeltme (tüm alarm pencerelerini kapsayan TEK geniş aralıkla adayları
+ * bir kerede çekip bellekte gruplamak) geri alındı — code review bulgusu:
+ * alarmlar otomatik süresi dolmuyor, yalnız elle dismiss ediliyor; eski/
+ * dismiss edilmemiş bir alarm aralığı aylara kadar genişletip TÜM o
+ * dönemin (alarmla ilgisiz kategoriler dahil) vakalarını belleğe çekme
+ * riski taşıyordu — düzelttiğimiz N+1'den daha ağır bir tam-tablo
+ * aktarımına dönüşebilirdi.
+ *
+ * Fix: her alarm YİNE kendi dar penceresiyle ayrı sayılıyor (indeksli,
+ * hafif, sınırsız bellek riski yok) — ama SINIRLI eşzamanlılıkla (aynı
+ * anda en fazla 10 tanesi), sırayla küçük gruplar hâlinde. Doğrulama:
+ * aynı veri üzerinde sınırsız/sınırlı sonuçlar birebir aynı (258/258).
  *
  * Çalıştır: node scripts/smoke-pattern-alert-summary-batched.js
  */
@@ -35,28 +42,36 @@ function check(label, pattern) {
 }
 
 check(
-  'Eski N+1 deseni (Promise.all + alerts.map + prisma.case.count) KALDIRILDI',
+  'Eski SINIRSIZ N+1 deseni (tüm alarmlar tek Promise.all içinde) KALDIRILDI',
   /^(?![\s\S]*await Promise\.all\(alerts\.map\(async \(a\) => \{[\s\S]{0,50}prisma\.case\.count)[\s\S]*$/,
 );
 check(
-  'Tüm alarm pencerelerini kapsayan TEK aralık hesaplanıyor (earliestWindowStart/latestDetectedAt)',
-  /const earliestWindowStart = new Date\(Math\.min\(\.\.\.windowStartMs\)\);\s*const latestDetectedAt = new Date\(Math\.max\(\.\.\.alerts\.map\(\(a\) => a\.detectedAt\.getTime\(\)\)\)\);/,
+  'İlk (geri alınan) düzeltmenin "tek geniş aralık" deseni de YOK — candidatesByKey/findMany tüm aralık taraması yok',
+  /^(?![\s\S]*const candidatesByKey = new Map)[\s\S]*$/,
 );
 check(
-  'Adaylar TEK prisma.case.findMany ile çekiliyor (companyId/isArchived/createdAt aralığı + narrowed filtreler)',
-  /const candidates = await prisma\.case\.findMany\(\{\s*where: \{\s*companyId: \{ in: scope\.companyIds \},\s*isArchived: false,[\s\S]{0,80}createdAt: \{ gte: earliestWindowStart, lte: latestDetectedAt \},/,
+  'Sınırlı eşzamanlılık sabiti tanımlı (PATTERN_ALERT_COUNT_CONCURRENCY)',
+  /const PATTERN_ALERT_COUNT_CONCURRENCY = 10;/,
 );
 check(
-  'Adaylar (companyId, category) anahtarıyla Map\'e gruplanıyor',
-  /const candidatesByKey = new Map\(\);\s*for \(const c of candidates\) \{\s*const key = `\$\{c\.companyId\}\|\$\{c\.category\}`;/,
+  'Alarmlar küçük gruplar (chunk) hâlinde, sırayla işleniyor (for + slice)',
+  /for \(let i = 0; i < alerts\.length; i \+= PATTERN_ALERT_COUNT_CONCURRENCY\) \{\s*const chunk = alerts\.slice\(i, i \+ PATTERN_ALERT_COUNT_CONCURRENCY\);/,
 );
 check(
-  'Her alarm için sayım bellekte (senkron .map, artık await/Promise.all YOK) yapılıyor',
-  /const counted = alerts\.map\(\(a\) => \{\s*const windowStart = a\.detectedAt\.getTime\(\) - \(a\.windowMinutes \?\? 60\) \* 60 \* 1000;\s*const windowEnd = a\.detectedAt\.getTime\(\);\s*const times = candidatesByKey\.get\(`\$\{a\.companyId\}\|\$\{a\.category\}`\) \?\? \[\];\s*const liveCount = times\.reduce/,
+  'Her chunk içinde Promise.all ile paralel, ama chunk\'lar arası await ile sıralı',
+  /const chunkResults = await Promise\.all\(chunk\.map\(async \(a\) => \{[\s\S]{0,150}prisma\.case\.count\(/,
 );
 check(
-  'narrowed (takım/kişi/müşteri daraltma) filtreleri korunuyor — TEK sorguda uygulanıyor',
+  'Her alarm hâlâ KENDİ dar penceresiyle sayılıyor (windowStart/detectedAt, tek alarm bazlı)',
+  /const windowStart = new Date\(a\.detectedAt\.getTime\(\) - \(a\.windowMinutes \?\? 60\) \* 60 \* 1000\);\s*const liveCount = await prisma\.case\.count\(\{\s*where: \{\s*companyId: a\.companyId,\s*category: a\.category,\s*createdAt: \{ gte: windowStart, lte: a\.detectedAt \},/,
+);
+check(
+  'narrowed (takım/kişi/müşteri daraltma) filtreleri korunuyor',
   /\.\.\.\(narrowed && scope\.teamIds && scope\.teamIds\.length > 0 \? \{ assignedTeamId: \{ in: scope\.teamIds \} \} : \{\}\),\s*\.\.\.\(narrowed && scope\.personIds && scope\.personIds\.length > 0 \? \{ assignedPersonId: \{ in: scope\.personIds \} \} : \{\}\),\s*\.\.\.\(narrowed && filters\?\.accountId \? \{ accountId: filters\.accountId \} : \{\}\),/,
+);
+check(
+  'Sonuçlar chunk\'lar arası birikiyor (counted.push(...chunkResults))',
+  /counted\.push\(\.\.\.chunkResults\);/,
 );
 check(
   'visible/largest hesaplaması (dönüş sözleşmesi) değişmedi',
