@@ -765,21 +765,45 @@ async function queryPatternAlertSummary(scope, filters) {
   // penceresi (detectedAt - windowMinutes) içinde açılan, aynı şirket+kategori
   // arşivsiz vakalar; daraltılmış görünümde scope filtreleri aynı sorguya
   // biner. patternDetect'in tetik sorgusuyla birebir aynı predikat.
-  const counted = await Promise.all(alerts.map(async (a) => {
-    const windowStart = new Date(a.detectedAt.getTime() - (a.windowMinutes ?? 60) * 60 * 1000);
-    const liveCount = await prisma.case.count({
-      where: {
-        companyId: a.companyId,
-        category: a.category,
-        createdAt: { gte: windowStart, lte: a.detectedAt },
-        isArchived: false, // 2026-07-06 — arşivli vaka alarm sayımına girmez
-        ...(narrowed && scope.teamIds && scope.teamIds.length > 0 ? { assignedTeamId: { in: scope.teamIds } } : {}),
-        ...(narrowed && scope.personIds && scope.personIds.length > 0 ? { assignedPersonId: { in: scope.personIds } } : {}),
-        ...(narrowed && filters?.accountId ? { accountId: filters.accountId } : {}),
-      },
-    });
+  //
+  // Perf fix — N+1: eskiden her alarm için AYRI prisma.case.count() Promise.all
+  // ile paralel atılıyordu (255 aktif alarmda 255 eşzamanlı sorgu). Bunların
+  // hepsi Case tablosunun aynı bölgesine (yakın tarihli kayıtlar) düşüp
+  // PAGELATCH_UP kilitlenmesi yaratıyordu — canlıda 20+ sorgu birbirini
+  // kilitleyip başka bir sistemin (Power BI refresh) sorgusunu bile 29sn
+  // bekletti. Artık TÜM alarmların pencerelerini kapsayan TEK bir aralıkla
+  // adaylar bir kere çekiliyor (companyId+createdAt zaten indeksli), sayım
+  // bellekte (companyId, category) anahtarıyla gruplanıp her alarmın kendi
+  // dar penceresine göre yapılıyor. Ölçüm: 255 alarm / 20 günlük aralık →
+  // tek sorguda ~6000 satır, milisaniyeler içinde.
+  const windowStartMs = alerts.map((a) => a.detectedAt.getTime() - (a.windowMinutes ?? 60) * 60 * 1000);
+  const earliestWindowStart = new Date(Math.min(...windowStartMs));
+  const latestDetectedAt = new Date(Math.max(...alerts.map((a) => a.detectedAt.getTime())));
+  const candidates = await prisma.case.findMany({
+    where: {
+      companyId: { in: scope.companyIds },
+      isArchived: false, // 2026-07-06 — arşivli vaka alarm sayımına girmez
+      createdAt: { gte: earliestWindowStart, lte: latestDetectedAt },
+      ...(narrowed && scope.teamIds && scope.teamIds.length > 0 ? { assignedTeamId: { in: scope.teamIds } } : {}),
+      ...(narrowed && scope.personIds && scope.personIds.length > 0 ? { assignedPersonId: { in: scope.personIds } } : {}),
+      ...(narrowed && filters?.accountId ? { accountId: filters.accountId } : {}),
+    },
+    select: { companyId: true, category: true, createdAt: true },
+  });
+  const candidatesByKey = new Map();
+  for (const c of candidates) {
+    const key = `${c.companyId}|${c.category}`;
+    const arr = candidatesByKey.get(key);
+    if (arr) arr.push(c.createdAt.getTime());
+    else candidatesByKey.set(key, [c.createdAt.getTime()]);
+  }
+  const counted = alerts.map((a) => {
+    const windowStart = a.detectedAt.getTime() - (a.windowMinutes ?? 60) * 60 * 1000;
+    const windowEnd = a.detectedAt.getTime();
+    const times = candidatesByKey.get(`${a.companyId}|${a.category}`) ?? [];
+    const liveCount = times.reduce((n, t) => (t >= windowStart && t <= windowEnd ? n + 1 : n), 0);
     return { category: a.category, liveCount };
-  }));
+  });
   const visible = counted.filter((a) => a.liveCount > 0);
   const largest = visible.reduce((a, b) => (b.liveCount > (a?.liveCount ?? -1) ? b : a), null);
   return {
