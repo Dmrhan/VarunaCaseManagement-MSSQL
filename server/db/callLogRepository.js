@@ -96,7 +96,8 @@ export async function resolveActiveCallContext(companyId, callIds) {
   const accMap = new Map(accs.map((a) => [a.id, a.name]));
   const out = new Map();
   for (const [callId, v] of base) {
-    out.set(callId, { ...v, matchedAccountName: v.matchedAccountId ? (accMap.get(v.matchedAccountId) ?? null) : null });
+    // customerPassword'ü DIŞARI verme (frontend kullanmıyor; gereksiz ifşa).
+    out.set(callId, { matchedAccountId: v.matchedAccountId, matchedAccountName: v.matchedAccountId ? (accMap.get(v.matchedAccountId) ?? null) : null });
   }
   return out;
 }

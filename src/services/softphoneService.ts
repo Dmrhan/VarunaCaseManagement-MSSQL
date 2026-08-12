@@ -154,9 +154,8 @@ export interface ActiveCallInfo {
   status: string; // ringing | talking | ...
   callDate: string;
   key: string;
-  // Faz 2 — backend /active-call enrichment (CallLog join): gelen çağrı webhook'unun
-  // yakaladığı müşteri şifresi + çözülen müşteri + link-call anahtarı.
-  customerPassword?: string | null;
+  // Faz 2 — backend /active-call enrichment (CallLog join): şifreden çözülen müşteri
+  // + link-call anahtarı. (customerPassword bilinçli olarak GÖNDERİLMEZ.)
   matchedAccountId?: string | null;
   matchedAccountName?: string | null;
   callLogKey?: string | null;
@@ -189,6 +188,52 @@ export async function linkCall(callId: string, caseId: string): Promise<{ ok: bo
     headers: { 'Content-Type': 'application/json', ...alotechHeaders() },
     body: JSON.stringify({ callId, caseId }),
   }, 'Çağrı-ticket bağlama');
+}
+
+// ── Faz 3 — Çağrı Merkezi Raporu (müşteri × ticket × agent × süre) ──
+export interface CallReportRow {
+  id: string;
+  callId: string;
+  callerId: string | null;
+  direction: string;
+  queue: string | null;
+  agentEmail: string | null;
+  matchedAccountId: string | null;
+  caseId: string | null;
+  status: string | null;
+  startedAt: string | null;
+  answeredAt: string | null;
+  endedAt: string | null;
+  durationSec: number | null;
+  accountName: string | null;
+  caseNumber: string | null;
+  projectName: string | null;
+}
+export interface CallReportSummary {
+  accountId: string | null;
+  accountName: string | null;
+  calls: number;
+  totalSec: number;
+  totalMin: number;
+  ticketCount: number;
+}
+export interface CallReportResponse {
+  rows: CallReportRow[];
+  summary: CallReportSummary[];
+  count: number;
+}
+
+/** Çağrı-merkezi raporu (CallLog). from/to ISO tarih, agentEmail/accountId opsiyonel. */
+export async function fetchCallReport(
+  params: { from?: string; to?: string; agentEmail?: string; accountId?: string; direction?: string } = {},
+): Promise<CallReportResponse | AlotechDisabledResponse | undefined> {
+  const q = new URLSearchParams();
+  for (const k of ['from', 'to', 'agentEmail', 'accountId', 'direction'] as const) {
+    const v = params[k];
+    if (v) q.set(k, v);
+  }
+  const qs = q.toString();
+  return apiFetch(`/api/integrations/alotech/call-report${qs ? `?${qs}` : ''}`, { headers: alotechHeaders() }, 'Çağrı raporu');
 }
 
 /** Backend'den giriş yapan kullanıcının AloTech session key'ini alır. */

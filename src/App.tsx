@@ -34,6 +34,7 @@ import { ActionCenterBell } from './features/action-center/ActionCenterBell';
 import { featureFlags } from './config/featureFlags';
 import { OperationsDashboardPage } from './features/analytics/OperationsDashboardPage';
 import { CaseReportStudioPage } from './features/reports/CaseReportStudioPage';
+import { CallCenterReportPage } from './features/reports/CallCenterReportPage';
 import { MonthlyBulletinPage } from './features/reports/MonthlyBulletinPage';
 import { RootCauseReportPage } from './features/analytics/RootCauseReportPage';
 import { AIUsagePage } from './features/analytics/AIUsagePage';
@@ -97,7 +98,7 @@ import { accountService } from './services/accountService';
 import { SOFTPHONE_ANSWERED_EVENT, SOFTPHONE_INCOMING_EVENT, useSoftphone } from './contexts/SoftphoneContext';
 import { CaseTaggingReviewPage } from './features/analytics/CaseTaggingReviewPage';
 
-type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'case-report-studio' | 'monthly-bulletin' | 'root-cause-report' | 'tagging-review' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | AdminView;
+type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'case-report-studio' | 'monthly-bulletin' | 'root-cause-report' | 'tagging-review' | 'call-center-report' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | AdminView;
 
 interface NavItem {
   key: View;
@@ -130,6 +131,9 @@ export default function App() {
   // Faz 2 — oto-pop'u tetikleyen çağrının CallLog anahtarı; ticket oluşturulunca
   // linkCall ile CallLog.caseId'ye bağlanır (hangi çağrı → hangi ticket).
   const [smartTicketCallId, setSmartTicketCallId] = useState<string | null>(null);
+  // Akıllı Ticket YALNIZ gelen çağrıdan mı açıldı — tek-proje oto-seçimi sadece
+  // bu durumda; manuel açılışta oto-doldurma yapılmaz.
+  const [smartTicketFromCall, setSmartTicketFromCall] = useState(false);
   const [customerCardId, setCustomerCardId] = useState<string | null>(null);
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const [pendingQuickPrefill, setPendingQuickPrefill] = useState<string | null>(null);
@@ -189,6 +193,7 @@ export default function App() {
         }
         setSmartTicketAccount(acc);
         setSmartTicketCallId(detail?.callLogKey ?? null); // ticket açılınca linkCall için
+        setSmartTicketFromCall(true); // çağrıdan açıldı → tek-proje oto-seç
         setView('smart-ticket-new');
       })();
     };
@@ -377,6 +382,9 @@ export default function App() {
     setView(key);
     setSelectedCaseId(null);
     setSelectedAccountId(null);
+    // Nav ile ayrılırken çağrı-context'i temizle (stale çağrı bilgisi sızmasın).
+    setSmartTicketFromCall(false);
+    setSmartTicketCallId(null);
   }
 
   function canShowView(key: View | string, fallback: boolean): boolean {
@@ -401,6 +409,7 @@ export default function App() {
   // Aylık Bülten — CS ekibi müşteriye gönderir; supervisor/admin/CSM görür
   const showMonthlyBulletin = !!user && canShowView('monthly-bulletin', ['CSM', 'Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showRootCauseReport = !!user && canShowView('root-cause-report', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
+  const showCallCenterReport = !!user && canShowView('call-center-report', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showTaggingReview = !!user && canShowView('tagging-review', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showReportsSection = sidebarExpanded && (
     showAiUsage ||
@@ -409,6 +418,7 @@ export default function App() {
     showCaseReportStudio ||
     showMonthlyBulletin ||
     showRootCauseReport ||
+    showCallCenterReport ||
     showTaggingReview
   );
 
@@ -977,6 +987,25 @@ export default function App() {
               </button>
             )}
 
+            {/* Çağrı Merkezi Raporu — Supervisor / Admin / SystemAdmin */}
+            {showCallCenterReport && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('call-center-report')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'call-center-report'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="Çağrı Merkezi Raporu"
+              >
+                <Phone size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">Çağrı Merkezi Raporu</span>}
+              </button>
+            )}
+
             {/* Vaka Etiket Doğrulama Ekranı — Supervisor / Admin / SystemAdmin */}
             {showTaggingReview && (
               <button
@@ -1023,7 +1052,7 @@ export default function App() {
               onShowPatterns={() => setView('analytics-patterns')}
               onOpenSmartTicket={
                 featureFlags.smartTicketIntakeEnabled
-                  ? () => setView('smart-ticket-new')
+                  ? () => { setSmartTicketFromCall(false); setView('smart-ticket-new'); }
                   : undefined
               }
             />
@@ -1041,7 +1070,7 @@ export default function App() {
                 onShowPatterns={() => setView('analytics-patterns')}
                 onOpenSmartTicket={
                   featureFlags.smartTicketIntakeEnabled
-                    ? () => setView('smart-ticket-new')
+                    ? () => { setSmartTicketFromCall(false); setView('smart-ticket-new'); }
                     : undefined
                 }
                 isVisible={!isDetail}
@@ -1071,6 +1100,7 @@ export default function App() {
             </div>
           )}
           {view === 'tagging-review' && <CaseTaggingReviewPage onSelectCase={openCase} />}
+          {view === 'call-center-report' && <CallCenterReportPage onSelectCase={openCase} />}
           {view === 'my-calendar' && <MyCalendarPage onSelectCase={openCase} />}
           {view === 'watching' && <WatcherInboxPage onSelectCase={openCase} />}
           {view === 'kb-viewer' && <KnowledgeBasePage />}
@@ -1112,11 +1142,12 @@ export default function App() {
             <SmartTicketNewPage
               initialAccountId={smartTicketAccount?.id ?? null}
               initialAccountName={smartTicketAccount?.name ?? null}
-              onCancel={() => { setView('cases'); setSmartTicketAccount(null); setSmartTicketCallId(null); }}
+              autoPickSingleProject={smartTicketFromCall}
+              onCancel={() => { setView('cases'); setSmartTicketAccount(null); setSmartTicketCallId(null); setSmartTicketFromCall(false); }}
               onCreated={(caseId) => {
                 // Faz 2 — oto-pop çağrısı varsa çağrı↔ticket bağını kur (best-effort).
                 if (smartTicketCallId) void alotechLinkCall(smartTicketCallId, caseId);
-                setSmartTicketAccount(null); setSmartTicketCallId(null); openCase(caseId);
+                setSmartTicketAccount(null); setSmartTicketCallId(null); setSmartTicketFromCall(false); openCase(caseId);
               }}
               onOpenExistingCase={(caseId) => openCase(caseId)}
             />

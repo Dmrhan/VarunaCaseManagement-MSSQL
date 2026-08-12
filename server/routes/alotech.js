@@ -211,7 +211,8 @@ router.get('/active-call', async (req, res) => {
         const ctx = await resolveActiveCallContext(cid, keys);
         calls.forEach((c) => {
           const e = ctx.get(c.callId) || ctx.get(c.key);
-          c.customerPassword = e?.customerPassword ?? null;
+          // NOT: customerPassword frontend'e GÖNDERİLMEZ (gereksiz müşteri-kodu ifşası);
+          // pop matchedAccountId ile açar.
           c.matchedAccountId = e?.matchedAccountId ?? null;
           c.matchedAccountName = e?.matchedAccountName ?? null;
           // link-call'ın kullanacağı CallLog anahtarı (hangisi eşleştiyse).
