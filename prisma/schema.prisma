@@ -1831,6 +1831,12 @@ model Case {
   @@index([companyId, status])
   @@index([companyId, assignedTeamId])
   @@index([companyId, category, subCategory])
+  // Perf — Örüntü-alarm baseline hot path'i (server/lib/patternInsight.js
+  // baselineCount + liveTriggerCount): companyId + category + isArchived
+  // EŞİTLİK, createdAt ARALIK. Eşitlik sütunları önce, range sona → seek.
+  // Prod'da elle oluşturuldu (IX_Case_company_category_arch_created);
+  // gelecekteki migrate/db push drift'le DÜŞÜRMESİN diye şemaya resmileştirildi.
+  @@index([companyId, category, isArchived, createdAt], map: "IX_Case_company_category_arch_created")
   @@index([companyId, resolvedAt])
   // "Atanmış ama henüz incelemeye alınmamış" dashboard sorgusu için bir
   // index (companyId, pickedUpAt, assignedAt) faydalı olur — kasıtlı
