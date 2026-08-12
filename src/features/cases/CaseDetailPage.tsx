@@ -44,6 +44,7 @@ import {
   ShoppingBag,
   Sparkles,
   Star,
+  Tag,
   TrendingDown,
   User,
   UserCheck,
@@ -4090,6 +4091,22 @@ function DetailTab({
               renderDisplay={() => (
                 <span className="text-sm text-slate-800">{thirdPartyDisplayName ?? '—'}</span>
               )}
+            />
+          )},
+          // Versiyon No — serbest metin, açılışta zorunlu değil. Yalnız
+          // COMP-UNIVERA'da Çözüldü'ye geçişten önce backend zorunlu kılar
+          // (product_version_required_for_closure) — bu inline edit tek düzenleme yolu.
+          { label: 'Versiyon No', icon: Tag, isEmpty: isBlankValue(v('productVersion')), node: (
+            <InlineEdit
+              fieldKey="productVersion"
+              type="text"
+              value={v('productVersion')}
+              editing={editingField === 'productVersion'}
+              isDraft={drafts.productVersion !== undefined}
+              onStart={() => onStartEdit('productVersion')}
+              onCommit={(val) => onCommitDraft('productVersion', String(val))}
+              onCancel={onCancelEdit}
+              placeholder="örn. 3.2.1"
             />
           )},
         ];
