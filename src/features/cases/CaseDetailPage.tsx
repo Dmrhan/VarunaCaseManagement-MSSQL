@@ -3997,6 +3997,27 @@ function DetailTab({
           ),
         };
 
+        // Versiyon No — productGroupItem ile aynı gerekçe: serbest metin,
+        // açılışta zorunlu değil ama YALNIZ COMP-UNIVERA'da Çözüldü'ye
+        // geçişten önce backend zorunlu kılar (product_version_required_for_closure).
+        // Bu yüzden "Diğer sınıflandırma bilgileri" katlanabilir bölümüne
+        // (boşsa saklanır) TABİ DEĞİL — her zaman görünen ayrı bir satır.
+        const productVersionItem = {
+          label: 'Versiyon No', icon: Tag, node: (
+            <InlineEdit
+              fieldKey="productVersion"
+              type="text"
+              value={v('productVersion')}
+              editing={editingField === 'productVersion'}
+              isDraft={drafts.productVersion !== undefined}
+              onStart={() => onStartEdit('productVersion')}
+              onCommit={(val) => onCommitDraft('productVersion', String(val))}
+              onCancel={onCancelEdit}
+              placeholder="örn. 3.2.1"
+            />
+          ),
+        };
+
         const secondaryClassificationItems = [
           // WR-A7b — Catalog Paket inline edit. BFF DI.3/4/5 enforce eder; role gate
           // (Supervisor/Admin/SystemAdmin) BFF tarafında, UI 403 ise toast gösterir.
@@ -4093,22 +4114,6 @@ function DetailTab({
               )}
             />
           )},
-          // Versiyon No — serbest metin, açılışta zorunlu değil. Yalnız
-          // COMP-UNIVERA'da Çözüldü'ye geçişten önce backend zorunlu kılar
-          // (product_version_required_for_closure) — bu inline edit tek düzenleme yolu.
-          { label: 'Versiyon No', icon: Tag, isEmpty: isBlankValue(v('productVersion')), node: (
-            <InlineEdit
-              fieldKey="productVersion"
-              type="text"
-              value={v('productVersion')}
-              editing={editingField === 'productVersion'}
-              isDraft={drafts.productVersion !== undefined}
-              onStart={() => onStartEdit('productVersion')}
-              onCommit={(val) => onCommitDraft('productVersion', String(val))}
-              onCancel={onCancelEdit}
-              placeholder="örn. 3.2.1"
-            />
-          )},
         ];
 
         // Kompakt tek satır düzeni: "İkon Label: değer" — yalnız bu kartta.
@@ -4134,6 +4139,11 @@ function DetailTab({
                 <productGroupItem.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
                 <span className="shrink-0 text-[11px] font-medium text-slate-500">{productGroupItem.label}:</span>
                 <div className="min-w-0 flex-1 text-sm">{productGroupItem.node}</div>
+              </div>
+              <div key={productVersionItem.label} className="flex items-center gap-1 px-1.5 py-0.5">
+                <productVersionItem.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
+                <span className="shrink-0 text-[11px] font-medium text-slate-500">{productVersionItem.label}:</span>
+                <div className="min-w-0 flex-1 text-sm">{productVersionItem.node}</div>
               </div>
               {filledSecondary.map((i) => (
                 <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">

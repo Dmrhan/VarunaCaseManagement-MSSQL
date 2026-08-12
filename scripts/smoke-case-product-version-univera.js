@@ -81,5 +81,22 @@ check('CaseDetailPage.tsx — InlineEdit fieldKey productVersion', 'src/features
 check('CaseDetailPage.tsx — onCommitDraft productVersion çağrısı', 'src/features/cases/CaseDetailPage.tsx', /onCommitDraft\('productVersion', String\(val\)\)/);
 check('CaseDetailPage.tsx — Tag ikonu import edildi', 'src/features/cases/CaseDetailPage.tsx', /\bTag,/);
 
+// ── Frontend: Versiyon No productGroupItem gibi HER ZAMAN görünür —
+//    "Diğer sınıflandırma bilgileri" katlanabilir (boşsa saklanır) bölümüne
+//    TABİ DEĞİL. productGroupItem'daki AYNI desen: ayrı obje (isEmpty YOK,
+//    secondaryClassificationItems dizisinde DEĞİL) + kendi her-zaman-render
+//    satırı.
+check('CaseDetailPage.tsx — productVersionItem ayrı, her zaman görünen obje olarak tanımlı', 'src/features/cases/CaseDetailPage.tsx', /const productVersionItem = \{\s*label: 'Versiyon No', icon: Tag, node: \(/);
+check('CaseDetailPage.tsx — productVersionItem render satırı (primaryClassificationItems ile aynı seviyede, filtre yok)', 'src/features/cases/CaseDetailPage.tsx', /<div key=\{productVersionItem\.label\} className="flex items-center gap-1 px-1\.5 py-0\.5">/);
+{
+  const src = readFileSync(path.resolve(root, 'src/features/cases/CaseDetailPage.tsx'), 'utf8');
+  const secStart = src.indexOf('const secondaryClassificationItems = [');
+  const secEnd = src.indexOf('\n        ];', secStart);
+  const secBody = secStart >= 0 && secEnd > secStart ? src.slice(secStart, secEnd) : '';
+  const ok = secBody !== '' && !/label: 'Versiyon No'/.test(secBody);
+  console.log(`${ok ? '✔' : '✘'} CaseDetailPage.tsx — Versiyon No secondaryClassificationItems (boşsa-gizle listesi) İÇİNDE DEĞİL`);
+  if (ok) pass += 1; else fail += 1;
+}
+
 console.log(`\n${pass} geçti, ${fail} başarısız.`);
 if (fail > 0) process.exitCode = 1;
