@@ -98,5 +98,16 @@ check('CaseDetailPage.tsx — productVersionItem render satırı (primaryClassif
   if (ok) pass += 1; else fail += 1;
 }
 
+// ── Frontend: Çözüldü öncesi FE kapısı (StatusTransitionPanel) — productGroup
+//    kapısıyla aynı desen (uyarı + Uygula engeli), YALNIZ COMP-UNIVERA ──
+check('StatusTransitionPanel.tsx — TextInput import edildi', 'src/features/cases/StatusTransitionPanel.tsx', /import \{ Field, Select, TextInput \} from '@\/components\/ui\/Field';/);
+check('StatusTransitionPanel.tsx — productVersionGateActive tanımı', 'src/features/cases/StatusTransitionPanel.tsx', /const productVersionGateActive =/);
+check('StatusTransitionPanel.tsx — kapı yalnız COMP-UNIVERA scope', 'src/features/cases/StatusTransitionPanel.tsx', /productVersionGateActive =\s*\n\s*pending === 'Çözüldü' &&\s*\n\s*item\.companyId === 'COMP-UNIVERA' &&\s*\n\s*!item\.productVersion &&/);
+check('StatusTransitionPanel.tsx — SystemAdmin muaf', 'src/features/cases/StatusTransitionPanel.tsx', /!productVersionSet &&\s*\n\s*user\?\.role !== 'SystemAdmin';/);
+check('StatusTransitionPanel.tsx — handleSaveProductVersion caseService.update çağrısı', 'src/features/cases/StatusTransitionPanel.tsx', /caseService\.update\(item\.id, \{ productVersion: trimmed \}\)/);
+check('StatusTransitionPanel.tsx — applyDisabled productVersionGateActive kontrol ediyor', 'src/features/cases/StatusTransitionPanel.tsx', /if \(productVersionGateActive\) return true;/);
+check('StatusTransitionPanel.tsx — uyarı UI bloğu render ediliyor', 'src/features/cases/StatusTransitionPanel.tsx', /Versiyon No girilmedi — bu vaka Versiyon No belirtilmeden çözülemez\./);
+check('StatusTransitionPanel.tsx — başarı UI bloğu render ediliyor', 'src/features/cases/StatusTransitionPanel.tsx', /✓ Versiyon No kaydedildi:/);
+
 console.log(`\n${pass} geçti, ${fail} başarısız.`);
 if (fail > 0) process.exitCode = 1;
