@@ -255,18 +255,33 @@ router.get('/patterns', requireSupervisorAnalytics, async (req, res) => {
     // Her alarm için commonThread + spike + impact + severity hesapla.
     // enrichPatternAlert fail olursa kart `insight=null` ile döner
     // (graceful degrade — mevcut consumer'lar etkilenmez).
+    //
+    // Perf fix — N+1: eskiden TÜM alarmlar (take:100) tek Promise.all'de
+    // SINIRSIZ eşzamanlı enrichPatternAlert() çağırıyordu; her çağrı 4-5
+    // Case sorgusu (findMany + 2x count, biri 7 günlük baseline taraması)
+    // içeriyor — 100 alarımda ~400-500 eşzamanlı sorgu, aynı Case tablosu
+    // bölgesinde PAGELATCH_UP kilitlenmesi yaratıyordu (operationsAggregator.js
+    // queryPatternAlertSummary ile aynı kök sebep, ayrı çağrı yeri).
+    // Fix: aynı desen — en fazla PATTERN_INSIGHT_CONCURRENCY tanesi aynı anda,
+    // küçük gruplar hâlinde sırayla.
     const allowedCompanyIds = req.user.allowedCompanyIds ?? [];
-    const enriched = await Promise.all(
-      items.map(async (alert) => {
-        try {
-          const insight = await enrichPatternAlert(alert, { allowedCompanyIds });
-          return { ...alert, insight };
-        } catch (insightErr) {
-          console.warn('[analytics:patterns] insight failed for', alert.id, insightErr?.message);
-          return { ...alert, insight: null };
-        }
-      }),
-    );
+    const PATTERN_INSIGHT_CONCURRENCY = 10;
+    const enriched = [];
+    for (let i = 0; i < items.length; i += PATTERN_INSIGHT_CONCURRENCY) {
+      const chunk = items.slice(i, i + PATTERN_INSIGHT_CONCURRENCY);
+      const chunkResults = await Promise.all(
+        chunk.map(async (alert) => {
+          try {
+            const insight = await enrichPatternAlert(alert, { allowedCompanyIds });
+            return { ...alert, insight };
+          } catch (insightErr) {
+            console.warn('[analytics:patterns] insight failed for', alert.id, insightErr?.message);
+            return { ...alert, insight: null };
+          }
+        }),
+      );
+      enriched.push(...chunkResults);
+    }
 
     res.json({ value: enriched, '@odata.count': enriched.length });
   } catch (e) {
