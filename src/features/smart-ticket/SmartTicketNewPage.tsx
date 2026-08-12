@@ -210,6 +210,7 @@ export function SmartTicketNewPage({
   onOpenExistingCase,
   initialAccountId,
   initialAccountName,
+  autoPickSingleProject = false,
 }: {
   /**
    * Kullanıcı bilinçli olarak Case Detail'e gitmek isterse caller bunu
@@ -228,6 +229,12 @@ export function SmartTicketNewPage({
   /** Gelen çağrı screen pop'u: müşteri ön-seçili açılır (callerId eşleşmesi). */
   initialAccountId?: string | null;
   initialAccountName?: string | null;
+  /**
+   * Gelen çağrı pop'u — müşterinin TEK aktif projesi varsa BİR KEZ oto-seç.
+   * YALNIZ çağrıda true; manuel akıllı-ticket açılışında false → mevcut davranış
+   * (proje elle seçilir) hiç değişmez.
+   */
+  autoPickSingleProject?: boolean;
 }) {
   const companies = useMemo(() => lookupService.companies(), []);
   const defaultCompanyId = companies[0]?.id ?? '';
@@ -235,6 +242,9 @@ export function SmartTicketNewPage({
   const [form, setForm] = useState<SmartTicketFormState>(() => emptyForm(defaultCompanyId));
   const [stage, setStage] = useState<Stage>('opening');
   const [createdCase, setCreatedCase] = useState<Case | null>(null);
+  // Tek-proje oto-seçimi yalnız BİR KEZ (çağrıdan gelen ilk müşteri için); sonraki
+  // manuel hesap değişiminde tetiklenmesin.
+  const autoPickConsumedRef = useRef(false);
 
   // Gelen çağrı screen pop'u: müşteri ön-seçili gelirse form'a uygula (boşsa).
   useEffect(() => {
@@ -392,11 +402,19 @@ export function SmartTicketNewPage({
         .filter((p) => p.isActive && p.status === 'Active')
         .map((p) => ({ id: p.id, name: p.name, code: p.code }));
       setProjects(list);
-      setForm((f) =>
-        f.accountProjectId && !list.some((p) => p.id === f.accountProjectId)
-          ? { ...f, accountProjectId: '', accountProjectName: '' }
-          : f,
-      );
+      setForm((f) => {
+        // Seçili proje artık listede yoksa temizle.
+        if (f.accountProjectId && !list.some((p) => p.id === f.accountProjectId)) {
+          return { ...f, accountProjectId: '', accountProjectName: '' };
+        }
+        // Faz 2 — YALNIZ gelen çağrı pop'unda (autoPickSingleProject) ve bir kez:
+        // müşterinin tek aktif projesi varsa oto-seç. Manuel akışta hiç çalışmaz.
+        if (!f.accountProjectId && projectsEnabled && list.length === 1 && autoPickSingleProject && !autoPickConsumedRef.current) {
+          autoPickConsumedRef.current = true;
+          return { ...f, accountProjectId: list[0].id, accountProjectName: list[0].name };
+        }
+        return f;
+      });
     });
     return () => {
       alive = false;
