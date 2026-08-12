@@ -2,6 +2,7 @@ import express, { Router } from 'express';
 import { createHash } from 'crypto';
 import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError, SMART_TICKET_ANALYSIS_CACHE_VERSION } from '../db/caseRepository.js';
 import { caseEmailRepository } from '../db/caseEmailRepository.js';
+import { emailRecipientSuggestionRepo } from '../db/emailRecipientSuggestionRepository.js';
 import { externalMailFromAliasRepo } from '../db/externalMailFromAliasRepository.js';
 import { caseEmailSender } from '../lib/caseEmailSender.js';
 import { prisma } from '../db/client.js';
@@ -191,6 +192,12 @@ function asyncRoute(handler) {
   };
 }
 
+// Toplu iptal yetkisi (2026-07-10) — Agent HARİÇ tüm roller. Deny-only
+// resource policy varsayılan KAPALI olduğundan birincil kapı bu allowlist.
+// Kod tabanında "except" helper'ı yok; approvals.js:72 rol-sabiti idiyomu.
+// İleride casePolicy.js merkezileştirmesine (BACKLOG P0) taşınacak.
+const CASE_BULK_CANCEL_ROLES = ['Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'];
+
 function isAuthorizationResourceEnforcementEnabled() {
   return process.env.AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED === 'true';
 }
@@ -317,7 +324,10 @@ async function assertCaseResourcePolicy(req, { resourceKey, action, baselineAllo
   const resourceEnabled = isAuthorizationResourceEnforcementEnabled();
   const securityFilterEnabled = isAuthorizationSecurityFilterEnforcementEnabled();
   if (!resourceEnabled && !securityFilterEnabled) return null;
-  const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
+  // Perf fix — burada yalnız companyId (scope kontrolü) lazım; tam
+  // CASE_INCLUDE (notes/attachments/history/callLogs) getirmenin karşılığı
+  // yok. bkz. caseRepository.getScopeOnly.
+  const c = await caseRepository.getScopeOnly(req.params.id, req.user.allowedCompanyIds, req.user.role);
   if (!c) {
     throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
   }
@@ -418,9 +428,23 @@ async function assertBulkCaseResourcePolicy(req, { caseIds, updates }) {
 // req.params.id okur (koleksiyonda undefined → enforcement açıkken anında
 // 404). assertBulkCaseResourcePolicy deseninin arşiv aksiyonu için karşılığı:
 // istenen id'lerin şirketleri üstünden company-aware policy kontrolü.
+//
+// Codex #438 P1 — tekil arşiv paritesi TAM olmalı: tekil yol
+// assertCaseSecurityFilterAccess'ten geçer; güvenlik filtresiyle kısıtlı bir
+// SystemAdmin görünmeyen vaka id'lerini toplu arşivleyememeli. Vaka başına
+// görünürlük kontrolü eklendi (ilk gizli vakada 404 — route repo'ya inmeden
+// keser, hiçbir şey yazılmaz; görünürlük yardımcısı kendi bayrağını içeride
+// kontrol eder, kapalıyken no-op).
 async function assertBulkCaseArchivePolicy(req, { caseIds }) {
-  if (!isAuthorizationResourceEnforcementEnabled()) return null;
+  const resourceEnabled = isAuthorizationResourceEnforcementEnabled();
+  const securityFilterEnabled = isAuthorizationSecurityFilterEnforcementEnabled();
+  if (!resourceEnabled && !securityFilterEnabled) return null;
   if (!Array.isArray(caseIds) || caseIds.length === 0) return null;
+  // Codex #439 P2 — üst sınır kısa devresi: guard, repo'nun max-100
+  // validasyonundan ÖNCE koşar; 100'ü aşan ham diziyle sınırsız IN sorgusu +
+  // vaka başına policy kontrolü çalıştırma. Sorgulamadan çekil — repo
+  // kontrollü 400'ü üretir, hiçbir şey yazılmaz.
+  if (caseIds.length > 100) return null;
 
   const allowedCompanyIds = Array.isArray(req.user.allowedCompanyIds)
     ? req.user.allowedCompanyIds
@@ -430,14 +454,50 @@ async function assertBulkCaseArchivePolicy(req, { caseIds }) {
       id: { in: caseIds },
       companyId: { in: allowedCompanyIds },
     },
-    select: { companyId: true },
+    select: { id: true, companyId: true },
   });
+  for (const c of cases) {
+    await assertCaseSecurityFilterAccess(req, { caseId: c.id, companyId: c.companyId });
+  }
+  if (!resourceEnabled) return null;
   const companyIds = Array.from(new Set(cases.map((c) => c.companyId).filter(Boolean)));
   for (const companyId of companyIds) {
     await assertCompanyResourcePolicy(req, {
       companyId,
       resourceKey: 'case',
       action: 'archive',
+    });
+  }
+  return null;
+}
+
+// Toplu iptal ikincil savunma — assertBulkCaseArchivePolicy ikizi, action
+// 'close' (iptal terminal geçiş). Birincil kapı route requireRole; bu
+// yalnız enforcement flag AÇIK ortamlarda per-company deny override uygular.
+async function assertBulkCaseCancelPolicy(req, { caseIds }) {
+  const resourceEnabled = isAuthorizationResourceEnforcementEnabled();
+  const securityFilterEnabled = isAuthorizationSecurityFilterEnforcementEnabled();
+  if (!resourceEnabled && !securityFilterEnabled) return null;
+  if (!Array.isArray(caseIds) || caseIds.length === 0) return null;
+  if (caseIds.length > 100) return null; // üst sınır kısa devresi (repo 400 üretir)
+
+  const allowedCompanyIds = Array.isArray(req.user.allowedCompanyIds)
+    ? req.user.allowedCompanyIds
+    : [];
+  const cases = await prisma.case.findMany({
+    where: { id: { in: caseIds }, companyId: { in: allowedCompanyIds } },
+    select: { id: true, companyId: true },
+  });
+  for (const c of cases) {
+    await assertCaseSecurityFilterAccess(req, { caseId: c.id, companyId: c.companyId });
+  }
+  if (!resourceEnabled) return null;
+  const companyIds = Array.from(new Set(cases.map((c) => c.companyId).filter(Boolean)));
+  for (const companyId of companyIds) {
+    await assertCompanyResourcePolicy(req, {
+      companyId,
+      resourceKey: 'case',
+      action: 'close',
     });
   }
   return null;
@@ -483,7 +543,9 @@ async function assertCaseCloseRequiredFields(req, { nextStatus, payload }) {
   if (!isAuthorizationFieldEnforcementEnabled()) return null;
   const fields = closeFieldCandidatesFor(nextStatus);
   if (fields.length === 0) return null;
-  const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
+  // Perf fix — bkz. assertCaseResourcePolicy'deki aynı not; yalnız companyId
+  // kullanılıyor, tam include gereksiz.
+  const c = await caseRepository.getScopeOnly(req.params.id, req.user.allowedCompanyIds, req.user.role);
   if (!c) {
     throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
   }
@@ -562,26 +624,63 @@ router.get(
       });
       const agentTeamId = agentPerson?.teamId ?? null;
       const canSeeTeamPool = agentPerson?.isTeamLead === true || ['L2', 'L3'].includes(agentPerson?.supportLevel ?? '');
-      const orClauses = [
-        { assignedPersonId: req.user.personId },
-        { createdByUserId: req.user.id },
-      ];
-      if (!agentTeamId) {
-        // Takımı olmayan Agent → mevcut davranış (takımsız + tüm havuz)
-        orClauses.push({ assignedPersonId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
-      } else if (canSeeTeamPool) {
-        // Takım lideri veya L2/L3 → kendi takım havuzu + takımsız havuz
-        orClauses.push({ assignedPersonId: null, assignedTeamId: agentTeamId, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
-        orClauses.push({ assignedPersonId: null, assignedTeamId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+      // Sıradan L1 Agent — takımı var, takım lideri değil, L2/L3 değil.
+      // Team.defaultSupportLevel'a DEĞİL, canSeeTeamPool ile aynı kritere
+      // bakılır (bkz. caseRepository.js claim() guard — birebir aynı kural).
+      const isPlainL1Agent = !!agentTeamId && !canSeeTeamPool;
+      const inboxTab = ['all', 'open', 'closed'].includes(f.inboxTab) ? f.inboxTab : null;
+
+      if (inboxTab === 'all') {
+        // Tümü — TÜM Agent seviyeleri (L1/L2/L3, takım lideri fark etmez)
+        // için read-only geniş görünürlük. roleDefaultScope tamamen
+        // kaldırılır; company/security scope (allowedCompanyIds,
+        // buildCaseListSecurityWhere) korunur. Mutasyon endpoint'leri
+        // (transfer vb.) bu görünürlükten bağımsız ayrıca guard'lanır.
+        roleDefaultScope = null;
+      } else if (isPlainL1Agent && inboxTab) {
+        // Açık/Kapalı sekme bazlı kısıtlama — yalnız sıradan L1 Agent'a
+        // uygulanır (L2/L3/takım lideri bu daraltmadan etkilenmez, aşağıdaki
+        // eski/ortak dala düşer). "later" (Ertelenenler) sekmesi inboxTab
+        // parametresini hiç göndermez, o da eski/ortak dala düşer.
+        if (inboxTab === 'open') {
+          // Açık — yalnız kendine atanmış açık vakalar. createdByUserId OR
+          // koşulu BİLEREK yok: kendi açtığı ama başkasına atanmış açık vaka
+          // bu sekmede görünmemeli.
+          roleDefaultScope = { assignedPersonId: req.user.personId };
+        } else {
+          // Kapalı — kendine atanmış VEYA kendisinin actor olduğu activity
+          // VEYA kendisinin mention edildiği herhangi bir kapalı vaka.
+          // Serbest metin/isim eşleşmesi yok, sadece ilişkisel ID sinyalleri.
+          roleDefaultScope = {
+            OR: [
+              { assignedPersonId: req.user.personId },
+              { history: { some: { actorUserId: req.user.id } } },
+              { mentions: { some: { mentionedUserId: req.user.id } } },
+            ],
+          };
+        }
       } else {
-        // L1 Agent with team → hiçbir sahipsiz/atanmamış havuz görünmez
-        // (ne kendi takımının ne takımsız/genel havuzun). Kayıt üzerine
-        // atama yalnız L1 takım liderinin (Supervisor) elinde — L1 Agent
-        // kendi kendine "Üstlen" ile sahipsiz bir kayıt alamaz. Yalnız
-        // kendine atanmış + kendi açtığı vakaları görür (üstteki ortak
-        // orClauses zaten bunları kapsıyor).
+        // Eski/ortak davranış — inboxTab tanınmıyorsa (ör. "later" sekmesi)
+        // veya kullanıcı sıradan L1 Agent değilse (takımsız, takım lideri,
+        // L2/L3) burada değişiklik yok.
+        const orClauses = [
+          { assignedPersonId: req.user.personId },
+          { createdByUserId: req.user.id },
+        ];
+        if (!agentTeamId) {
+          // Takımı olmayan Agent → mevcut davranış (takımsız + tüm havuz)
+          orClauses.push({ assignedPersonId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+        } else if (canSeeTeamPool) {
+          // Takım lideri veya L2/L3 → kendi takım havuzu + takımsız havuz
+          orClauses.push({ assignedPersonId: null, assignedTeamId: agentTeamId, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+          orClauses.push({ assignedPersonId: null, assignedTeamId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+        } else {
+          // L1 Agent with team, inboxTab tanınmıyor (ör. "later") → hiçbir
+          // sahipsiz/atanmamış havuz görünmez. Yalnız kendine atanmış + kendi
+          // açtığı vakaları görür (üstteki ortak orClauses zaten kapsıyor).
+        }
+        roleDefaultScope = { OR: orClauses };
       }
-      roleDefaultScope = { OR: orClauses };
     } else if (['Supervisor', 'Backoffice'].includes(req.user.role) && req.user.personId && !roleDefaultViewOff) {
       const { prisma } = await import('../db/client.js');
       const myPerson = await prisma.person.findUnique({
@@ -726,6 +825,28 @@ router.get(
 );
 
 /**
+ * GET /api/cases/transferred-by-me — Agent KPI "Yönlendirdiklerim" kartı.
+ * transferredBy=req.user.id olan CaseTransfer kayıtlarını caseId bazında
+ * tekilleştirip döner (bkz. caseRepository.listTransferredByMe). Sadece
+ * authenticated kullanıcının KENDİ transferredBy kayıtları görünür — body/
+ * query'den userId alınmaz. Rol bağımsız çalışır (kart sadece Agent'ta
+ * gösterilir ama endpoint her rolde erişilebilir); companyId scope
+ * allowedCompanyIds ile korunur. /:id rotasından önce mount edilmeli.
+ */
+router.get(
+  '/transferred-by-me',
+  asyncRoute(async (req, res) => {
+    const securityWhere = await buildCaseListSecurityWhere(req);
+    const { items, total } = await caseRepository.listTransferredByMe(
+      req.user.id,
+      req.user.allowedCompanyIds,
+      securityWhere,
+    );
+    res.json({ value: items, '@odata.count': total });
+  }),
+);
+
+/**
  * GET /api/cases/watching — kullanıcının izlediği aktif vakalar (Watcher Inbox).
  * companyId scope. /:id rotasından önce mount edilmeli (Express order eşleşmesi).
  */
@@ -784,6 +905,33 @@ router.post(
     const result = await caseRepository.bulkArchive(
       { caseIds: body.caseIds, reason: body.reason },
       { actor, allowedCompanyIds: req.user.allowedCompanyIds },
+    );
+    if (result?.error) return res.status(400).json(result);
+    res.json(result);
+  }),
+);
+
+/**
+ * POST /api/cases/bulk-cancel — toplu iptal (2026-07-10). Agent HARİÇ
+ * tüm roller. bulk-archive'ın rol/statü-değişmiş ikizi: rol kapısı +
+ * cross-tenant koruması aynı; repo tarafında arşiv yerine terminal statü
+ * geçişi (transitionStatus 'İptalEdildi', SLA/history/neden reuse).
+ * Body: { caseIds: string[] (max 100), cancellationReason: string (min 3) }.
+ * Çözüldü toplu YASAK kalır; tekil iptal (/:id/transition) değişmez.
+ */
+router.post(
+  '/bulk-cancel',
+  requireRole(...CASE_BULK_CANCEL_ROLES),
+  asyncRoute(async (req, res) => {
+    const body = req.body ?? {};
+    // İkincil savunma (deny-only policy; flag açıkken 'close' aksiyonuyla).
+    await assertBulkCaseCancelPolicy(req, { caseIds: body.caseIds });
+    const actor = requireActor(req); // ActorContext: userId + role + displayName
+    // Codex #520 P2 — transitionStatus audit stamp'ı actorObject.userId okur;
+    // ActorContext geç (req.user'da alan 'id', stamp null kalırdı).
+    const result = await caseRepository.bulkCancel(
+      { caseIds: body.caseIds, cancellationReason: body.cancellationReason },
+      { actorDisplay: actor.displayName, allowedCompanyIds: req.user.allowedCompanyIds, actorObject: actor },
     );
     if (result?.error) return res.status(400).json(result);
     res.json(result);
@@ -1251,7 +1399,7 @@ router.patch(
 
 /**
  * POST /api/cases/:id/transition — statü geçişi
- * Body: { nextStatus, resolutionNote?, cancellationReason?, thirdPartyId?, thirdPartyName?, escalationLevel?, escalationReason? }
+ * Body: { nextStatus, resolutionNote?, cancellationReason?, thirdPartyId?, thirdPartyName?, thirdPartyNote?, escalationLevel?, escalationReason? }
  */
 router.post(
   '/:id/transition',
@@ -1318,6 +1466,8 @@ router.post(
         priority: body.priority,
       },
       req.user.allowedCompanyIds,
+      req.user.role,
+      req.user.personId ?? null,
     );
 
     if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
@@ -1632,10 +1782,13 @@ router.post(
   '/:id/action-summary',
   asyncRoute(async (req, res) => {
     await assertCaseSecurityFilterAccess(req);
+    // Durum Raporu v2 — muhatap modu: 'internal' (default) | 'customer'.
+    // Geçersiz değer BE'de fail-safe internal'a düşer.
     const result = await generateActionSummary({
       caseId: req.params.id,
       userId: req.user.id,
       allowedCompanyIds: req.user.allowedCompanyIds,
+      mode: (req.body ?? {}).mode,
     });
     if (result.error === 'not_found') return res.status(404).json({ error: 'Vaka bulunamadı' });
     if (result.error === 'forbidden') return res.status(403).json({ error: 'forbidden' });
@@ -2453,7 +2606,7 @@ router.get(
     const emailIdRaw = req.query?.emailId;
     const emailId = typeof emailIdRaw === 'string' && emailIdRaw ? emailIdRaw : undefined;
     const ctx = await caseEmailSender.buildReplyContext(req.params.id, { emailId });
-    res.json(ctx ?? { caseNumber: null, to: [], cc: [], bcc: [], subject: '', inReplyTo: null });
+    res.json(ctx ?? { caseNumber: null, to: [], cc: [], bcc: [], subject: '', inReplyTo: null, quotedBodyHtml: '', quotedInlineRefs: [], suggestedFromAddress: null });
   }),
 );
 
@@ -2608,6 +2761,34 @@ router.get(
         isDefault: a.isDefault,
       })),
     });
+  }),
+);
+
+/**
+ * Alıcı önerisi v1 (2026-07-10) — GET /api/cases/:id/email-recipients
+ *
+ * Composer To/Cc/Bcc autocomplete havuzu: yazışma geçmişi + iç ekip
+ * (kaynak etiketiyle). SALT-OKUR; gönderim/intake koduna dikişi yok.
+ * Scope: from-aliases ile birebir aynı guard zinciri. FE tek fetch ile
+ * önyükler (tuş-başı sorgu yok); hata halinde FE sessizce eski davranışa
+ * düşer — bu endpoint mail akışı için hiçbir koşulda kritik değildir.
+ */
+router.get(
+  '/:id/email-recipients',
+  asyncRoute(async (req, res) => {
+    const c = await caseRepository.get(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+    // Codex #509 P1 — yazışma taraması aktörün vaka görünürlüğüyle sınırlanır
+    // (liste endpoint'leriyle aynı buildCaseListSecurityWhere; enforcement
+    // kapalıysa null → yalnız arşiv dışlaması uygulanır).
+    const securityWhere = await buildCaseListSecurityWhere(req);
+    const items = await emailRecipientSuggestionRepo.listSuggestions(c.companyId, { securityWhere });
+    res.json({ items });
   }),
 );
 

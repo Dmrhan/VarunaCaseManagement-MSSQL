@@ -2,6 +2,9 @@ import bcrypt from 'bcryptjs';
 import { prisma } from './client.js';
 import { fromDb, toDb } from './enumMap.js';
 import { assertActorObject } from '../lib/actor.js';
+import { invalidateWorkCalendarCache } from '../lib/sla/businessTime.js';
+import { getTrHolidays } from '../lib/sla/trHolidays.js';
+import { sortTaxonomyDefs } from '../lib/taxonomySort.js';
 
 /**
  * PR-3 follow-up (Codex P2) — Audit field corruption guard.
@@ -65,6 +68,11 @@ export const thirdPartyRepo = {
         isActive: input.isActive ?? true,
         companyId,
         pausesSla: input.pausesSla !== false, // default true; undefined → true
+        // Uzatılmış SLA v1 (U-B) — iki parçalı tetik; default'lar fail-safe
+        // (uygular=false, DevOps-şartı=true).
+        triggersExtendedSla: input.triggersExtendedSla === true,
+        extendedSlaRequiresDevopsLink: input.extendedSlaRequiresDevopsLink !== false,
+        requiresNote: input.requiresNote === true,
       },
     });
   },
@@ -83,6 +91,9 @@ export const thirdPartyRepo = {
         ...(patch.description !== undefined && { description: patch.description?.trim() || null }),
         ...(patch.isActive !== undefined && { isActive: patch.isActive }),
         ...(patch.pausesSla !== undefined && { pausesSla: patch.pausesSla }),
+        ...(patch.triggersExtendedSla !== undefined && { triggersExtendedSla: !!patch.triggersExtendedSla }),
+        ...(patch.extendedSlaRequiresDevopsLink !== undefined && { extendedSlaRequiresDevopsLink: !!patch.extendedSlaRequiresDevopsLink }),
+        ...(patch.requiresNote !== undefined && { requiresNote: !!patch.requiresNote }),
       },
     });
   },
@@ -528,6 +539,12 @@ export const slaPolicyRepo = {
         ...safeInput,
         requestType: toDb({ requestType: safeInput.requestType }).requestType ?? null,
         priority: safeInput.priority ?? null,
+        // Uzatılmış SLA v1 — yalnız pozitif tam dakika; aksi her değer null
+        // (fail-safe: bozuk giriş uzatma tanımlamış SAYILMAZ).
+        extendedResolutionMin:
+          Number.isInteger(safeInput.extendedResolutionMin) && safeInput.extendedResolutionMin > 0
+            ? safeInput.extendedResolutionMin
+            : null,
         createdByUserId: actor.userId,
         updatedByUserId: actor.userId,
       },
@@ -538,6 +555,13 @@ export const slaPolicyRepo = {
     assertActorObject(actor, 'slaPolicyRepo.update');
     // Codex P2 — client body'sinde createdByUserId/updatedByUserId varsa strip
     const dbPatch = stripAuditFields(toDb(patch));
+    // Uzatılmış SLA v1 — normalize: pozitif tam dakika değilse null.
+    if ('extendedResolutionMin' in dbPatch) {
+      dbPatch.extendedResolutionMin =
+        Number.isInteger(dbPatch.extendedResolutionMin) && dbPatch.extendedResolutionMin > 0
+          ? dbPatch.extendedResolutionMin
+          : null;
+    }
     // 5-tuple değişiyorsa duplicate kontrolü
     if (
       patch.companyId || patch.productGroup || patch.categoryName ||
@@ -1465,7 +1489,8 @@ async function autoPopulateIfEmpty(companyId) {
   if (existing > 0) return 0;
 
   const [caseCount, slaCount, checklistCount, categoryCount] = await Promise.all([
-    prisma.case.count({ where: { companyId } }),
+    // Review fix — arşivli vakalar bu sayaca dahil olmamalı.
+    prisma.case.count({ where: { companyId, isArchived: false } }),
     prisma.sLAPolicy.count({ where: { companyId } }),
     prisma.checklistTemplate.count({ where: { companyId } }),
     prisma.categoryDef.count({
@@ -1523,7 +1548,8 @@ async function autoPopulateIfEmpty(companyId) {
  */
 async function refreshSystemCounts(companyId) {
   const [caseCount, slaCount, checklistCount, categoryCount] = await Promise.all([
-    prisma.case.count({ where: { companyId } }),
+    // Review fix — arşivli vakalar bu sayaca dahil olmamalı.
+    prisma.case.count({ where: { companyId, isArchived: false } }),
     prisma.sLAPolicy.count({ where: { companyId } }),
     prisma.checklistTemplate.count({ where: { companyId } }),
     prisma.categoryDef.count({
@@ -2156,11 +2182,16 @@ export const taxonomyDefRepo = {
     if (parentId !== undefined) {
       where.parentId = parentId === null || parentId === '' ? null : parentId;
     }
-    return prisma.taxonomyDef.findMany({
+    const rows = await prisma.taxonomyDef.findMany({
       where,
       select: TAXONOMY_DEF_SELECT,
-      orderBy: [{ taxonomyType: 'asc' }, { sortOrder: 'asc' }, { label: 'asc' }],
+      orderBy: [{ taxonomyType: 'asc' }, { id: 'asc' }],
     });
+    // 2026-07-16 — kullanıcı kararı: açılış/kapanış etiket içerikleri
+    // alfabetik gelsin (admin ekranı da agent'ların gördüğü sırayla tutarlı
+    // olsun), TEK istisna "impact" (Etki) — eski şiddet sırasına (sortOrder
+    // ASC) geri döndürüldü (bkz. sortTaxonomyDefs).
+    return sortTaxonomyDefs(rows);
   },
 
   async create(input, allowedCompanyIds, actor) {
@@ -2299,6 +2330,164 @@ export const taxonomyDefRepo = {
       data: { isActive: false, updatedByUserId: actor.userId },
     });
     return { id, deactivated: true };
+  },
+};
+
+
+// ─────────────────────────────────────────────────────────────────
+// Çalışma Takvimi (SLA iş-saati Faz 2) — şirket başına TEK kayıt +
+// tatiller. SysAdmin-only (route katmanında kapılı). Her yazımda motor
+// cache'i invalidate edilir (businessTime.loadWorkCalendar 5dk TTL).
+// ─────────────────────────────────────────────────────────────────
+export const workCalendarRepo = {
+  /** Takvim + tatiller; yoksa null (FE "tanımsız — duvar-saati" gösterir). */
+  async get(companyId) {
+    return prisma.workCalendar.findUnique({
+      where: { companyId },
+      include: { holidays: { orderBy: { date: 'asc' } } },
+    });
+  },
+
+  /**
+   * Upsert — companySettingsRepo dersinden: alan-alan koşullu patch;
+   * listede olmayan alan SESSİZCE yazılmaz diye buraya alan eklemeyi
+   * unutma (smoke assert'i kilitler). workDays dizi olarak gelir;
+   * jsonFieldMap köprüsü stringify'ı otomatik yapar.
+   */
+  async upsert(companyId, patch, actor) {
+    assertActorObject(actor, 'workCalendarRepo.upsert');
+    const data = {
+      ...(patch.workDays !== undefined && { workDays: patch.workDays }),
+      ...(patch.breakStartMin !== undefined && { breakStartMin: patch.breakStartMin }),
+      ...(patch.breakEndMin !== undefined && { breakEndMin: patch.breakEndMin }),
+      ...(patch.isActive !== undefined && { isActive: !!patch.isActive }),
+      ...(patch.pauseOnCustomerWait !== undefined && { pauseOnCustomerWait: !!patch.pauseOnCustomerWait }),
+      ...(patch.effectiveFrom !== undefined && {
+        effectiveFrom: patch.effectiveFrom ? new Date(patch.effectiveFrom) : null,
+      }),
+    };
+    const saved = await prisma.workCalendar.upsert({
+      where: { companyId },
+      update: { ...data, updatedByUserId: actor.userId },
+      create: {
+        companyId,
+        workDays: patch.workDays ?? [],
+        breakStartMin: patch.breakStartMin ?? null,
+        breakEndMin: patch.breakEndMin ?? null,
+        isActive: patch.isActive !== undefined ? !!patch.isActive : true,
+        pauseOnCustomerWait: !!patch.pauseOnCustomerWait,
+        effectiveFrom: patch.effectiveFrom ? new Date(patch.effectiveFrom) : null,
+        createdByUserId: actor.userId,
+        updatedByUserId: actor.userId,
+      },
+    });
+    invalidateWorkCalendarCache(companyId);
+    return this.get(companyId);
+  },
+
+  /** Tatil ekle — companyId+date unique (çift kayıt AdminError). */
+  async addHoliday(companyId, { date, name, isHalfDay, halfDayEndMin }, actor) {
+    assertActorObject(actor, 'workCalendarRepo.addHoliday');
+    const cal = await prisma.workCalendar.findUnique({ where: { companyId } });
+    if (!cal) throw new AdminError('Önce çalışma takvimi kaydedilmeli.');
+    const trimmed = String(name ?? '').trim();
+    if (!trimmed) throw new AdminError('Tatil adı zorunlu.');
+    const day = new Date(String(date).slice(0, 10));
+    if (Number.isNaN(day.getTime())) throw new AdminError('Geçersiz tarih.');
+    const dup = await prisma.holiday.findFirst({ where: { companyId, date: day } });
+    if (dup) throw new AdminError('Bu tarihte zaten tatil tanımlı.');
+    const created = await prisma.holiday.create({
+      data: {
+        calendarId: cal.id,
+        companyId,
+        date: day,
+        name: trimmed,
+        isHalfDay: !!isHalfDay,
+        halfDayEndMin: isHalfDay
+          ? (Number.isFinite(Number(halfDayEndMin)) ? Number(halfDayEndMin) : 780)
+          : null,
+        createdByUserId: actor.userId,
+      },
+    });
+    invalidateWorkCalendarCache(companyId);
+    return created;
+  },
+
+  async removeHoliday(companyId, holidayId) {
+    // Scope guard: tatil bu şirkete ait olmalı (id tahmin edilemez ama yine de).
+    const hol = await prisma.holiday.findUnique({ where: { id: holidayId } });
+    if (!hol || hol.companyId !== companyId) throw new AdminError('Tatil bulunamadı.');
+    await prisma.holiday.delete({ where: { id: holidayId } });
+    invalidateWorkCalendarCache(companyId);
+    return { id: holidayId, deleted: true };
+  },
+
+  /**
+   * TR resmî tatillerini yıla göre içe aktar (gömülü Diyanet tablosu;
+   * mevcut tarihler atlanır — copyHolidays deseni). Tablo dışı yıl AdminError.
+   */
+  async importTrHolidays(companyId, year, actor) {
+    assertActorObject(actor, 'workCalendarRepo.importTrHolidays');
+    const cal = await prisma.workCalendar.findUnique({ where: { companyId } });
+    if (!cal) throw new AdminError('Önce çalışma takvimi kaydedilmeli.');
+    const list = getTrHolidays(Number(year));
+    if (!list) {
+      throw new AdminError(
+        `${year} yılı gömülü TR tatil tablosunda yok — tatilleri elle girin ya da tabloyu güncelletin.`,
+      );
+    }
+    const existing = new Set(
+      (await prisma.holiday.findMany({ where: { companyId }, select: { date: true } }))
+        .map((h) => h.date.toISOString().slice(0, 10)),
+    );
+    let added = 0;
+    for (const h of list) {
+      if (existing.has(h.date)) continue;
+      await prisma.holiday.create({
+        data: {
+          calendarId: cal.id,
+          companyId,
+          date: new Date(h.date),
+          name: h.name,
+          isHalfDay: h.isHalfDay,
+          halfDayEndMin: h.halfDayEndMin,
+          createdByUserId: actor.userId,
+        },
+      });
+      added += 1;
+    }
+    invalidateWorkCalendarCache(companyId);
+    return { added, skipped: list.length - added };
+  },
+
+  /** Kaynak şirketin tatillerini hedefe kopyala (mevcut tarihler atlanır). */
+  async copyHolidays(companyId, sourceCompanyId, actor) {
+    assertActorObject(actor, 'workCalendarRepo.copyHolidays');
+    const cal = await prisma.workCalendar.findUnique({ where: { companyId } });
+    if (!cal) throw new AdminError('Önce çalışma takvimi kaydedilmeli.');
+    const source = await prisma.holiday.findMany({ where: { companyId: sourceCompanyId } });
+    const existing = new Set(
+      (await prisma.holiday.findMany({ where: { companyId }, select: { date: true } }))
+        .map((h) => h.date.toISOString().slice(0, 10)),
+    );
+    let copied = 0;
+    for (const h of source) {
+      if (existing.has(h.date.toISOString().slice(0, 10))) continue;
+      await prisma.holiday.create({
+        data: {
+          calendarId: cal.id,
+          companyId,
+          date: h.date,
+          name: h.name,
+          isHalfDay: h.isHalfDay,
+          halfDayEndMin: h.halfDayEndMin,
+          createdByUserId: actor.userId,
+        },
+      });
+      copied += 1;
+    }
+    invalidateWorkCalendarCache(companyId);
+    return { copied, skipped: source.length - copied };
   },
 };
 

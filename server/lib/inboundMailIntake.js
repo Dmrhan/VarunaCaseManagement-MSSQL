@@ -80,11 +80,16 @@ const SYSTEM_UPLOADER = 'E-posta';
  * Wrapped şekilde { ok, attachmentId, fileName, size } veya { ok:false, error }
  * döner. Caller intake throw etmez — stored/skipped counts'a yansır.
  */
+/** Storage relatif path'i — writeCaseFile ile inline-görsel yolu ortak kullanır. */
+function buildMailFilePath(caseId, attachmentId, filename) {
+  return `cases/${caseId}/${attachmentId}-${(filename ?? 'unnamed').replace(/[^\w.\-]+/g, '_').slice(0, 120)}`;
+}
+
 async function writeCaseFile({ caseId, companyId, filename, contentType, content, prisma }) {
   const attachmentId = randomUUID();
   // buildPath storage.js internal; orada safeName + caseId path normalize.
   // saveObject mkdir + writeFile yapar.
-  const relPath = `cases/${caseId}/${attachmentId}-${(filename ?? 'unnamed').replace(/[^\w.\-]+/g, '_').slice(0, 120)}`;
+  const relPath = buildMailFilePath(caseId, attachmentId, filename);
   await saveObject(relPath, content);
   const row = await prisma.caseAttachment.create({
     data: {
@@ -123,11 +128,39 @@ async function writeCaseFile({ caseId, companyId, filename, contentType, content
  *
  * @returns {Promise<{ stored: number, skipped: Array<{filename: string|null, reason: string}> }>}
  */
-async function persistAttachmentsForCase({ caseId, companyId, attachments, prisma, emailId = null }) {
+async function persistAttachmentsForCase({ caseId, companyId, attachments, prisma, emailId = null, bodyHtml = null }) {
   const stored = [];
+  // PR-4 — gövde-içi görseller (CaseEmailAttachment-only; Dosyalar'a girmez,
+  // cap tüketmez, "dosya eklendi" aktivitesine sayılmaz).
+  const storedInline = [];
   const skipped = [];
   if (!Array.isArray(attachments) || attachments.length === 0) {
-    return { stored: 0, skipped: [] };
+    return { stored: 0, storedInline: 0, skipped: [] };
+  }
+  // Adversarial review fix (2026-07-09) — "inline görsel" sınıflandırması
+  // parser'ın inline bayrağına GÜVENEMEZ: parser cid'i olan HER eki inline
+  // sayar (inboundMailParser.js:246), Outlook/Exchange ise normal (gerçek)
+  // görsel eklere de Content-ID koyar. Gövdede REFERANS EDİLMEYEN cid'li
+  // görsel = GERÇEK EK → Dosyalar sekmesine yazılmalı (kanıt kaybolmasın).
+  // Kural: yalnız sanitize edilmiş gövdede <img src="cid:X"> ile gerçekten
+  // referanslanan görseller "gövde-içi" sayılır. bodyHtml gelmezse set boş
+  // → tümü gerçek-ek yolundan (güvenli/legacy davranış).
+  // R2 review fix — sanitize-html attribute değerlerini entity-escape eder
+  // (& → &amp;). Gövdeden yakalanan cid'i HAM contentId ile kıyaslamadan
+  // önce decode et; aksi halde '&' içeren meşru cid'ler (RFC 5322 atext)
+  // "referanssız" sayılıp gerçek-ek yoluna düşer (cap tüketimi geri gelir).
+  // Sıra önemli: spesifik entity'ler önce, &amp; EN SON (çift-decode önlenir).
+  const decodeEntities = (s) => s
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
+  const bodyCidSet = new Set();
+  if (typeof bodyHtml === 'string' && bodyHtml) {
+    const re = /<img[^>]+src=["']cid:([^"']+)["']/gi;
+    for (let m; (m = re.exec(bodyHtml)); ) {
+      const c = decodeEntities(m[1]).trim().replace(/^<|>$/g, '').toLowerCase();
+      if (c) bodyCidSet.add(c);
+    }
   }
   // Codex P2 fix — Cap enforcement. Mevcut attachment count alınır;
   // remaining slots hesaplanır. Cap aşımı → skipped:
@@ -139,23 +172,65 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
     const filename = a?.filename ?? null;
     const contentType = a?.contentType ?? null;
     const content = a?.content;
+    const cid = a?.cid ?? null;
     if (!content || !Buffer.isBuffer(content) || content.length === 0) {
-      skipped.push({ filename, reason: 'empty_content' });
+      skipped.push({ filename, cid, reason: 'empty_content' });
       continue;
     }
     if (content.length > MAIL_ATTACHMENT_MAX_BYTES) {
-      skipped.push({ filename, reason: 'too_large' });
+      skipped.push({ filename, cid, reason: 'too_large' });
       continue;
     }
     if (!isAcceptedUpload(contentType, filename ?? '')) {
-      skipped.push({ filename, reason: 'mime_not_accepted' });
+      skipped.push({ filename, cid, reason: 'mime_not_accepted' });
       continue;
     }
-    // Cap check — geçerli (allowlist + boyut) ek için kontrol.
+
+    // Evidence Preservation PR-4 (2026-07-09) — INLINE GÖRSEL ≠ GERÇEK EK.
+    // Gövde-içi (cid'li) görseller vaka Dosyaları'na (CaseAttachment)
+    // YAZILMAZ; yalnız storage + mailin kendi ek kaydı (CaseEmailAttachment).
+    // Gerekçe:
+    //   1. Her imza logosu/screenshot 20'lik vaka dosya hakkını tüketiyordu →
+    //      uzun thread'de GERÇEK kanıt eki 'attachment_cap_reached' ile
+    //      reddedilebiliyordu. Inline görseller cap'ten MUAF.
+    //   2. Dosyalar sekmesi imza logolarıyla kirlenmez.
+    // Kural: inline + cid + image/* + GÖVDEDE REFERANSLI + emailId mevcut
+    // (CaseEmailAttachment yazılabiliyor). Gövdede referanssız cid'li görsel
+    // = gerçek ek (Outlook Content-ID alışkanlığı) → eski yol. emailId yoksa
+    // eski yol (dosya kaybolmasın).
+    const cidCanon = cid ? String(cid).trim().replace(/^<|>$/g, '').toLowerCase() : null;
+    const isInlineImage = !!a?.inline && !!cidCanon
+      && String(contentType ?? '').toLowerCase().startsWith('image/')
+      && bodyCidSet.has(cidCanon);
+    if (isInlineImage && emailId) {
+      try {
+        const attachmentId = randomUUID();
+        const relPath = buildMailFilePath(caseId, attachmentId, filename);
+        await saveObject(relPath, content);
+        await prisma.caseEmailAttachment.create({
+          data: {
+            emailId,
+            storageKey: relPath,
+            fileName: filename ?? 'dosya',
+            mimeType: contentType ?? 'application/octet-stream',
+            fileSize: content.length,
+            contentId: cid,
+            isInline: true,
+          },
+        });
+        storedInline.push({ fileName: filename ?? 'dosya' });
+      } catch (err) {
+        skipped.push({ filename, cid, reason: 'write_failed' });
+      }
+      continue;
+    }
+
+    // Cap check — geçerli (allowlist + boyut) GERÇEK ek için kontrol.
     // Format kontrolleri ile sonra: mime-reject'i cap'e SAYMAYIZ; yalnız
-    // gerçekten yazılacak ekler slot tüketir.
+    // gerçekten yazılacak ekler slot tüketir. Inline görseller yukarıda
+    // ayrıldı — cap yalnız gerçek ekleri sayar.
     if (remaining <= 0) {
-      skipped.push({ filename, reason: 'attachment_cap_reached' });
+      skipped.push({ filename, cid, reason: 'attachment_cap_reached' });
       continue;
     }
     try {
@@ -187,7 +262,13 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
                 mimeType: contentType ?? 'application/octet-stream',
                 fileSize: content.length,
                 contentId: a?.cid ?? null,
-                isInline: !!a?.inline,
+                // R2 review fix — parser bayrağı DEĞİL, gövde-referans gerçeği:
+                // bu (gerçek-ek) yola düşen kayıtta "gövde-içi" ancak cid
+                // gövdede gerçekten referanslıysa doğrudur (nadir non-image
+                // embed). Outlook'un referanssız Content-ID'li gerçek ekleri
+                // isInline=false → FE çip ayrımı Dosyalar sınıflandırmasıyla
+                // TUTARLI (fix B ↔ fix C hizası).
+                isInline: !!cidCanon && bodyCidSet.has(cidCanon),
               },
             });
           } catch (e) {
@@ -200,7 +281,7 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
       }
     } catch (err) {
       // Disk/DB write fail → atla + skipped (intake düşürülmez)
-      skipped.push({ filename, reason: 'write_failed' });
+      skipped.push({ filename, cid, reason: 'write_failed' });
     }
   }
 
@@ -257,7 +338,44 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
     }
   }
 
-  return { stored: stored.length, skipped };
+  // Evidence Preservation PR-3 (2026-07-09) — SESSİZ KAYIP YOK: alınamayan
+  // ekler vaka aktivitesine yazılır (önceden yalnız log'a düşüyordu →
+  // kullanıcı "görsel/ek nerede?" diye kod aramak zorunda kalıyordu).
+  // İnsancıl sebep etiketiyle: kanıt kaybının nedeni ekranda görünür.
+  if (skipped.length > 0) {
+    const SKIP_REASON_TR = {
+      empty_content: 'içerik boş geldi',
+      too_large: '25MB boyut sınırını aşıyor',
+      mime_not_accepted: 'izin verilmeyen dosya türü',
+      attachment_cap_reached: 'vaka dosya limiti (20) dolu',
+      write_failed: 'dosya kaydedilemedi',
+    };
+    try {
+      const parts = skipped.map((s) =>
+        `${s.filename ?? 'isimsiz'} — ${SKIP_REASON_TR[s.reason] ?? s.reason}`);
+      let note = parts.join('; ');
+      if (note.length > 180) note = `${note.slice(0, 160)}… +${skipped.length} ek`;
+      await prisma.caseActivity.create({
+        data: {
+          caseId,
+          companyId,
+          action: skipped.length > 1
+            ? `E-postadaki ${skipped.length} ek alınamadı`
+            : 'E-postadaki ek alınamadı',
+          actionType: 'FileUploadSkipped',
+          fieldName: 'files',
+          toValue: skipped.length > 1 ? `${skipped.length} ek` : (skipped[0].filename ?? 'isimsiz'),
+          note,
+          actor: SYSTEM_UPLOADER,
+          actorUserId: null,
+        },
+      });
+    } catch (err) {
+      console.warn('[intake] skip caseActivity failed', err?.message ?? err);
+    }
+  }
+
+  return { stored: stored.length, storedInline: storedInline.length, skipped };
 }
 
 // Subject'te [PREFIX-xxx] token ararız. Case caseNumber iki format:
@@ -563,7 +681,6 @@ export async function intakeInboundEmail({
   // (ör. [ABC-1234567] Varuna'da YOK + In-Reply-To gerçek) senaryosunda
   // header threading atlanıp mükerrer vaka açılırdı. Gate artık gerçek
   // resolve durumuna bağlı.
-  let subjectTokenResolvedCase = false;
   if (tokens.length > 0) {
     // Mevcut vakaya CaseEmail olarak ekle — caseNumber ile lookup.
     try {
@@ -582,7 +699,6 @@ export async function intakeInboundEmail({
         }
       }
       if (existing) {
-        subjectTokenResolvedCase = true;
         // ─── K3 OVERRIDE (M6.1) ──────────────────────────────────
         // Plan: kapalı/terminal vakaya gelen yanıt → YENİ vaka aç
         // (otomatik link YOK; ilişkilendirme mevcut LinksTab ile manuel).
@@ -638,8 +754,38 @@ export async function intakeInboundEmail({
               companyId,
               attachments: parsed.attachments ?? [],
               prisma,
+              bodyHtml: sanitizedHtml,
               emailId: inboundEmail.id,
             });
+            // customer_replied bildirimi (2026-07-09, kullanıcı direktifi) —
+            // müşteri mevcut vakaya yanıt verdi; kural varsa üstlenen ajana
+            // e-posta gider (n4b paritesi). DÖNGÜ GUARD'I (2026-07-06 olayı
+            // dersi): İÇ adres göndericide EMIT YOK — ajanın OOO/auto-reply'ı
+            // paylaşımlı kutuya döner, [token]'lı subject vakaya append olur;
+            // emit edilseydi ajana yeni mail → sonsuz döngü. Fail-CLOSED:
+            // kontrol hata verirse iç sayılır (emit atlanır — güvenli yön).
+            void (async () => {
+              let replyFromInternal = true;
+              try {
+                replyFromInternal = await isInternalAddress(parsed.from.email, companyId);
+              } catch {
+                replyFromInternal = true;
+              }
+              if (!replyFromInternal) {
+                // Atanmamış (havuz) vakada VEYA atanan kişinin E-POSTASI
+                // yoksa emit YOK. Codex #496 P2: assignee resolver e-posta
+                // yoksa person.id'ye düşüyor → isLikelyEmail false → dispatch
+                // sonsuza dek Pending + communicationState Pending (guard'ın
+                // önlemeye çalıştığı kuyruk gürültüsü). E-posta ön-şart.
+                const c = await prisma.case.findUnique({
+                  where: { id: existing.id },
+                  select: { assignedPerson: { select: { email: true } } },
+                });
+                if (c?.assignedPerson?.email) {
+                  void emitNotificationEvent({ event: 'customer_replied', caseId: existing.id, triggerInboundEmailId: inboundEmail.id });
+                }
+              }
+            })();
           }
 
           return {
@@ -685,31 +831,61 @@ export async function intakeInboundEmail({
   // - Terminal + k3Enabled → yeni vaka (mevcut K3 davranışı korunur)
   // - En yeni CaseEmail eşleşmesi (birden çok match olursa) — receivedAt/sentAt desc
   let headerMatchedMessageId = null;
-  // Codex P2 R1 fix (2026-07-03): Guard artık `!token` DEĞİL — çünkü
-  // token = tokens[0] ?? null; ilk candidate resolve olmasa bile set
-  // edilir. Dış referanslı Re: ([ABC-1234567] Varuna'da YOK + gerçek
-  // In-Reply-To) senaryosunda önceki guard header threading'i
-  // atlayıp mükerrer vaka açardı. Artık gate gerçek resolve flag'ine
-  // bağlı (token flow eşleşme buldu mu?). Terminal K3 durumunda
-  // subjectTokenResolvedCase = true olduğu için header threading
-  // tekrar çalışmaz (aynı case'e ikinci lookup gereksiz).
-  if (!subjectTokenResolvedCase) {
+  // Codex P2 R1 fix (2026-07-03): gate gerçek resolve flag'ine bağlı.
+  //
+  // 2026-07-16 fix (mükerrer vaka zinciri — UNV-1003100 / UNV-1002191
+  // aileleri): önceki gate, token TERMINAL vakaya çıktığında da header
+  // threading'i atlıyordu ("aynı case'e ikinci lookup gereksiz"
+  // varsayımıyla). Varsayım YANLIŞ: müşteri konudaki eski [token]'la
+  // yazmaya devam ederken In-Reply-To/References zinciri, K3'ün daha
+  // önce açtığı AÇIK devam vakasını gösterebilir. Header atlandığı için
+  // her cevap yeni K3 vakası doğuruyordu (bir thread → 5 vakaya kadar
+  // gözlendi). Yeni kural: header threading yalnız token AÇIK vakaya
+  // append ETTİĞİNDE atlanır (o yol zaten return etti); token terminal
+  // K3 yoluna düştüyse header'a DA bakılır — zincirde açık vaka varsa
+  // cevap oraya eklenir, yoksa K3 davranışı aynen sürer.
+  {
     const headerIds = collectHeaderMessageIds(parsed);
     if (headerIds.length > 0) {
       try {
         const { prisma } = await import('../db/client.js');
-        const matchedEmail = await prisma.caseEmail.findFirst({
+        // 2026-07-16 fix — SEÇİM KURALI: References tipik olarak TÜM
+        // zinciri taşır; eşleşmeler birden çok vakaya dağılabilir (orijinal
+        // terminal + K3 devam vakaları). Eski "en yeni kayıt" kuralı
+        // terminal vakayı seçip K3'ü yeniden tetikleyebiliyordu. Yeni kural:
+        // AÇIK (terminal olmayan, arşivsiz) vakadaki eşleşme ÖNCELİKLİ —
+        // açıklar içinde en yeni; hiç açık yoksa en yeni eşleşme (terminal
+        // → K3 davranışı aynen korunur).
+        const TERMINAL_FOR_PICK = new Set(['Cozuldu', 'IptalEdildi']);
+        const matchedEmails = await prisma.caseEmail.findMany({
           where: { companyId, messageId: { in: headerIds } },
-          select: { caseId: true, messageId: true },
-          // En yeni eşleşen — birden fazla ID match olursa deterministic
+          select: {
+            caseId: true,
+            messageId: true,
+            case: { select: { id: true, status: true, caseNumber: true, isArchived: true, companyId: true } },
+          },
           orderBy: { createdAt: 'desc' },
         });
+        // Codex #542 P2 — CaseEmail.companyId DENORMALİZE; tutarsız veride
+        // (satır bu tenant'ta ama caseId başka tenant'ın vakasında) relation
+        // yabancı vakayı getirebilir. Eski ikinci scoped lookup bunu
+        // reddediyordu — aynı guard burada: vakası bu tenant'ta olmayan
+        // eşleşmeler DAHA SEÇİMDEN ÖNCE elenir (fail-closed; ne append
+        // hedefi ne K3 'existing'i olabilirler).
+        const tenantScoped = matchedEmails.filter(
+          (m) => m.case && m.case.id && m.case.companyId === companyId,
+        );
+        const matchedEmail =
+          tenantScoped.find(
+            (m) => !TERMINAL_FOR_PICK.has(m.case.status) && !m.case.isArchived,
+          ) ?? tenantScoped[0] ?? null;
         if (matchedEmail) {
-          const existing = await prisma.case.findFirst({
-            where: { id: matchedEmail.caseId, companyId },
-            select: { id: true, status: true, caseNumber: true },
-          });
-          if (existing) {
+          const existing = {
+            id: matchedEmail.case.id,
+            status: matchedEmail.case.status,
+            caseNumber: matchedEmail.case.caseNumber,
+          };
+          {
             const TERMINAL_STATUSES_DB = new Set(['Cozuldu', 'IptalEdildi']);
             const k3Enabled = (process.env.M6_K3_NEW_TICKET_ON_TERMINAL ?? 'true') !== 'false';
 
@@ -748,8 +924,31 @@ export async function intakeInboundEmail({
                   companyId,
                   attachments: parsed.attachments ?? [],
                   prisma,
+                  bodyHtml: sanitizedHtml,
                   emailId: inboundEmail.id,
                 });
+                // customer_replied bildirimi — token flow ile AYNI mantık +
+                // AYNI iç-adres döngü guard'ı (fail-closed). Bkz. yukarıdaki
+                // subject-token emit noktasındaki açıklama.
+                void (async () => {
+                  let replyFromInternal = true;
+                  try {
+                    replyFromInternal = await isInternalAddress(parsed.from.email, companyId);
+                  } catch {
+                    replyFromInternal = true;
+                  }
+                  if (!replyFromInternal) {
+                    // Atanmamış VEYA e-postasız üstlenen → emit YOK (Codex
+                    // #496 P2; yukarıdaki subject-token yoluyla aynı gerekçe).
+                    const c = await prisma.case.findUnique({
+                      where: { id: existing.id },
+                      select: { assignedPerson: { select: { email: true } } },
+                    });
+                    if (c?.assignedPerson?.email) {
+                      void emitNotificationEvent({ event: 'customer_replied', caseId: existing.id, triggerInboundEmailId: inboundEmail.id });
+                    }
+                  }
+                })();
               }
 
               return {
@@ -1043,8 +1242,12 @@ export async function intakeInboundEmail({
   // CaseEmailAttachment(emailId) ile yazılsın. Aksi halde cid/inline
   // metadata kaybolur.
   let firstEmail = { id: null, deduped: false };
+  // Codex #489 P1 fix — sanitizedHtml try DIŞINA hoist edildi: aşağıdaki
+  // persistAttachmentsForCase(bodyHtml: sanitizedHtml) AYRI try bloğunda;
+  // const içeride kalsaydı ReferenceError → catch yutar → yeni vakanın TÜM
+  // ekleri + inline snapshot'ları sessizce düşerdi.
+  const sanitizedHtml = sanitizeIncomingEmailHtml(parsed.html || parsed.text || description);
   try {
-    const sanitizedHtml = sanitizeIncomingEmailHtml(parsed.html || parsed.text || description);
     firstEmail = await caseEmailRepository.appendInbound({
       caseId: created.id,
       companyId,
@@ -1146,6 +1349,7 @@ export async function intakeInboundEmail({
         companyId,
         attachments: parsed.attachments ?? [],
         prisma,
+        bodyHtml: sanitizedHtml,
         emailId: firstEmail.id,
       });
     }

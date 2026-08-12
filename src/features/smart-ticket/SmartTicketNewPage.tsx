@@ -507,14 +507,22 @@ export function SmartTicketNewPage({
   const [catalogProductGroups, setCatalogProductGroups] = useState<
     Array<{ id: string; code: string; name: string }>
   >([]);
+  // Codex #494 P2 fix — "yükleniyor" ile "yüklendi ve boş" AYRI durumlar.
+  // Fetch dönmeden catalogProductGroups=[] olduğundan hızlı davranan
+  // kullanıcı Ürün Grubu zorunluluğunu atlayıp ticket açabiliyordu →
+  // kapanışta product_group_required_for_closure duvarına çıkışsız
+  // takılıyordu. Yüklenene kadar create bloklanır.
+  const [catalogLoading, setCatalogLoading] = useState(false);
 
   useEffect(() => {
     if (stage !== 'opening' || !form.companyId) {
       setCatalogProducts([]);
       setCatalogProductGroups([]);
+      setCatalogLoading(false);
       return;
     }
     let alive = true;
+    setCatalogLoading(true);
     void lookupService
       .caseCatalog({ companyId: form.companyId, accountId: form.accountId || null })
       .then((data) => {
@@ -528,9 +536,13 @@ export function SmartTicketNewPage({
             productGroupId: p.productGroupId,
           })),
         );
+        setCatalogLoading(false);
       })
       .catch(() => {
         // Sessiz — apiFetch zaten toast gösterir. Alanlar boş kalır.
+        // Yükleme bitti sayılır (fail'de boş liste = zorunluluk uygulanmaz;
+        // aksi halde katalog servisi düşükken vaka HİÇ açılamazdı).
+        if (alive) setCatalogLoading(false);
       });
     return () => {
       alive = false;
@@ -694,6 +706,13 @@ export function SmartTicketNewPage({
   const projectRequirementSatisfied =
     !projectsEnabled || !projectsRequired || !form.accountId || !!form.accountProjectId;
 
+  // Akıllı Tanımlar (açılış taksonomisi) — SEÇİLEBİLİR (item'ı olan) alanların HEPSİ
+  // ZORUNLU (kullanıcı isteği: hepsi zorunlu). Admin'in item tanımlamadığı alan zorunlu
+  // sayılmaz — aksi halde o alan seçilemeyeceği için hiç vaka açılamazdı.
+  // Taxonomiler YÜKLENİRKEN sağlanmış sayılmaz (item'lar bilinmeden buton aktifleşmesin).
+  const taxonomyRequirementSatisfied =
+    !taxonomiesLoading &&
+    TAXONOMY_FIELDS.every((f) => (taxonomies?.[f.key]?.length ?? 0) === 0 || !!form[f.key]);
   const canCreate =
     stage === 'opening' &&
     !!form.companyId &&
@@ -704,6 +723,16 @@ export function SmartTicketNewPage({
     // 2026-07-02 — Öncelik + Talep Türü ZORUNLU. Kullanıcı seçmezse advance yok.
     !!form.priority &&
     !!form.requestType &&
+    // Review fix — Ürün Grubu ZORUNLU (kayıtlarda bu bilginin kesin
+    // olması için; kapanış kapısıyla aynı gerekçe, ama burada açılışta
+    // uygulanıyor). Şirkette tanımlı hiç ürün grubu yoksa (dropdown boş)
+    // zorunluluk uygulanmaz — aksi halde o şirkette vaka HİÇ açılamazdı.
+    // Codex #494 P2 — katalog YÜKLENİRKEN create bloklanır: geçici boş
+    // liste "grup yok" değildir; hızlı kullanıcı zorunluluğu atlayamaz.
+    !catalogLoading &&
+    (catalogProductGroups.length === 0 || !!form.productGroupId) &&
+    // Akıllı Tanımlar — item'ı olan alanların hepsi seçili olmadan buton pasif.
+    taxonomyRequirementSatisfied &&
     !creating;
 
   const canSuggest =
@@ -1384,7 +1413,6 @@ export function SmartTicketNewPage({
 
   async function handleSubmitTransfer() {
     if (!createdCase || transferring) return;
-    const isSameTeam = transferToTeamId === createdCase.assignedTeamId;
     const trimmedNote = transferNote.trim();
     if (!trimmedNote) {
       setTransferError('Devir notu zorunlu.');
@@ -1403,32 +1431,26 @@ export function SmartTicketNewPage({
       // varsa ekle (network payload temiz, backend FieldUpdate row'u
       // duplicate yazmaz).
       const priorityChanged = transferPriority !== createdCase.priority;
-      let updated: Case | null | undefined;
-      if (isSameTeam) {
-        // Aynı takım: kişi seçildiyse belirli kişiye, boşsa havuza ata.
-        // transferCase değil update kullan — backend same_team guard var.
-        const targetPerson = transferPersonOptions.find((p) => p.id === transferToPersonId);
-        updated = await caseService.update(createdCase.id, {
-          assignedPersonId: transferToPersonId || null,
-          assignedPersonName: targetPerson?.name ?? null,
-        });
-      } else {
-        // Farklı takıma devir — mevcut transferCase akışı
-        const updated2 = await caseService.transferCase(createdCase.id, {
-          toTeamId: transferToTeamId,
-          toPersonId: transferToPersonId || undefined,
-          reason: trimmedNote,
-          reasonCode: 'expertise',
-          smartTicketTransfer: {
-            transferNote: trimmedNote,
-            ...(summary ? { composedSummary: summary } : {}),
-            attemptedStepIds: transferAttemptedStepIds,
-            ...(transferStepOutcomes ? { stepOutcomesSummary: transferStepOutcomes } : {}),
-          },
-          ...(priorityChanged ? { priority: transferPriority } : {}),
-        });
-        updated = updated2 ?? null;
-      }
+      // Review fix — takımdan bağımsız HER ZAMAN transferCase() çağrılır.
+      // Eskiden aynı takım içi devirde caseService.update() kullanılıyordu
+      // ("backend same_team guard var" varsayımıyla) — ama transferCase()
+      // aynı takıma devri de sorunsuz kabul ediyor (böyle bir guard yok,
+      // bkz. caseRepository.transferCase()). update() yolu CaseTransfer
+      // kaydı hiç oluşturmadığı için devir notu "Devir Notu" bölümünde
+      // hiç görünmüyordu.
+      const updated = await caseService.transferCase(createdCase.id, {
+        toTeamId: transferToTeamId,
+        toPersonId: transferToPersonId || undefined,
+        reason: trimmedNote,
+        reasonCode: 'expertise',
+        smartTicketTransfer: {
+          transferNote: trimmedNote,
+          ...(summary ? { composedSummary: summary } : {}),
+          attemptedStepIds: transferAttemptedStepIds,
+          ...(transferStepOutcomes ? { stepOutcomesSummary: transferStepOutcomes } : {}),
+        },
+        ...(priorityChanged ? { priority: transferPriority } : {}),
+      });
       if (!updated) {
         setTransferError('Vaka aktarılamadı.');
         return;
@@ -1484,9 +1506,10 @@ export function SmartTicketNewPage({
       closure.resolutionType ||
       closure.permanentPrevention
     );
-    if (!closureSuggestion && !hasAnyClosureField) {
+    // KB analizine basmak YETMEZ — en az bir kapanış etiketi SEÇİLMİŞ olmalı.
+    if (!hasAnyClosureField) {
       setClosureError(
-        'Vaka çözülmeden önce KB kapanış analizi yapılmalı (veya kapanış etiketleri elle seçilmeli).',
+        'Vaka çözülmeden önce en az bir kapanış etiketi seçilmeli (kök neden grubu / detay / çözüm tipi / kalıcı önleme).',
       );
       return;
     }
@@ -1817,21 +1840,27 @@ export function SmartTicketNewPage({
                 </Field>
               </div>
 
-              {/* 2026-07-02 — Ürün Grubu + Ürün (opsiyonel, cascade). Grup
-                  seçilince ürün dropdown'ı yalnız o grubun aktif ürünleri.
-                  Grup değişince ürün seçimi otomatik sıfırlanır (useEffect).
-                  Boş gruplar (Quest/ServiceCore) listede kalır — grup-only
-                  seçim anlamlı; Case.productGroup name'e yazılır, productId
-                  ürün seçilirse eklenir. */}
+              {/* 2026-07-02 — Ürün Grubu + Ürün (cascade). Grup seçilince ürün
+                  dropdown'ı yalnız o grubun aktif ürünleri. Grup değişince
+                  ürün seçimi otomatik sıfırlanır (useEffect). Boş gruplar
+                  (Quest/ServiceCore) listede kalır — grup-only seçim
+                  anlamlı; Case.productGroup name'e yazılır, productId ürün
+                  seçilirse eklenir.
+                  Review fix — Ürün Grubu artık ZORUNLU (şirkette hiç grup
+                  tanımlı değilse istisna, bkz. canCreate). Ürün seçimi hâlâ
+                  opsiyonel — grup tek başına yeterli. */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field
                   label="Ürün Grubu"
+                  required={catalogLoading || catalogProductGroups.length > 0}
                   hint={
                     !form.companyId
                       ? 'Önce şirket seç.'
-                      : catalogProductGroups.length === 0
-                        ? 'Bu şirkette aktif ürün grubu tanımlı değil.'
-                        : 'Opsiyonel. Vakanın konu ürün grubu; emin değilsen boş bırak.'
+                      : catalogLoading
+                        ? 'Ürün grupları yükleniyor…'
+                        : catalogProductGroups.length === 0
+                          ? 'Bu şirkette aktif ürün grubu tanımlı değil.'
+                          : 'Vakanın konu ürün grubu.'
                   }
                 >
                   <Select
@@ -1840,7 +1869,8 @@ export function SmartTicketNewPage({
                       setForm((f) => ({ ...f, productGroupId: e.target.value }))
                     }
                     disabled={
-                      stage !== 'opening' || !form.companyId || catalogProductGroups.length === 0
+                      stage !== 'opening' || !form.companyId || catalogLoading
+                      || catalogProductGroups.length === 0
                     }
                   >
                     <option value="">— Grup seçme —</option>
@@ -1956,6 +1986,7 @@ export function SmartTicketNewPage({
                     return (
                       <Field
                         key={f.key}
+                        required={items.length > 0}
                         label={
                           <span className="inline-flex items-center gap-1.5">
                             <Icon size={11} className="text-brand-500" />
@@ -1965,7 +1996,9 @@ export function SmartTicketNewPage({
                         hint={
                           isFromSuggestion && suggested
                             ? `KB önerisi (${suggested.matchedBy}, %${Math.round(suggested.confidence * 100)})`
-                            : undefined
+                            : items.length > 0 && !form[f.key]
+                              ? 'Zorunlu'
+                              : undefined
                         }
                       >
                         <Select
@@ -2012,6 +2045,7 @@ export function SmartTicketNewPage({
                             if (form.description.trim().length === 0) return 'Açıklama boş olamaz.';
                             if (!projectRequirementSatisfied) return 'Proje seçimi zorunlu.';
                             if (!form.priority || !form.requestType) return 'Öncelik ve Talep Türü zorunlu.';
+                            if (catalogProductGroups.length > 0 && !form.productGroupId) return 'Ürün Grubu zorunlu.';
                             return undefined;
                           })()
                         : undefined

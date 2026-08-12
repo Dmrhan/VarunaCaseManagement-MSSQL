@@ -56,6 +56,9 @@ export interface ReportColumnDef {
 export interface ReportFilters {
   dateFrom?: string;
   dateTo?: string;
+  /** Case.resolvedAt aralığı — yalnız terminal (Çözüldü/İptal) vakalar döner. */
+  resolvedFrom?: string;
+  resolvedTo?: string;
   companyIds?: string[] | string;
   statuses?: string[] | string;
   priorities?: string[] | string;

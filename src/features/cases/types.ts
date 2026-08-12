@@ -70,6 +70,11 @@ export interface CaseThirdParty {
   isActive: boolean;
   companyId?: string;
   pausesSla?: boolean;
+  // Uzatılmış SLA v1 — tanım bazlı iki parçalı tetik (U-B)
+  triggersExtendedSla?: boolean;
+  extendedSlaRequiresDevopsLink?: boolean;
+  // U-C — bu tanım seçildiğinde 3rdPartyBekleniyor geçişinde açıklama zorunlu mu.
+  requiresNote?: boolean;
 }
 
 export interface CaseDocumentType {
@@ -172,6 +177,9 @@ export interface SlaPolicy {
   priority: CasePriority | null;
   responseHours: number;
   resolutionHours: number;
+  /** Uzatılmış SLA v1 — yazılım geliştirme devrinde geçerli TOPLAM çözüm
+   *  süresi (MESAİ DAKİKASI; null = bu kuralda uzatma yok). */
+  extendedResolutionMin?: number | null;
   description?: string;
   isActive: boolean;
 }
@@ -247,6 +255,7 @@ export type CaseHistoryActionType =
   | 'NoteAdded'        // Not eklendi
   | 'CallLogAdded'     // Çağrı kaydı eklendi
   | 'FileUploaded'     // Dosya yüklendi
+  | 'FileUploadSkipped' // E-posta eki alınamadı (boyut/tür/limit — Evidence Preservation)
   | 'FileRemoved'      // Dosya silindi
   | 'CaseCreated'      // Vaka oluşturuldu
   | 'SLAApplied';      // SLA kuralı/fallback uygulandı
@@ -287,6 +296,8 @@ export const CASE_FIELD_LABELS: Record<string, string> = {
   companyName:          'Şirket',
   accountId:            'Müşteri',
   accountName:          'Müşteri',
+  accountProjectId:     'Proje',
+  accountProjectName:   'Proje',
   assignedTeamId:       'Atanan Takım',
   assignedTeamName:     'Atanan Takım',
   assignedPersonId:     'Atanan Kişi',
@@ -417,6 +428,24 @@ export interface Case {
   /** WR-A4 / PM-04 — AccountCompany altındaki proje (opsiyonel). */
   accountProjectId?: string;
   accountProjectName?: string;
+  /**
+   * WR-Proje-Kapanış — müşteride seçilebilir AKTİF proje (isActive:true AND
+   * status:'Active') var mı. Yalnız TEKİL vaka dönen endpoint'lerde dolu
+   * gelir (get, transition, patch, transfer, claim, link-account vb.) —
+   * liste (GET /api/cases) bu alanı TAŞIMAZ (bilinçli, performans).
+   */
+  hasAvailableProjects?: boolean;
+  /**
+   * WR-Proje-Kapanış fix — accountProjectId dolu olsa bile o proje sonradan
+   * Completed/Cancelled/Passive'e çekilmiş (stale) olabilir; backend kapanış
+   * guard'ı artık bunu reddediyor (isAccountProjectCurrentlyActive). FE'nin
+   * projectGateActive hesabı yalnız "accountProjectId dolu mu" değil, bu
+   * alanla "bağlı proje HÂLÂ aktif mi" diye de bakmalı — aksi halde kapı
+   * erken kapanıp seçim kutusu gizlenir, kullanıcı Uygula'ya basıp backend
+   * hatası alana kadar sorunu fark edemez. Aynı kapsam kısıtı geçerli:
+   * yalnız tekil-vaka endpoint'lerinde dolu gelir.
+   */
+  accountProjectIsActive?: boolean;
 
   category: string;
   subCategory: string;
@@ -447,6 +476,9 @@ export interface Case {
   // Spec 5.1 — third_party_id FK (3rdPartyBekleniyor statüsünde zorunlu)
   thirdPartyId?: string;
   thirdPartyName?: string;
+  // U-C — 3. parti bekleme açıklaması. thirdPartyId/thirdPartyName'in aksine
+  // statüden çıkınca temizlenmez; raporlanabilir kalıcı kayıt.
+  thirdPartyNote?: string | null;
 
   // Spec 5.2 — ProactiveTracking'e özel (caseType !== 'ProactiveTracking' iken undefined)
   financialStatus?: FinancialStatus;
@@ -477,6 +509,22 @@ export interface Case {
   slaThirdPartyWaitMin: number;
   slaResponseMetAt?: string | null;
   slaResolutionStartedAt?: string | null;
+
+  // Faz 3b/4 — iş-saati SLA görünümü. Kalan dk'lar BE-hesaplıdır (FE'de
+  // takvim kopyası YASAK): slaBusinessTime=true ise İŞ-dakikası, değilse
+  // duvar-dk. slaDayMinutes = dk→gün çevrim katsayısı (takvimlide günlük
+  // net mesai, duvarda 1440). Alanlar yalnız liste + detay dönüşünde dolar;
+  // yoksa FE eski duvar-saat formatına düşer.
+  slaBusinessTime?: boolean;
+  slaResponseRemainingMin?: number | null;
+  slaResolutionRemainingMin?: number | null;
+  slaDayMinutes?: number;
+  slaCustomerWaitStartedAt?: string | null;
+  slaCustomerWaitMin?: number;
+  /** Uzatılmış SLA v1 — hangi hedefin uygulandığı: 'standard'|'extended'
+   *  (null=legacy). Rozet + "uygulanan hedef" satırı bu alandan okur. */
+  slaTargetSource?: string | null;
+  slaResolutionTargetMin?: number | null;
 
   // Phase D — Müşteri eşleştirme bekleyen flag.
   // true ise vaka accountId NULL açıldı, Supervisor/Admin eşleştirme kuyruğunda
@@ -909,12 +957,17 @@ export interface CaseFilters {
   // Rol bazlı varsayılan kapsam. 'off' = Supervisor/Backoffice Tümü sekmesinde
   // havuz kaldırılır; Agent için backend tarafından ignore edilir.
   roleDefaultView?: 'off';
+  /** L1 Agent sekme bazlı görünürlük (F1) — hangi Inbox sekmesinin aktif
+   *  olduğunu backend'e bildirir. Sadece sıradan L1 Agent için anlamlı;
+   *  diğer roller backend tarafında ignore edilir. 'later' sekmesi bu
+   *  alanı hiç göndermez (ayrı endpoint kullanır). */
+  inboxTab?: 'all' | 'open' | 'closed';
 }
 
 // Role-aware KPI stats — GET /api/cases/stats response.
 export type CaseStatsResponse =
-  | { mode: 'personal'; assignedToMe: number; slaRiskMine: number; resolvedToday: number; snoozedMine: number; unassigned: number; critical: number }
-  | { mode: 'team'; teamOpenCount: number; teamSlaRisk: number; teamEscalation: number; teamResolvedToday: number; supervisorTeamId: string | null; unassigned: number; critical: number }
+  | { mode: 'personal'; assignedToMe: number; slaRiskMine: number; resolvedToday: number; snoozedMine: number; transferredByMeCount: number; unassigned: number; critical: number }
+  | { mode: 'team'; teamOpenCount: number; teamSlaRisk: number; teamEscalation: number; teamResolvedToday: number; transferredByMeCount: number; supervisorTeamId: string | null; unassigned: number; critical: number }
   | { mode: 'operations'; totalOpen: number; slaViolation: number; critical: number; resolvedToday: number; unassigned: number }
   | { mode: 'empty'; unassigned?: number; critical?: number }
   | { mode: 'unknown'; unassigned?: number; critical?: number };

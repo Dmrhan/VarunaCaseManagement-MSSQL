@@ -29,7 +29,9 @@ export async function runPatternDetect() {
   // Aynı şirket + kategori için son N dk'daki vaka sayısı
   const groups = await prisma.case.groupBy({
     by: ['companyId', 'category'],
-    where: { createdAt: { gte: since } },
+    // 2026-07-06 — arşivli vaka örüntü tespitine girmez (toplu temizlik
+    // arşivleri sahte spike üretmesin)
+    where: { createdAt: { gte: since }, isArchived: false },
     _count: { _all: true },
   });
   const triggered = groups.filter((g) => g._count._all >= THRESHOLD);
@@ -66,6 +68,7 @@ export async function runPatternDetect() {
         companyId: g.companyId,
         category: g.category,
         createdAt: { gte: since },
+        isArchived: false,
       },
       select: { id: true },
       take: 100, // pratik üst sınır (alarm noise değil veri)

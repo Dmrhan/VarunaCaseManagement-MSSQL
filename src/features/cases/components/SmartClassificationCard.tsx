@@ -26,7 +26,7 @@
  * farklıysa/elle girildiyse "elle seçildi" — persist edilen
  * classificationSuggestion.perField sayesinde sayfa yenilense de korunur.
  */
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Flame, Layers, Pencil, Settings2, Sparkles, Workflow } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Field';
@@ -98,6 +98,15 @@ interface SmartClassificationCardProps {
   kbEnabled: boolean | null;
   canEdit: boolean;
   onUpdated: (updated: Case) => void;
+  /**
+   * caseRepository.js transitionStatus kapanış kapısıyla aynı üst-koşul
+   * (COMP-UNIVERA + KB tenant açık; müşteri/proje eşleşmesinden bağımsız)
+   * — true ise vaka Çözüldü'ye geçerken 5 alan boşken backend 400 döner.
+   * Kart burada yalnız görsel uyarı verir (hangi alanın gerçekten zorunlu
+   * olduğu — "o şirkette tanımlı taksonomi var mı" inceliği — backend'de
+   * kesinleşir).
+   */
+  requiredForClosure?: boolean;
 }
 
 export function SmartClassificationCard({
@@ -105,6 +114,7 @@ export function SmartClassificationCard({
   kbEnabled,
   canEdit,
   onUpdated,
+  requiredForClosure = false,
 }: SmartClassificationCardProps) {
   const { toast } = useToast();
   const [editing, setEditing] = useState(false);
@@ -142,6 +152,18 @@ export function SmartClassificationCard({
     setTaxonomies(res.taxonomies);
     return res.taxonomies;
   }, [taxonomies, item.companyId]);
+
+  // P2 review fix — "Zorunlu" rozeti backend'in "yalnız o şirkette tanımlı
+  // taksonomi tipi zorunlu" kuralıyla hizalanmalı; eskiden 5 alandan biri
+  // bile boşsa rozet gösteriliyordu (admin o alan için hiç taksonomi
+  // tanımlamamış olsa bile). taxonomies normalde yalnız Düzenle/Analiz Et
+  // tıklanınca çekilir — rozetin doğru görünmesi için requiredForClosure
+  // true'yken erkenden (kullanıcı etkileşimi olmadan) çekilir.
+  useEffect(() => {
+    if (!requiredForClosure) return;
+    void ensureTaxonomies().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requiredForClosure, item.companyId]);
 
   const openEditor = useCallback(async () => {
     setValues(readStoredValues(item));
@@ -314,6 +336,26 @@ export function SmartClassificationCard({
   const chips = FIELDS.map((f) => ({ ...f, value: readStoredLabel(item, f.key) })).filter(
     (f) => f.value,
   );
+  // Kapanış kapısı görsel ipucu — backend'in "yalnız o şirkette tanımlı
+  // taksonomi tipi zorunlu" kuralıyla hizalı (P2 review fix): taxonomies
+  // henüz çekilmediyse (kısa geçiş penceresi) eski konservatif davranış
+  // korunur; çekildikten sonra yalnız gerçekten tanımlı (taxonomies[key]
+  // dolu) alanlar sayılır — admin bir alan için hiç taksonomi tanımlamadıysa
+  // o alan boş olsa bile rozet tetiklenmez.
+  const definedFieldKeys = new Set(
+    FIELDS.map((f) => f.key).filter((key) => (taxonomies?.[key]?.length ?? 0) > 0),
+  );
+  const isIncomplete = taxonomies
+    ? FIELDS.some((f) => definedFieldKeys.has(f.key) && !stored[f.key])
+    : chips.length < FIELDS.length;
+  const requiredBadge = requiredForClosure && isIncomplete && (
+    <span
+      className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+      title="Vaka Çözüldü'ye geçmeden önce bu alanların doldurulması gerekiyor."
+    >
+      Zorunlu
+    </span>
+  );
 
   const headerIcon = (
     <Sparkles size={13} className="shrink-0 text-violet-500" aria-hidden />
@@ -331,6 +373,7 @@ export function SmartClassificationCard({
           <span className="text-xs font-medium text-slate-600 dark:text-ndark-muted">
             Akıllı Tanımlar
           </span>
+          {requiredBadge}
           {chips.length > 0 ? (
             <>
               {chips.map((f) => {

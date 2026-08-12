@@ -107,7 +107,7 @@ export function AdminSlaPage() {
     <>
       <AdminListLayout
         title="SLA Kuralları"
-        description="5-tuple eşleşme: Şirket + Ürün Grubu + Kategori + Alt Kategori + Talep Türü → Yanıt/Çözüm saatleri (PRODUCT_SPEC §6)."
+        description="6 boyutlu eşleşme: Şirket + Ürün Grubu + Kategori + Alt Kategori + Talep Türü + Öncelik → Yanıt/Çözüm saatleri; opsiyonel Uzatılmış Çözüm (yazılım geliştirme devri, dk) (PRODUCT_SPEC §6)."
         count={filtered.length}
         searchPlaceholder="Şirket / ürün grubu / kategori / talep türüne göre ara…"
         searchValue={search}
@@ -162,6 +162,7 @@ export function AdminSlaPage() {
                   <Th>Öncelik</Th>
                   <Th align="right">Yanıt</Th>
                   <Th align="right">Çözüm</Th>
+                  <Th align="right">Uzatılmış</Th>
                   <Th align="right">Eşleşen</Th>
                   <Th>Durum</Th>
                   <Th align="right">Aksiyon</Th>
@@ -194,6 +195,11 @@ export function AdminSlaPage() {
                       </Td>
                       <Td align="right" className="font-mono text-slate-700">
                         {p.resolutionHours}h
+                      </Td>
+                      <Td align="right" className="font-mono text-slate-700">
+                        {p.extendedResolutionMin
+                          ? `${p.extendedResolutionMin} dk`
+                          : <span className="text-xs text-slate-400">—</span>}
                       </Td>
                       <Td align="right">
                         {usage > 0 ? (
@@ -277,6 +283,7 @@ const EMPTY_FORM: SlaPolicyInput = {
   priority: null,
   responseHours: 4,
   resolutionHours: 24,
+  extendedResolutionMin: null,
   description: '',
   isActive: true,
 };
@@ -540,6 +547,29 @@ function SlaEditModal({
               value={form.resolutionHours}
               onChange={(e) =>
                 setForm((f) => ({ ...f, resolutionHours: Number(e.target.value) || 0 }))
+              }
+            />
+          </Field>
+
+          <Field
+            label="Uzatılmış Çözüm (dk)"
+            hint={
+              form.extendedResolutionMin
+                ? `≈ ${(form.extendedResolutionMin / 510).toFixed(1)} iş günü (8,5 sa/gün) — yazılım geliştirme devrinde geçerli TOPLAM süre`
+                : 'Boş = bu kuralda uzatma yok. Yazılım geliştirme devrinde geçerli TOPLAM süre (mesai dk).'
+            }
+          >
+            <TextInput
+              type="number"
+              min={1}
+              step={1}
+              placeholder="örn. 1830"
+              value={form.extendedResolutionMin ?? ''}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  extendedResolutionMin: e.target.value === '' ? null : Number(e.target.value) || null,
+                }))
               }
             />
           </Field>

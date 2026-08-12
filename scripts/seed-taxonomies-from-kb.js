@@ -94,7 +94,9 @@ for (const [srcKey, taxonomyType] of Object.entries(OPEN_MAP)) {
 // parentCode'suz emit edilir (parentId yazılmaz, gruba bağlanmaz).
 for (const g of taxonomy.close?.kok_neden?.groups ?? []) {
   emit('rootCauseGroup', g.group);
-  for (const d of g.details ?? []) emit('rootCauseDetail', d);
+  // v4 şema — details artık {label, cozum_tipleri} nesnesi (bkz. commit
+  // 124c9a6); düz string değil, label'ı çıkarmak gerekiyor.
+  for (const d of g.details ?? []) emit('rootCauseDetail', d.label);
 }
 for (const label of taxonomy.close?.cozum_tipi?.values ?? []) emit('resolutionType', label);
 for (const label of taxonomy.close?.kalici_onlem?.values ?? []) emit('permanentPrevention', label);

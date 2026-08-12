@@ -66,6 +66,8 @@ export interface MailComposerProps {
     caseNumber: string | null;
     subject: string;
     quotedBodyHtml: string;
+    /** Taslak hydration'ı — alıntı cid görsellerinin kaynak ek referansları. */
+    quotedInlineRefs?: Array<{ cid: string; emailId: string; attachmentId: string }>;
   } | null;
   /**
    * @deprecated M6.3b Faz 2 — Yerine initialTenantSignatureHtml +
@@ -165,6 +167,15 @@ export function MailComposer({
   const [to, setTo] = useState<ContactPickerValue[]>(initialReplyContext?.to ?? []);
   const [cc, setCc] = useState<ContactPickerValue[]>(initialReplyContext?.cc ?? []);
   const [bcc, setBcc] = useState<ContactPickerValue[]>(initialReplyContext?.bcc ?? []);
+  // Yanıt VEYA ilet alıntısı — composer örneği ikisinden yalnız biridir.
+  // Baseline body'nin sonuna eklenir ve imza-swap'larında korunur (Option A:
+  // standart nested quoting; parent gövde zinciri kendiliğinden taşır).
+  // 2026-07-09 hydration — STATE: alıntıdaki cid görselleri blob URL'e
+  // çevrilince bu değer de güncellenir; imza-swap/şablon efektleri hydrate
+  // edilmiş alıntıyla string-eşleşmeye devam eder.
+  const [activeQuotedHtml, setActiveQuotedHtml] = useState<string>(
+    () => initialForwardContext?.quotedBodyHtml ?? initialReplyContext?.quotedBodyHtml ?? '',
+  );
   // M6.3-realign — Cc/Bcc her zaman görünür (n4b spec). Setter
   // gerekmiyor; sadece downstream handleSubmit kullanımına string
   // kalsın diye sabit readonly.
@@ -238,7 +249,7 @@ export function MailComposer({
     (() => {
       let html = '<p></p>';
       if (initialSelectedSignatureHtml) html += initialSelectedSignatureHtml;
-      if (initialForwardContext?.quotedBodyHtml) html += initialForwardContext.quotedBodyHtml;
+      if (activeQuotedHtml) html += activeQuotedHtml;
       return html;
     })(),
   );
@@ -251,9 +262,8 @@ export function MailComposer({
     setBodyHtml((cur) => {
       // Body hala baseline durumunda mı? → append güvenli.
       if (cur === initialBaselineBodyRef.current) {
-        // Codex P2 fix — forward quotedBodyHtml KORUNMALI.
-        const quoted = initialForwardContext?.quotedBodyHtml ?? '';
-        const next = `<p></p>${initialSelectedSignatureHtml}${quoted}`;
+        // Codex P2 fix — yanıt/ilet alıntısı (activeQuotedHtml) KORUNMALI.
+        const next = `<p></p>${initialSelectedSignatureHtml}${activeQuotedHtml}`;
         initialBaselineBodyRef.current = next;
         signatureAppendedRef.current = true;
         // Codex P2 fix — late-loaded signature tracking:
@@ -277,7 +287,7 @@ export function MailComposer({
       signatureAppendedRef.current = true;
       return cur;
     });
-  }, [initialSelectedSignatureHtml, initialSignatureChoice, initialForwardContext]);
+  }, [initialSelectedSignatureHtml, initialSignatureChoice, activeQuotedHtml]);
 
   // Codex P2 fix — Dropdown değişimi: body'deki ESKİ imzayı yeni seçimle
   // SWAP et. Aksi halde agent "İmzasız" seçse bile başlangıç imzası
@@ -325,8 +335,8 @@ export function MailComposer({
         }
       }
       if (newSig && !newSigInsertHandled) {
-        // forward bağlamı varsa quoted body'nin BAŞINA imza enjekte et.
-        const quoted = initialForwardContext?.quotedBodyHtml ?? '';
+        // yanıt/ilet alıntısı varsa quoted body'nin BAŞINA imza enjekte et.
+        const quoted = activeQuotedHtml;
         if (quoted && next.endsWith(quoted)) {
           next = next.slice(0, -quoted.length) + newSig + quoted;
         } else {
@@ -336,7 +346,7 @@ export function MailComposer({
       currentSignatureHtmlRef.current = newSig;
       return next;
     });
-  }, [signatureSelection, agentHtml, composedHtml, initialForwardContext]);
+  }, [signatureSelection, agentHtml, composedHtml, activeQuotedHtml]);
   const [attachments, setAttachments] = useState<UploadedFileRef[]>([]);
   const [uploading, setUploading] = useState(false);
 
@@ -393,18 +403,119 @@ export function MailComposer({
     }
   }, []);
 
-  // Suggestions kaynağı — şimdilik vakanın customerContact alanları.
-  // Genişletilmiş account contacts öneri listesi M6.3'te.
+  // UX fix (kullanıcı direktifi 2026-07-09) — JUMP: Yanıtla sekme-içi
+  // inline'da composer sayfanın altında açılıyor, kullanıcı ne olduğunu
+  // anlamıyor. Mount'ta composer'a yumuşak kaydır. compactDock (fs dock)
+  // ve overlay zaten görünür konumda — kaydırma yalnız sekme-içi inline.
+  // composeKey her açılışta remount ettiğinden mount-effect her seferinde
+  // çalışır; 60ms gecikme layout otursun diye.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (layoutMode !== 'inline' || compactDock) return undefined;
+    const t = window.setTimeout(() => {
+      // Saha düzeltmesi (2026-07-09): block:'center' uzun composer'da başlığı
+      // yukarıda kesiyor, kullanıcı Gönder hizasına düşüyordu. 'start' +
+      // scroll-mt (root'ta) → composer BAŞI görünür alanın üstüne hizalanır
+      // ("E-Postayı Yanıtla" başlığından itibaren okunur).
+      rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Alıntı görseli HYDRATION (kullanıcı direktifi 2026-07-09) ──
+  // Tarayıcı `cid:` çözemez → alıntıdaki görseller taslakta kırık görünüyordu
+  // ("forward'da foto yok"). Paste akışıyla AYNI desen: kaynak eki indirim
+  // URL'inden blob'a çek → taslakta blob URL göster → gönderirken cid'e
+  // geri çevir (aşağıda handleSubmit; sender snapshot compiler cid'i
+  // yeniden ekler). Dosya storage'da yoksa (404) o cid atlanır — mevcut
+  // kırık-görünüm davranışı korunur, gönderim etkilenmez.
+  const quoteBlobsRef = useRef<Array<{ blobUrl: string; cid: string }>>([]);
+  useEffect(() => {
+    const refs = initialReplyContext?.quotedInlineRefs
+      ?? initialForwardContext?.quotedInlineRefs
+      ?? [];
+    if (!refs.length) return undefined;
+    let alive = true;
+    void (async () => {
+      const swaps: Array<{ blobUrl: string; cid: string }> = [];
+      for (const r of refs) {
+        try {
+          const dl = await caseEmailService.getAttachmentDownload(item.id, r.emailId, r.attachmentId);
+          if (!dl?.url) continue;
+          const resp = await fetch(dl.url);
+          if (!resp.ok) continue;
+          const blob = await resp.blob();
+          swaps.push({ blobUrl: URL.createObjectURL(blob), cid: r.cid });
+        } catch {
+          // tek görsel hata → atla; taslak yine açılır
+        }
+      }
+      if (!alive || !swaps.length) {
+        swaps.forEach((s) => URL.revokeObjectURL(s.blobUrl));
+        return;
+      }
+      quoteBlobsRef.current = swaps;
+      const apply = (html: string) => {
+        let out = html;
+        for (const s of swaps) out = out.split(`cid:${s.cid}`).join(s.blobUrl);
+        return out;
+      };
+      // Baseline + aktif alıntı + body ÜÇÜNÜ birden güncelle → dirty-check
+      // ve imza-swap string-eşleşmeleri tutarlı kalır.
+      initialBaselineBodyRef.current = apply(initialBaselineBodyRef.current);
+      setActiveQuotedHtml((cur) => apply(cur));
+      setBodyHtml((cur) => apply(cur));
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => () => {
+    for (const s of quoteBlobsRef.current) URL.revokeObjectURL(s.blobUrl);
+  }, []);
+
+  // Alıcı önerisi v1 (2026-07-10) — havuz: vaka kişisi (en üstte, mevcut
+  // davranış) + yazışma geçmişi + iç ekip (kaynak etiketiyle). Composer
+  // açılışında TEK fetch ile önyüklenir; filtre ContactPicker'da client-side.
+  // KİLL-SWITCH: fetch hatası sessizce yutulur → öneri havuzu yalnız vaka
+  // kişisine düşer (bugünkü davranışın aynısı). Mail GÖNDERİMİ bu listeden
+  // bağımsızdır — öneri sadece To/Cc/Bcc state'ine adres yazar.
+  const [fetchedSuggestions, setFetchedSuggestions] = useState<
+    { email: string; name: string | null; source: 'correspondence' | 'team' }[]
+  >([]);
+  useEffect(() => {
+    let alive = true;
+    caseEmailService
+      .getRecipientSuggestions(item.id)
+      .then((items) => {
+        if (!alive) return;
+        setFetchedSuggestions(items.map((i) => ({ email: i.address, name: i.name, source: i.source })));
+      })
+      .catch(() => {
+        /* sessiz düşüş — composer eski davranışıyla çalışmaya devam eder */
+      });
+    return () => { alive = false; };
+  }, [item.id]);
+
   const suggestions = useMemo(() => {
-    const out: { email: string; name: string | null }[] = [];
+    const out: { email: string; name: string | null; source?: 'case_contact' | 'correspondence' | 'team' }[] = [];
+    const seen = new Set<string>();
     if (item.customerContactEmail) {
       out.push({
         email: item.customerContactEmail,
         name: item.customerContactName ?? null,
+        source: 'case_contact',
       });
+      seen.add(item.customerContactEmail.trim().toLowerCase());
+    }
+    for (const s of fetchedSuggestions) {
+      const key = s.email.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(s);
     }
     return out;
-  }, [item]);
+  }, [item, fetchedSuggestions]);
 
   // From alias'ları yükle
   useEffect(() => {
@@ -412,11 +523,18 @@ export function MailComposer({
     void caseEmailService.getFromAliases(item.id).then((items) => {
       if (!alive) return;
       setAliases(items);
-      const def = items.find((a) => a.isDefault) ?? items[0] ?? null;
+      // From varsayılanı (2026-07-08) — Multi-inbox: mail hangi paylaşımlı
+      // kutuya geldiyse cevap o kutudan çıksın. reply-context'in önerdiği
+      // adrese eşleşen alias öncelikli; yoksa tenant default; o da yoksa ilk.
+      const suggested = initialReplyContext?.suggestedFromAddress?.trim().toLowerCase();
+      const byInbox = suggested
+        ? items.find((a) => a.address.trim().toLowerCase() === suggested)
+        : null;
+      const def = byInbox ?? items.find((a) => a.isDefault) ?? items[0] ?? null;
       if (def) setFromId(def.id);
     });
     return () => { alive = false; };
-  }, [item.id]);
+  }, [item.id, initialReplyContext]);
 
   // M6.3b Faz 3 — Mail Şablonu dropdown beslemesi.
   const [templates, setTemplates] = useState<import('@/services/caseEmailService').CaseEmailTemplateItem[]>([]);
@@ -488,7 +606,7 @@ export function MailComposer({
   function insertTemplateBody(bodyHtml: string) {
     setBodyHtml((cur) => {
       const sig = currentSignatureHtmlRef.current ?? '';
-      const quoted = initialForwardContext?.quotedBodyHtml ?? '';
+      const quoted = activeQuotedHtml;
       // 1. Önce signature varsa onun başlangıcını bul
       if (sig && cur.includes(sig)) {
         const i = cur.indexOf(sig);
@@ -617,6 +735,15 @@ export function MailComposer({
           activeInlineIds.add(a.id);
         }
       }
+      // Hydration geri-çevirimi (2026-07-09) — alıntı görsellerinin blob
+      // URL'leri orijinal cid'lerine döner; sender snapshot compiler bu
+      // cid'leri vakanın ekinden yeniden ekler (alıcı görür). Kullanıcı
+      // görseli taslaktan sildiyse blobUrl body'de yoktur → no-op.
+      for (const q of quoteBlobsRef.current) {
+        if (payloadHtml.includes(q.blobUrl)) {
+          payloadHtml = payloadHtml.split(q.blobUrl).join(`cid:${q.cid}`);
+        }
+      }
       // DOMPurify ile final pass (defense-in-depth; backend de sanitize eder)
       // Sanitize AFTER replace — cid: allowed default'ta, blob: değil.
       const safeBody = DOMPurify.sanitize(payloadHtml, { USE_PROFILES: { html: true } });
@@ -689,10 +816,19 @@ export function MailComposer({
     // composer açıkken thread'i gizler; bu container thread alanını
     // doldurur.
     // R10.1 — relative: iç confirm modalı absolute inset-0 ile bunun içinde açılır.
-    <div className="relative rounded-lg border border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card">
+    //
+    // UX fix (kullanıcı direktifi 2026-07-09) — FOOTER FREEZE: flex kolon
+    // düzeni; içerik (alanlar+editör) kayar, aksiyon barı (Büyüt/Vazgeç/
+    // Önizleme/Gönder) HEP görünür. Overlay/dock'ta flex-1 + max-h-full
+    // kutuyu doldurur (bar gerçek dipte); sekme-içi inline'da parent flex
+    // olmadığından etkisiz — davranış aynı kalır.
+    <div
+      ref={rootRef}
+      className="relative flex min-h-0 max-h-full flex-1 scroll-mt-20 flex-col rounded-lg border border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card"
+    >
       {/* Header — compactDock modunda gizli (fs bar zaten context taşır) */}
       {!compactDock && (
-        <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2 dark:border-ndark-border">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-3 py-2 dark:border-ndark-border">
           <h3 className="text-sm font-semibold text-slate-800 dark:text-ndark-text">{title}</h3>
           {item.caseNumber && (
             <span className={`${MAIL_TYPE.t1} text-slate-500 dark:text-ndark-muted`}>
@@ -702,7 +838,7 @@ export function MailComposer({
         </div>
       )}
 
-      <div className="space-y-3 p-3">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {/* R10.1 — Dock kompakt özet satırı: verb + Kime chip'ler + ayrıntılar
             toggle. Kime düzenlenmek istenirse Ayrıntılar açılır. */}
         {compactDock && (
@@ -980,14 +1116,18 @@ export function MailComposer({
               onChange={setBodyHtml}
               disabled={submitting}
               onPasteImage={handlePasteImage}
-              autoFocus={compactDock}
+              // UX fix (2026-07-09) — FOCUS: yanıt/ilet akışında editör
+              // otomatik odaklanır (jump ile birlikte "ne oldu" belirsizliği
+              // biter). Yeni-mail overlay'inde eski davranış (alıcı önce).
+              autoFocus={compactDock || !!initialReplyContext || !!initialForwardContext}
             />
           )}
         </Field>
       </div>
 
-      {/* Footer */}
-      <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-3 py-2 dark:border-ndark-border">
+      {/* Footer — FREEZE (2026-07-09): shrink-0 + flex kolon sayesinde
+          içerik ne kadar uzarsa uzasın aksiyon barı görünür kalır. */}
+      <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-white px-3 py-2 dark:border-ndark-border dark:bg-ndark-card">
         {/* R5 — Büyüt (yalnız inline mode): tam alan overlay'a taşı, taslak korunur. */}
         {layoutMode === 'inline' && onGrow && (
           <Button

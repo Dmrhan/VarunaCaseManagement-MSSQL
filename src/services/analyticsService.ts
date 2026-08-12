@@ -311,7 +311,180 @@ export interface DrilldownResponse {
   durationMs: number;
 }
 
+// Performans Panosu (FAZ 1) — kişi/takım koçluk metrikleri.
+// Her metrik birim + hesap taşır (backend tek kaynak); UI uydurmaz.
+export interface PersonMetric {
+  key: string;
+  label: string;
+  value: number | null;
+  unit: string;
+  formula: string;
+  sampleSize: number;
+  insufficient: boolean;
+}
+export interface PersonPerformance {
+  id: string;
+  name: string;
+  sampleSize: number;
+  metrics: {
+    resolved: PersonMetric;
+    medianHours: PersonMetric;
+    p90Hours: PersonMetric;
+    reopenRatePct: PersonMetric;
+    slaCompliancePct: PersonMetric;
+    escalationRatePct: PersonMetric;
+    transferRatePct: PersonMetric;
+    openWip: PersonMetric;
+    qaScore: PersonMetric;
+  };
+  coaching?: { tone: 'watch' | 'info' | 'good' | null; text: string | null; action?: string | null };
+  topExpertise?: { topic: string; count: number; fasterPct: number | null }[];
+}
+export interface PeopleTeamBenchmark {
+  resolved: number | null;
+  medianHours: number | null;
+  reopenRatePct: number | null;
+  slaCompliancePct: number | null;
+  escalationRatePct: number | null;
+  transferRatePct: number | null;
+  qaScore: number | null;
+  openWip: number | null;
+}
+
+export interface PeopleTeamSummary {
+  resolvedTotal: number;
+  backlog: number;
+  netMelted: number;
+  medianHours: number | null;
+  p90Hours: number | null;
+  openWip: number | null;
+  reopenRatePct: number | null;
+  slaCompliancePct: number | null;
+  qaScore: number | null;
+  busiest: { name: string; openWip: number } | null;
+  idleCapacity: number;
+  peopleCount: number;
+}
+export interface PeoplePerformanceRequest {
+  from: string;
+  to: string;
+  companies?: string[];
+  teams?: string[];
+  productGroups?: string[];
+  caseTypes?: string[];
+}
+export interface PeoplePerformanceResponse {
+  people: PersonPerformance[];
+  teamBenchmark: PeopleTeamBenchmark;
+  teamSummary: PeopleTeamSummary;
+  meta: { formulaVersion: string; minSampleAgent: number; unitNote: string; durationMs: number };
+  scope: { kind: string; companyIds: string[]; teamIds: string[] | null; personIds: string[] | null; narrative?: string };
+}
+
+// Performans Panosu FAZ 2 — kişi uzmanlık profili (drill-down).
+export interface ExpertiseTopic {
+  category: string;
+  count: number;
+  sharePct: number;
+  medianHours: number | null;
+  teamMedianHours: number | null;
+  fasterPct: number | null;
+  tag: 'expert' | 'solid' | 'normal';
+}
+export interface LongestCase {
+  id: string;
+  caseNumber: string;
+  title: string;
+  category: string;
+  subCategory: string;
+  hours: number;
+  reopened: boolean;
+}
+export interface SolutionSignatureItem { code: string; label: string; count: number; pct: number }
+export interface DailyTrendPoint { date: string; resolvedCount: number; medianHours: number | null; rollingMedianHours: number | null }
+export interface PersonDetailResponse {
+  person: { id: string; name: string; resolved: number } | null;
+  expertise: ExpertiseTopic[];
+  problems: { subCategory: string; count: number }[];
+  products: { product: string; count: number; sharePct: number }[];
+  longestCases: LongestCase[];
+  solutionSignature: {
+    rootCause: SolutionSignatureItem[];
+    resolutionType: SolutionSignatureItem[];
+    permanentPreventionPct: number | null;
+    teamPermanentPreventionPct: number | null;
+  } | null;
+  dailyTrend: DailyTrendPoint[];
+  meta: { minSampleAgent?: number; durationMs: number };
+}
+
+// FAZ 2c — Etkinlik & Katkı (gizlenme tespiti). HASSAS.
+export interface EngagementSignal {
+  key: string;
+  label: string;
+  value: number | null;
+  teamValue: number | null;
+  unit: string;
+  tone: 'good' | 'warn' | 'flat';
+  hint: string;
+}
+export interface EngagementResponse {
+  signals: EngagementSignal[];
+  verdict: { read: 'active' | 'mixed' | 'watch' | 'inconclusive'; concerns: number; resolved: number; signalCount: number } | null;
+  meta: { minSampleAgent?: number; durationMs: number };
+}
+
 export const analyticsService = {
+  async personEngagement(
+    personId: string,
+    from: string,
+    to: string,
+    teams?: string[],
+    companies?: string[],
+  ): Promise<EngagementResponse | undefined> {
+    return apiFetch<EngagementResponse>(
+      '/api/analytics/person-engagement',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personId, from, to, ...(teams?.length ? { teams } : {}), ...(companies?.length ? { companies } : {}) }),
+      },
+      'Etkinlik verisi yüklenemedi',
+    );
+  },
+
+  async personDetail(
+    personId: string,
+    from: string,
+    to: string,
+    teams?: string[],
+    companies?: string[],
+  ): Promise<PersonDetailResponse | undefined> {
+    return apiFetch<PersonDetailResponse>(
+      '/api/analytics/person-detail',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personId, from, to, ...(teams?.length ? { teams } : {}), ...(companies?.length ? { companies } : {}) }),
+      },
+      'Kişi profili yüklenemedi',
+    );
+  },
+
+  async peoplePerformance(
+    body: PeoplePerformanceRequest,
+  ): Promise<PeoplePerformanceResponse | undefined> {
+    return apiFetch<PeoplePerformanceResponse>(
+      '/api/analytics/people-performance',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      'Performans panosu yüklenemedi',
+    );
+  },
+
   async getAIUsage(period: AIUsagePeriod): Promise<AIUsageReport | undefined> {
     return apiFetch<AIUsageReport>(
       `/api/analytics/ai-usage?period=${period}`,
@@ -441,4 +614,126 @@ export const analyticsService = {
       'Drill-down listesi yüklenemedi',
     );
   },
+
+  // CS Yönetim Panosu (SLA İzleme) — n4b Power BI karşılığı
+  async getSlaDashboard(
+    filters: SlaDashboardFilters,
+  ): Promise<SlaDashboardResponse | undefined> {
+    const qs = slaFiltersToQuery(filters);
+    return apiFetch<SlaDashboardResponse>(
+      `/api/analytics/sla-dashboard?${qs.toString()}`,
+      undefined,
+      'SLA panosu yüklenemedi',
+    );
+  },
+
+  // İlk açılış: yalnız dropdown seçenekleri (vaka taraması YOK — ucuz)
+  async getSlaDashboardOptions(): Promise<SlaDashboardResponse | undefined> {
+    return apiFetch<SlaDashboardResponse>(
+      '/api/analytics/sla-dashboard?optionsOnly=1',
+      undefined,
+      'Filtre seçenekleri yüklenemedi',
+    );
+  },
+
+  // Excel export — sayfalama olmadan süzülmüş TÜM set (backend 20k tavanlı)
+  async exportSlaDashboard(
+    filters: SlaDashboardFilters,
+  ): Promise<SlaDashboardResponse | undefined> {
+    const qs = slaFiltersToQuery(filters, true);
+    qs.set('export', '1');
+    return apiFetch<SlaDashboardResponse>(
+      `/api/analytics/sla-dashboard?${qs.toString()}`,
+      undefined,
+      'SLA export verisi alınamadı',
+    );
+  },
 };
+
+// ── CS SLA Panosu tipleri ─────────────────────────────────────────────
+export interface SlaDashboardFilters {
+  year?: number | null;
+  month?: number | null;
+  /** 'YYYY-MM-DD' — verilmişse year/month'u EZER (aralık kazanır, AND değil). */
+  createdFrom?: string | null;
+  createdTo?: string | null;
+  /** Çoklu seçim — boş dizi = filtre yok. Query'ye tekrar eden param olarak gider. */
+  companyId?: string[];
+  waitingDept?: string[];
+  supportLevel?: string[];
+  status?: string[];
+  accountId?: string[];
+  /** ADI bazlı (ID değil) — aynı proje adı birden çok bayide tekrarlanabiliyor. */
+  accountProjectName?: string[];
+  openAge?: string[];
+  requestType?: string[];
+  page?: number;
+  pageSize?: number;
+}
+
+function slaFiltersToQuery(filters: SlaDashboardFilters, skipPaging = false): URLSearchParams {
+  const qs = new URLSearchParams();
+  (Object.entries(filters) as Array<[string, string | number | string[] | null | undefined]>).forEach(
+    ([k, v]) => {
+      if (skipPaging && (k === 'page' || k === 'pageSize')) return;
+      if (v === null || v === undefined || v === '') return;
+      if (Array.isArray(v)) {
+        v.forEach((item) => item && qs.append(k, String(item)));
+      } else {
+        qs.set(k, String(v));
+      }
+    },
+  );
+  return qs;
+}
+
+export interface SlaDashboardRow {
+  id: string;
+  caseNumber: string;
+  companyId: string;
+  createdAt: string;
+  accountId: string | null;
+  accountName: string | null;
+  accountProjectName: string | null;
+  priority: string | null;
+  requestType: string | null;
+  status: string;
+  teamName: string | null;
+  ownerName: string | null;
+  supportLevel: string | null;
+  waitingDept: string;
+  devopsIds: string[];
+  openAgeBucket: string;
+  resolutionTargetDays: number | null;
+  resolutionElapsedDays: number;
+  resolutionRemainingDays: number | null;
+  resolutionOnTarget: boolean | null;
+  responseTargetMin: number | null;
+  responseElapsedMin: number;
+  responseRemainingMin: number | null;
+  responseOnTarget: boolean | null;
+}
+
+export interface SlaDashboardResponse {
+  rows: SlaDashboardRow[];
+  /** export=1 modunda: satır tavanı aşıldı, liste kırpıldı. */
+  exportTruncated?: boolean;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  kpis: {
+    totalCount: number;
+    resolution: { evet: number; hayir: number; withDue: number };
+    response: { evet: number; hayir: number; withDue: number };
+  };
+  options: {
+    companies: Array<{ id: string; name: string }>;
+    waitingDepts: string[];
+    accounts: Array<{ id: string; name: string }>;
+    /** ADI bazlı dedup edilmiş liste — id yok, name tek başına kimlik. */
+    projects: string[];
+    requestTypes: string[];
+    statuses: string[];
+  };
+  generatedAt: string;
+}

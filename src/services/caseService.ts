@@ -427,6 +427,8 @@ export const caseService = {
     if (filters?.includeArchived) params.set('includeArchived', 'true');
     // Rol bazlı varsayılan kapsam — 'off' ise Supervisor/Backoffice havuz kaldırılır.
     if (filters?.roleDefaultView === 'off') params.set('roleDefaultView', 'off');
+    // F1 — L1 Agent sekme bazlı görünürlük.
+    if (filters?.inboxTab) params.set('inboxTab', filters.inboxTab);
     if (pagination) {
       params.set('page', String(pagination.page));
       params.set('pageSize', String(pagination.pageSize));
@@ -719,6 +721,7 @@ export const caseService = {
       cancellationReason?: string;
       thirdPartyId?: string;
       thirdPartyName?: string;
+      thirdPartyNote?: string;
       escalationLevel?: EscalationLevel;
       escalationReason?: string;
       /**
@@ -2017,10 +2020,17 @@ export const caseService = {
    * Persist edilmez — UI her "Yenile" tıklayışında yeniden üretir.
    * AI yoksa 503 → UI fallback mesajı gösterir.
    */
-  async getActionSummary(caseId: string): Promise<ActionSummary | undefined> {
+  async getActionSummary(
+    caseId: string,
+    mode: 'internal' | 'customer' = 'internal',
+  ): Promise<ActionSummary | undefined> {
     return apiFetch<ActionSummary>(
       `${API_BASE}/${caseId}/action-summary`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      },
       'Eylem özeti üretilemedi',
     );
   },
@@ -2167,6 +2177,28 @@ export const caseService = {
         body: JSON.stringify({ caseIds, reason }),
       },
       'Toplu arşivleme başarısız',
+    );
+    if (result) caseIds.forEach((id) => invalidateCaseDetail(id));
+    return result;
+  },
+
+  /**
+   * Toplu iptal (2026-07-10) — bulk bar "İptal Et" aksiyonu; Agent HARİÇ
+   * roller (BE requireRole otoritedir). Her vaka "İptal Edildi"ye geçer,
+   * neden geçmişe yazılır.
+   */
+  async bulkCancel(
+    caseIds: string[],
+    cancellationReason: string,
+  ): Promise<{ cancelled: number; skipped: number; requested: number } | undefined> {
+    const result = await apiFetch<{ cancelled: number; skipped: number; requested: number }>(
+      `${API_BASE}/bulk-cancel`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caseIds, cancellationReason }),
+      },
+      'Toplu iptal başarısız',
     );
     if (result) caseIds.forEach((id) => invalidateCaseDetail(id));
     return result;

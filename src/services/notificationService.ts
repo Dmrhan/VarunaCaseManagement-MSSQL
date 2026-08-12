@@ -25,7 +25,9 @@ export type NotificationEvent =
   | 'case_reopened'
   // M4.1 FAZ B — müşteri bildirim event'leri
   | 'case_created'
-  | 'status_changed';
+  | 'status_changed'
+  // 2026-07-09 — müşteri mevcut vakaya yanıt verdi → üstlenen ajan bildirimi
+  | 'customer_replied';
 
 export type AudienceType =
   | 'assignee'

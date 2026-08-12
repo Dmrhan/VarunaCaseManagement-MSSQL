@@ -817,6 +817,20 @@ export function CaseReportStudioPage() {
                 ))}
               </Select>
             </Field>
+            <Field label="Çözüm Zamanı Başlangıç">
+              <TextInput
+                type="date"
+                value={filters.resolvedFrom ?? ''}
+                onChange={(e) => setFilters((f) => ({ ...f, resolvedFrom: e.target.value || undefined }))}
+              />
+            </Field>
+            <Field label="Çözüm Zamanı Bitiş">
+              <TextInput
+                type="date"
+                value={filters.resolvedTo ?? ''}
+                onChange={(e) => setFilters((f) => ({ ...f, resolvedTo: e.target.value || undefined }))}
+              />
+            </Field>
             <Field label="Statü">
               <Select
                 value={(filters.statuses as string) ?? ''}

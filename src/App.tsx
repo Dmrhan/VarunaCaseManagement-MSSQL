@@ -24,7 +24,10 @@ import {
   Settings2,
   ShieldCheck,
   Star,
+  Gauge,
   Sun,
+  Activity,
+  Timer,
 } from 'lucide-react';
 import { CasesListPage } from './features/cases/CasesListPage';
 import { CaseDetailPage } from './features/cases/CaseDetailPage';
@@ -40,6 +43,7 @@ import { RootCauseReportPage } from './features/analytics/RootCauseReportPage';
 import { AIUsagePage } from './features/analytics/AIUsagePage';
 import { PatternsPage } from './features/analytics/PatternsPage';
 import { QAScoresPage } from './features/analytics/QAScoresPage';
+import { PeoplePerformancePage } from './features/analytics/PeoplePerformancePage';
 import { MyCalendarPage } from './features/my/MyCalendarPage';
 import { MyHomePage } from './features/my/MyHomePage';
 import { WatcherInboxPage } from './features/my/WatcherInboxPage';
@@ -53,6 +57,7 @@ import { AdminTeamsPage } from './features/admin/AdminTeamsPage';
 import { AdminTaxonomyDefsPage } from './features/admin/AdminTaxonomyDefsPage';
 import { AdminCategoriesPage } from './features/admin/AdminCategoriesPage';
 import { AdminSlaPage } from './features/admin/AdminSlaPage';
+import { AdminWorkCalendarPage } from './features/admin/AdminWorkCalendarPage';
 import { AdminChecklistPage } from './features/admin/AdminChecklistPage';
 import { AdminOfferedSolutionsPage } from './features/admin/AdminOfferedSolutionsPage';
 import { AdminProductCatalogPage } from './features/admin/AdminProductCatalogPage';
@@ -78,6 +83,21 @@ import { AdminExternalMailPage } from './features/admin/AdminExternalMailPage';
 const AdminEmailTemplatesPage = lazy(() =>
   import('./features/admin/AdminEmailTemplatesPage').then((m) => ({ default: m.AdminEmailTemplatesPage })),
 );
+const SystemHealthPage = lazy(() =>
+  import('./features/admin/SystemHealthPage').then((m) => ({ default: m.SystemHealthPage })),
+);
+// CS Yönetim Panosu (SLA İzleme) — tüm roller; lazy: ana bundle'a girmesin
+const CsSlaDashboardPage = lazy(() =>
+  import('./features/analytics/CsSlaDashboardPage').then((m) => ({ default: m.CsSlaDashboardPage })),
+);
+// Monitoring/İzleme panosu (izole feature) — lazy: ana bundle'a girmesin
+const MonitoringPage = lazy(() =>
+  import('./features/monitoring/MonitoringPage').then((m) => ({ default: m.MonitoringPage })),
+);
+// Raporlar (izole feature) — manuel Bildirim Sayıları Excel'inin birebir otomasyonu
+const ReportsPage = lazy(() =>
+  import('./features/reporting/ReportsPage').then((m) => ({ default: m.ReportsPage })),
+);
 import { AdminDataImportPage } from './features/admin/AdminDataImportPage';
 import { KnowledgeBasePage } from './features/kb/KnowledgeBasePage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
@@ -98,7 +118,7 @@ import { accountService } from './services/accountService';
 import { SOFTPHONE_ANSWERED_EVENT, SOFTPHONE_INCOMING_EVENT, useSoftphone } from './contexts/SoftphoneContext';
 import { CaseTaggingReviewPage } from './features/analytics/CaseTaggingReviewPage';
 
-type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'case-report-studio' | 'monthly-bulletin' | 'root-cause-report' | 'tagging-review' | 'call-center-report' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | AdminView;
+type View = 'my-home' | 'cases' | 'dashboard' | 'cs-sla-dashboard' | 'monitoring' | 'reporting' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'analytics-people-performance' | 'case-report-studio' | 'monthly-bulletin' | 'root-cause-report' | 'tagging-review' | 'call-center-report' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | 'system-health' | AdminView;
 
 interface NavItem {
   key: View;
@@ -118,10 +138,17 @@ export default function App() {
   // useEffect aşağıda bir kez yönlendirme yapar (sadece initialRedirectDoneRef
   // false iken — manuel nav'ı override etmesin).
   const [view, setView] = useState<View>('cases');
+  // Sistem Sağlığı → Bildirim Kayıtları drill-down'ı: kart tıklanınca
+  // dispatches sayfası bu state filtresiyle açılır (key remount tazeler).
+  const [dispatchesInitialState, setDispatchesInitialState] = useState<'Pending' | 'Failed' | ''>('');
   const [initialRedirectDone, setInitialRedirectDone] = useState(false);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   // Vaka detayına hangi view'dan girildiği — geri dönüşte oraya yönlendirmek için.
   const [caseDetailOrigin, setCaseDetailOrigin] = useState<View>('cases');
+  // Vaka detayına dar kapsamlı (Açık/Kapalı sekmesi ya da az önce
+  // üstlenilen/oluşturulan vaka) bir navigasyondan mi girildiği — Backoffice/
+  // Supervisor için Devret/Üstlen görünürlüğünü belirler (CaseDetailPage).
+  const [caseDetailNarrowScopeConfirmed, setCaseDetailNarrowScopeConfirmed] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   // Müşteri detayına hangi view'dan girildiği (ör. vaka detayından "Detay →")
   // — geri dönüşte oraya yönlendirmek için. caseDetailOrigin ile aynı desen.
@@ -167,17 +194,19 @@ export default function App() {
   // Gelen çağrıda otomatik screen-pop: callerId → müşteri eşleştir → Akıllı Ticket
   // (müşteri ön-seçili). Çağrı ÇALMAYA başladığında (inbound) OTOMATİK açılır; agent
   // banner'daki "Vaka Aç" ile de tetikler. Aynı çağrı için tek sefer (dedup).
-  const lastPoppedCallerRef = useRef<string | null>(null);
+  const lastPoppedCallKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    type PopDetail = { number?: string; matchedAccountId?: string | null; matchedAccountName?: string | null; callLogKey?: string | null };
+    type PopDetail = { key?: string; number?: string; matchedAccountId?: string | null; matchedAccountName?: string | null; callLogKey?: string | null };
+    // Screen-pop dedup'u STABİL çağrı KEY'i ile (dev fix): her çağrının benzersiz key'i
+    // olduğundan çağrı başına TAM BİR KEZ; poll'ler arası titreme (inbound flicker /
+    // callerId değişimi) yeni-vaka ekranını TEKRAR açmaz. Faz 2: key yoksa callLogKey/callerId.
     const popTicket = (detail?: PopDetail) => {
       const callerId = detail?.number;
-      // Dedup anahtarı: callLogKey (çağrı bazlı) varsa o, yoksa callerId.
-      const dedupKey = detail?.callLogKey || callerId || null;
+      const dedupKey = detail?.key || detail?.callLogKey || callerId || null;
       // callerId yoksa BİLE, webhook şifresinden çözülen müşteri varsa aç.
       if ((!callerId || callerId === 'Bilinmeyen') && !detail?.matchedAccountId) return;
-      if (dedupKey && lastPoppedCallerRef.current === dedupKey) return;
-      lastPoppedCallerRef.current = dedupKey;
+      if (!dedupKey || lastPoppedCallKeyRef.current === dedupKey) return;
+      lastPoppedCallKeyRef.current = dedupKey;
       void (async () => {
         let acc: { id: string; name: string } | null = null;
         if (detail?.matchedAccountId) {
@@ -210,15 +239,19 @@ export default function App() {
     };
   }, []);
   const { user, signOut } = useAuth();
-  // Gömülü softphone (sağ-dock) açıkken ana içeriği sağdan 380px daralt →
-  // içerik panelin altında kalmaz, panelin başladığı yerde kesilir.
+  // Softphone sağda DAR (300px) tam-yükseklik dock. Ana içeriğin daralması +
+  // açılan drawer/modal'ların panelin ALTINA girmemesi main.tsx'teki AppShell
+  // wrapper'ında (width calc + contain:layout) yönetilir — bu yüzden App root'ta
+  // ayrı rezervasyon YOK.
   const {
-    dockReserved, incomingCall,
     status: spStatus, panelCollapsed: spCollapsed,
     setPanelCollapsed: setSpCollapsed, openPanel: openSoftphonePanel,
   } = useSoftphone();
-  // Çağrı bitince dedup ref sıfırlanır → aynı numara tekrar arayınca yeniden açılır.
-  useEffect(() => { if (!incomingCall) lastPoppedCallerRef.current = null; }, [incomingCall]);
+  // NOT: Eski "incomingCall null olunca dedup ref'ini sıfırla" effect'i KALDIRILDI.
+  // Çağrı talking'e geçip AloTech'te inbound görünmeyince incomingCall null oluyor,
+  // bu da ref'i sıfırlayıp ANSWERED/flicker'da yeni-vaka ekranını TEKRAR açıyordu.
+  // Artık dedup stabil çağrı KEY'i ile (lastPoppedCallKeyRef) — reset gerekmez, her
+  // çağrı benzersiz key'le tam bir kez açılır.
 
   useHotkey('?', () => setHelpOpen(true));
 
@@ -351,11 +384,34 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, caseDetailOrigin]);
 
-  function openCase(id: string) {
+  function openCase(id: string, narrowScopeConfirmed = false) {
     setCaseDetailOrigin(view);
+    setCaseDetailNarrowScopeConfirmed(narrowScopeConfirmed);
     setSelectedCaseId(id);
     setView('case-detail');
   }
+
+  // 2026-07-09 — Vaka deep-link'i (?case=<id>). customer_replied bildirim
+  // maili "vakayı aç" bağlantısı taşır; SPA'da path-router olmadığından
+  // login sonrası query parametresi okunup vaka açılır ve URL temizlenir
+  // (refresh/bookmark tekrar tetiklemesin). Ref guard: oturum başına bir kez.
+  const deepLinkHandledRef = useRef(false);
+  useEffect(() => {
+    if (!user || deepLinkHandledRef.current) return;
+    deepLinkHandledRef.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const caseId = params.get('case');
+    if (!caseId) return;
+    openCase(caseId);
+    params.delete('case');
+    const rest = params.toString();
+    window.history.replaceState(
+      {},
+      '',
+      `${window.location.pathname}${rest ? `?${rest}` : ''}`,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   function backToList() {
     setView(caseDetailOrigin);
@@ -404,16 +460,24 @@ export default function App() {
   const showKbViewer = !!user && canShowView('kb-viewer', true);
   const showAiUsage = !!user && canShowView('analytics-ai-usage', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showQaScores = !!user && canShowView('analytics-qa-scores', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
+  const showPeoplePerformance = !!user && canShowView('analytics-people-performance', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showPatterns = !!user && canShowView('analytics-patterns', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
+  // Sistem Sağlığı — YALNIZ SystemAdmin (makine/altyapı teşhisi; iş metrikleri değil)
+  const showSystemHealth = !!user && canShowView('system-health', user.role === 'SystemAdmin');
   const showCaseReportStudio = !!user && canShowView('case-report-studio', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   // Aylık Bülten — CS ekibi müşteriye gönderir; supervisor/admin/CSM görür
   const showMonthlyBulletin = !!user && canShowView('monthly-bulletin', ['CSM', 'Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showRootCauseReport = !!user && canShowView('root-cause-report', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showCallCenterReport = !!user && canShowView('call-center-report', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showTaggingReview = !!user && canShowView('tagging-review', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
+  const showMonitoring = !!user && canShowView('monitoring', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
+  const showReporting = !!user && canShowView('reporting', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showReportsSection = sidebarExpanded && (
+    showMonitoring ||
+    showReporting ||
     showAiUsage ||
     showQaScores ||
+    showPeoplePerformance ||
     showPatterns ||
     showCaseReportStudio ||
     showMonthlyBulletin ||
@@ -452,6 +516,9 @@ export default function App() {
         user?.role === 'SystemAdmin'
         && key === 'admin-authorization-policies'
       ) return true;
+      // Çalışma Takvimi — SLA taahhüdünün akışını belirler; YALNIZ SystemAdmin
+      // (kullanıcı kararı 2026-07-14). Route katmanında da assertSystemAdmin var.
+      if (key === 'admin-work-calendar' && user?.role !== 'SystemAdmin') return false;
       return canShowView(key, true);
     };
     if (!canShowAdminView(view)) {
@@ -471,6 +538,7 @@ export default function App() {
       >
         {view === 'admin-categories' && <AdminCategoriesPage />}
         {view === 'admin-sla' && <AdminSlaPage />}
+        {view === 'admin-work-calendar' && <AdminWorkCalendarPage />}
         {view === 'admin-thirdparty' && <AdminThirdPartyPage />}
         {view === 'admin-documents' && <AdminDocumentsPage />}
         {view === 'admin-checklist' && <AdminChecklistPage />}
@@ -494,14 +562,19 @@ export default function App() {
         {view === 'admin-resolution-approval' && <ResolutionApprovalPoliciesPage />}
         {view === 'admin-notification-templates' && <NotificationTemplatesPage />}
         {view === 'admin-notification-rules' && <NotificationRulesPage />}
-        {view === 'admin-notification-dispatches' && <NotificationDispatchesPage />}
+        {view === 'admin-notification-dispatches' && (
+          <NotificationDispatchesPage
+            key={dispatchesInitialState || 'all'}
+            initialState={dispatchesInitialState}
+          />
+        )}
         {view === 'admin-authorization-policies' && <AdminAuthorizationPoliciesPage />}
       </AdminLayout>
     );
   }
 
   return (
-    <div className={`flex flex-col bg-slate-50 transition-[padding] duration-200 dark:bg-ndark-bg ${isFixedHeight ? 'h-screen' : 'min-h-screen'} ${dockReserved ? 'pr-[380px]' : ''}`}>
+    <div className={`flex flex-col bg-slate-50 dark:bg-ndark-bg ${isFixedHeight ? 'h-screen' : 'min-h-screen'}`}>
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3 dark:border-ndark-border dark:bg-ndark-card">
         <div className="flex items-center gap-3">
           <BrandLogo />
@@ -846,11 +919,68 @@ export default function App() {
               </>
             )}
 
+            {/* SLA İzleme (CS Yönetim Panosu) — TÜM roller (kullanıcı kararı
+                2026-07-13); daraltma günü geldiğinde buraya show* koşulu +
+                route'taki requireRole listesi birlikte değişir. */}
+            <button
+              type="button"
+              onClick={() => handleNavSelect('cs-sla-dashboard')}
+              className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+              } ${
+                view === 'cs-sla-dashboard'
+                  ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                  : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+              }`}
+              title="SLA İzleme — CS Yönetim Panosu"
+            >
+              <Timer size={16} />
+              {sidebarExpanded && <span className="flex-1 text-left">SLA İzleme</span>}
+            </button>
+
             {/* Vaka Raporları — bölüm başlığı (Supervisor / Admin / SystemAdmin) */}
             {showReportsSection && (
               <div className="mt-3 px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-ndark-dim">
                 Vaka Raporları
               </div>
+            )}
+
+            {/* Monitoring / İzleme panosu — Supervisor / Admin / SystemAdmin */}
+            {showMonitoring && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('monitoring')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'monitoring'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="Monitoring — Ticket Yaşam Döngüsü"
+              >
+                <Activity size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">Monitoring</span>}
+              </button>
+            )}
+
+            {/* Raporlar — birebir Bildirim Sayıları (Supervisor / Admin / SystemAdmin) */}
+            {showReporting && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('reporting')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'reporting'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="Raporlar — Bildirim Sayıları"
+              >
+                <FileSpreadsheet size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">Raporlar</span>}
+              </button>
             )}
 
             {/* AI Kullanım Panosu — Supervisor / Admin / SystemAdmin */}
@@ -891,6 +1021,25 @@ export default function App() {
               </button>
             )}
 
+            {/* Performans Panosu — Supervisor / Admin / SystemAdmin */}
+            {showPeoplePerformance && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('analytics-people-performance')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'analytics-people-performance'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="Performans Panosu"
+              >
+                <Gauge size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">Performans</span>}
+              </button>
+            )}
+
             {/* Örüntü Alarmları — Supervisor / Admin / SystemAdmin (active count badge) */}
             {showPatterns && (
               <button
@@ -927,6 +1076,25 @@ export default function App() {
                     )}
                   </>
                 )}
+              </button>
+            )}
+
+            {/* Sistem Sağlığı — YALNIZ SystemAdmin (altyapı teşhis panosu) */}
+            {showSystemHealth && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('system-health')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'system-health'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="Sistem Sağlığı"
+              >
+                <Activity size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">Sistem Sağlığı</span>}
               </button>
             )}
 
@@ -1092,6 +1260,41 @@ export default function App() {
             />
           )}
           {view === 'analytics-qa-scores' && <QAScoresPage />}
+          {view === 'system-health' && showSystemHealth && (
+            // Codex #517 P1 — lazy bileşen Suspense sınırı ister: chunk ilk
+            // kez yüklenirken sarmalayıcı yoksa React suspend hatası fırlatır
+            // (satır ~500'deki AdminEmailTemplatesPage deseniyle aynı).
+            <Suspense fallback={<p className="p-4 text-sm text-slate-400">Sistem Sağlığı yükleniyor…</p>}>
+              <SystemHealthPage
+                onOpenDispatches={(state) => {
+                  setDispatchesInitialState(state);
+                  setView('admin-notification-dispatches');
+                }}
+              />
+            </Suspense>
+          )}
+          {(view === 'cs-sla-dashboard' || (isDetail && caseDetailOrigin === 'cs-sla-dashboard')) && (
+            <div className={isDetail ? 'hidden' : 'contents'}>
+              <Suspense fallback={<p className="p-4 text-sm text-slate-400">SLA panosu yükleniyor…</p>}>
+                <CsSlaDashboardPage onSelectCase={openCase} />
+              </Suspense>
+            </div>
+          )}
+          {view === 'monitoring' && (
+            <Suspense fallback={<p className="p-4 text-sm text-slate-400">Monitoring yükleniyor…</p>}>
+              <MonitoringPage />
+            </Suspense>
+          )}
+          {view === 'reporting' && (
+            <Suspense fallback={<p className="p-4 text-sm text-slate-400">Raporlar yükleniyor…</p>}>
+              <ReportsPage />
+            </Suspense>
+          )}
+          {(view === 'analytics-people-performance' || (isDetail && caseDetailOrigin === 'analytics-people-performance')) && (
+            <div className={isDetail ? 'hidden' : 'contents'}>
+              <PeoplePerformancePage onSelectCase={openCase} />
+            </div>
+          )}
           {view === 'case-report-studio' && <CaseReportStudioPage />}
           {view === 'monthly-bulletin' && <MonthlyBulletinPage />}
           {(view === 'root-cause-report' || (isDetail && caseDetailOrigin === 'root-cause-report')) && (
@@ -1117,6 +1320,7 @@ export default function App() {
                 onBack={backToList}
                 onShowCustomer={(id) => setCustomerCardId(id)}
                 onOpenAccount={canReadAccounts(user?.role) ? openAccount : undefined}
+                narrowScopeConfirmedByNav={caseDetailNarrowScopeConfirmed}
               />
             )
           )}

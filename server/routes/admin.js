@@ -18,6 +18,7 @@ import {
   teamRepo,
   thirdPartyRepo,
   userRepo,
+  workCalendarRepo,
 } from '../db/adminRepository.js';
 import { prisma } from '../db/client.js';
 import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
@@ -31,6 +32,7 @@ import { caseEmailTemplateRepo } from '../db/caseEmailTemplateRepository.js';
 import { sendMail as mailProviderSendMail } from '../lib/mailProvider.js';
 import { pollMailbox as imapPollMailbox, testInboxConnection } from '../lib/imapPoller.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
+import { normalizeCalendar, addBusinessMinutes, businessMinutesBetween } from '../lib/sla/businessTime.js';
 import { requireActor } from '../lib/actor.js';
 import { buildAuthorizationEffectivePreview } from '../lib/authorizationEffectivePreview.js';
 
@@ -219,6 +221,99 @@ router.delete('/sla-policies/:id', asyncRoute(async (req, res) => {
   const result = await slaPolicyRepo.remove(req.params.id);
   res.json(result);
 }));
+
+// ─────────────────────────────────────────────────────────────────
+// Çalışma Takvimi (SLA iş-saati Faz 2) — YALNIZ SystemAdmin.
+// Router-level kapı Admin+SystemAdmin olduğundan burada ikinci kapı:
+// takvim SLA taahhüdünün nasıl aktığını belirler, şirket admini bile
+// değiştirememeli (kullanıcı kararı 2026-07-14).
+// ─────────────────────────────────────────────────────────────────
+function assertSystemAdmin(req) {
+  if (req.user?.role !== 'SystemAdmin') {
+    const err = new Error('Bu işlem yalnız SystemAdmin tarafından yapılabilir.');
+    err.status = 403;
+    throw err;
+  }
+}
+
+router.get('/work-calendar/:companyId', asyncRoute(async (req, res) => {
+  assertSystemAdmin(req);
+  assertCompanyAdmin(req, req.params.companyId);
+  const cal = await workCalendarRepo.get(req.params.companyId);
+  res.json({ value: cal }); // null = tanımsız (duvar-saati davranış)
+}));
+
+router.put('/work-calendar/:companyId', asyncRoute(async (req, res) => {
+  assertSystemAdmin(req);
+  assertCompanyAdmin(req, req.params.companyId);
+  const actor = requireActor(req);
+  const saved = await workCalendarRepo.upsert(req.params.companyId, req.body ?? {}, actor);
+  res.json(saved);
+}));
+
+router.post('/work-calendar/:companyId/holidays', asyncRoute(async (req, res) => {
+  assertSystemAdmin(req);
+  assertCompanyAdmin(req, req.params.companyId);
+  const actor = requireActor(req);
+  const created = await workCalendarRepo.addHoliday(req.params.companyId, req.body ?? {}, actor);
+  res.status(201).json(created);
+}));
+
+router.delete('/work-calendar/:companyId/holidays/:holidayId', asyncRoute(async (req, res) => {
+  assertSystemAdmin(req);
+  assertCompanyAdmin(req, req.params.companyId);
+  const result = await workCalendarRepo.removeHoliday(req.params.companyId, req.params.holidayId);
+  res.json(result);
+}));
+
+router.post('/work-calendar/:companyId/import-tr-holidays', asyncRoute(async (req, res) => {
+  assertSystemAdmin(req);
+  assertCompanyAdmin(req, req.params.companyId);
+  const actor = requireActor(req);
+  const year = Number(req.body?.year);
+  const result = await workCalendarRepo.importTrHolidays(req.params.companyId, year, actor);
+  res.json(result);
+}));
+
+router.post('/work-calendar/:companyId/copy-from/:sourceCompanyId', asyncRoute(async (req, res) => {
+  assertSystemAdmin(req);
+  assertCompanyAdmin(req, req.params.companyId);
+  assertCompanyAdmin(req, req.params.sourceCompanyId); // kaynak da kapsamda olmalı
+  const actor = requireActor(req);
+  const result = await workCalendarRepo.copyHolidays(
+    req.params.companyId,
+    req.params.sourceCompanyId,
+    actor,
+  );
+  res.json(result);
+}));
+
+/**
+ * POST /work-calendar/preview — STATELESS örnek hesap: taslak takvim +
+ * senaryolar gövdede gelir, HİÇBİR ŞEY yazılmaz (kaydetmeden önizleme).
+ * Body: { calendar: {workDays,breakStartMin,breakEndMin,holidays[]},
+ *         scenarios: [{startIso, addMinutes} | {fromIso, toIso}] }
+ */
+router.post('/work-calendar/preview', asyncRoute(async (req, res) => {
+  assertSystemAdmin(req);
+  const body = req.body ?? {};
+  const cal = normalizeCalendar({ isActive: true, ...(body.calendar ?? {}) });
+  if (!cal) return res.status(400).json({ error: 'invalid_calendar', message: 'Takvim tanımı geçersiz ya da boş.' });
+  const scenarios = Array.isArray(body.scenarios) ? body.scenarios.slice(0, 10) : [];
+  const results = scenarios.map((sc) => {
+    if (sc?.startIso && Number.isFinite(Number(sc.addMinutes))) {
+      const out = addBusinessMinutes(Date.parse(sc.startIso), Number(sc.addMinutes), cal);
+      return { kind: 'add', resultIso: out == null ? null : new Date(out).toISOString() };
+    }
+    if (sc?.fromIso && sc?.toIso) {
+      return { kind: 'between', minutes: businessMinutesBetween(Date.parse(sc.fromIso), Date.parse(sc.toIso), cal) };
+    }
+    return { kind: 'invalid' };
+  });
+  res.json({ results });
+}));
+
+
 
 router.get('/checklists', asyncRoute(async (req, res) => {
   if (req.query.companyId) assertCompanyAdmin(req, req.query.companyId);

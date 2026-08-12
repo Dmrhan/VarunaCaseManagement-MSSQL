@@ -24,6 +24,7 @@ interface ReasonChip {
 }
 
 const REASON_CHIPS: ReasonChip[] = [
+  { code: 'followed_case', label: 'Takipli Vaka' },
   { code: 'wrong_team', label: 'Yanlış Takım' },
   { code: 'expertise', label: 'Uzmanlık' },
   { code: 'workload', label: 'İş Yükü' },

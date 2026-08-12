@@ -45,5 +45,26 @@ export async function resolveSlaPolicy(ctx) {
   });
 
   const best = candidates[0].policy;
-  return { responseHours: best.responseHours, resolutionHours: best.resolutionHours };
+  return {
+    responseHours: best.responseHours,
+    resolutionHours: best.resolutionHours,
+    // Uzatılmış SLA v1 — eşleşen satırın uzatılmış TOPLAM süresi (mesai dk,
+    // null=tanımsız). Okuma tek noktadan: resolveExtendedTargetMinutes.
+    extendedResolutionMin: best.extendedResolutionMin ?? null,
+  };
+}
+
+/**
+ * SLA hedef DAKİKALARI — hedef değerin koddan okunduğu TEK nokta
+ * (kullanıcı yapısal tercihi, Faz 0 gözden geçirme 2026-07-13):
+ * politika değerleri saat cinsinden yazılır, hesap dakika cinsinden
+ * akar (dakika = tek doğruluk kaynağı). Politika şeması değişirse
+ * yalnız burası dokunulur.
+ */
+export function resolveTargetMinutes(slaMatch) {
+  if (!slaMatch) return null;
+  return {
+    responseMin: Math.round(slaMatch.responseHours * 60),
+    resolutionMin: Math.round(slaMatch.resolutionHours * 60),
+  };
 }

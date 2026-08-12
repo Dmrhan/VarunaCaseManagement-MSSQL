@@ -38,7 +38,7 @@ const TARGETS = [
 const rows = await prisma.taxonomyDef.findMany({
   where: { companyId: COMPANY, isActive: true },
   orderBy: [{ taxonomyType: 'asc' }, { sortOrder: 'asc' }, { label: 'asc' }],
-  select: { id: true, taxonomyType: true, label: true, parentId: true },
+  select: { id: true, taxonomyType: true, code: true, label: true, parentId: true, metadata: true },
 });
 await prisma.$disconnect();
 
@@ -73,9 +73,21 @@ for (const target of TARGETS) {
   }
 
   if (doc.close?.kok_neden && byType.rootCauseGroup) {
+    // resolutionType kod→etiket: detay cascade'i (cozum_tipleri) LABEL cinsinden yazılır.
+    const rtCodeToLabel = Object.fromEntries((byType.resolutionType ?? []).map((r) => [r.code, r.label]));
+    const detailAllowed = (d) => {
+      let codes = [];
+      try { codes = JSON.parse(d.metadata || '{}').allowedResolutionTypes || []; } catch { /* boş */ }
+      return codes.map((c) => rtCodeToLabel[c]).filter(Boolean);
+    };
+    // v4 CASCADE — detay {label, cozum_tipleri} OBJESİ olmalı (kategorizer bunu bekler:
+    // categorizer-v2 → d.cozum_tipleri.join). Düz string yazılırsa JSON-fallback çöker.
     const groups = byType.rootCauseGroup.map((g) => ({
       group: g.label,
-      details: (byType.rootCauseDetail ?? []).filter((d) => d.parentId === g.id).map((d) => d.label),
+      mode: 'coupled',
+      details: (byType.rootCauseDetail ?? []).filter((d) => d.parentId === g.id).map((d) => ({
+        label: d.label, cozum_tipleri: detailAllowed(d),
+      })),
     }));
     if (JSON.stringify(doc.close.kok_neden.groups) !== JSON.stringify(groups)) {
       doc.close.kok_neden.groups = groups;

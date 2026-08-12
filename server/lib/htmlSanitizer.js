@@ -76,6 +76,14 @@ const ALLOWED_STYLES = {
     width: [/^.+$/],
     height: [/^.+$/],
     border: [/^.+$/],
+    // 2026-07-09 — mail ayırıcıları/alıntı çizgileri: reply-quote flu gri
+    // divider (border-top) + blockquote sol çizgisi (border-left) + forward
+    // başlığı. Yön bazlı border'lar allowlist'te yoktu → sessizce soyulup
+    // ayırıcılar görünmez kalıyordu.
+    'border-top': [/^.+$/],
+    'border-bottom': [/^.+$/],
+    'border-left': [/^.+$/],
+    'border-right': [/^.+$/],
     'border-radius': [/^.+$/],
   },
 };

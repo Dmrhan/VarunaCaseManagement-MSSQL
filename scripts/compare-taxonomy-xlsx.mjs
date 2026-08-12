@@ -53,7 +53,9 @@ const kbSets = {
   'Etkilenen Nesne': new Set((kb.open?.etkilenen_nesne?.values ?? []).map(norm)),
   'Etki': new Set((kb.open?.etki?.values ?? []).map(norm)),
   'Kök Neden Grubu': new Set((kb.close?.kok_neden?.groups ?? []).map((g) => norm(g.group))),
-  'Kök Neden Detayı': new Set((kb.close?.kok_neden?.groups ?? []).flatMap((g) => (g.details ?? []).map(norm))),
+  // v4 şema — details artık {label, cozum_tipleri} nesnesi; norm() düz
+  // string bekliyor, label çıkarılmadan geçince Set "[object Object]" ile dolardı.
+  'Kök Neden Detayı': new Set((kb.close?.kok_neden?.groups ?? []).flatMap((g) => (g.details ?? []).map((d) => norm(d.label)))),
   'Çözüm Tipi': new Set((kb.close?.cozum_tipi?.values ?? []).map(norm)),
   'Kalıcı Önlem': new Set((kb.close?.kalici_onlem?.values ?? []).map(norm)),
 };

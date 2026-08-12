@@ -86,6 +86,7 @@ async function querySnoozedActiveByStatus(scope, accountId, from, to) {
       AND [createdAt] >= @P${fromIdx} AND [createdAt] < @P${toIdx}
       AND [snoozeUntil] IS NOT NULL
       AND [snoozeUntil] > sysutcdatetime()
+      AND [isArchived] = 0
     GROUP BY [status];
   `;
   const rows = await prisma.$queryRawUnsafe(sql, ...params);

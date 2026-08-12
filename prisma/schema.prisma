@@ -213,6 +213,8 @@ model Company {
   /// this table later.
   authorizationPolicies      AuthorizationPolicy[]
   thirdParties               ThirdParty[]
+  workCalendar               WorkCalendar?
+  holidays                   Holiday[]
   /// Per-tenant vaka numarası sayacı (1-1). Lazy-init on first case create.
   caseNumberCounter          CaseNumberCounter?
 }
@@ -1320,6 +1322,16 @@ model ThirdParty {
   isActive    Boolean  @default(true)
   companyId   String?  @db.NVarChar(450)
   pausesSla   Boolean  @default(true)
+  // Uzatılmış SLA v1 (U-B, 2026-07-14) — İKİ PARÇALI tetik, tanım bazında
+  // konfigüre: (1) bu tanıma devir uzatılmış çözüm süresini uygular mı,
+  // (2) ek şart olarak vakada DevOps kaydı aransın mı. Davranış bayrağı
+  // deseni (pausesSla ikizi) — tanımın ADI kural değildir, ad değişse
+  // bayrak kayıtta kalır.
+  triggersExtendedSla          Boolean @default(false)
+  extendedSlaRequiresDevopsLink Boolean @default(true)
+  /// U-C — bu 3. parti seçildiğinde "3rdPartyBekleniyor" geçişinde açıklama
+  /// (Case.thirdPartyNote) zorunlu olsun mu.
+  requiresNote Boolean @default(false)
   createdAt   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt   DateTime @updatedAt
 
@@ -1388,6 +1400,13 @@ model SLAPolicy {
   priority        String?  @db.NVarChar(50) // enum:CasePriority (Low/Medium/High/Critical)
   responseHours   Int
   resolutionHours Int
+  // Uzatılmış SLA v1 (U-A/U-D, 2026-07-14): yazılım geliştirme devrinde
+  // geçerli TOPLAM çözüm süresi, MESAİ DAKİKASI (kaynak-doğruluk dk —
+  // 1.830 dk gibi tam saate bölünmeyen sözleşme değerleri için saat değil).
+  // null = bu satırda uzatma tanımsız → tetik oluşsa bile davranış değişmez
+  // (fail-safe; takvimdeki boş-kesim-tarihi kapısının ikizi). Bileşen
+  // ayrıştırması (müdahale+çözüm+geliştirme) BİLEREK modellenmedi (U-D).
+  extendedResolutionMin Int?
   description     String?  @db.NVarChar(Max)
   isActive        Boolean  @default(true)
   /// PR-3 — admin audit attribution (nullable; eski satırlar NULL)
@@ -1401,6 +1420,78 @@ model SLAPolicy {
   updatedBy User?   @relation("SLAPolicyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([companyId])
+}
+
+// ─────────────────────────────────────────────────────────────────
+// SLA İş-Saati Takvimi (Faz 1, 2026-07-14) — SLA süreleri şirket bazlı
+// mesai penceresi + resmi tatillere göre akar. Takvimi olmayan (veya
+// isActive=false) şirket duvar-saati davranışında kalır → şirket şirket
+// kademeli geçiş. Motor: server/lib/sla/businessTime.js.
+// Faz 0 kararları (2026-07-13/14): şirket-bazlı; Pzt-Cu 08:30-18:00 +
+// öğle molası 12:00-13:00 (net 8,5 sa/gün); 7/24 yok; arife yarım-gün
+// v1'de; DAKİKA = tek doğruluk kaynağı (gün çevrimi tek katsayıyla).
+// ─────────────────────────────────────────────────────────────────
+model WorkCalendar {
+  id        String @id @default(cuid()) @db.NVarChar(450)
+  companyId String @unique @db.NVarChar(450) // şirket başına TEK takvim
+
+  /// Haftalık pencere — JSON (MSSQL JSON tipi yok; customFields deseni):
+  /// [{"day":1,"startMin":510,"endMin":1080},...] day: ISO 1=Pzt..7=Paz;
+  /// dakika = YEREL (Europe/Istanbul) gece yarısından itibaren.
+  /// Yalnız çalışılan günler listede bulunur.
+  workDays String @db.NVarChar(Max) // json
+
+  /// Öğle arası — TÜM çalışma günlerine uygulanır, mesaiden düşülür.
+  /// null = mola yok. (Kullanıcı kararı: tek tanım tüm günlere yeterli.)
+  breakStartMin Int?
+  breakEndMin   Int?
+
+  /// false → şirket duvar-saati davranışa döner (acil geri-alma anahtarı).
+  isActive Boolean @default(true)
+
+  /// K-F (parametrik duraklatma): müşteri yanıtı beklenirken çözüm SLA'sı
+  /// dursun mu. Default KAPALI (bugünkü davranış). Faz 3'te bağlanır.
+  pauseOnCustomerWait Boolean @default(false)
+
+  /// Kesim tarihi (duyurulu geçiş, karar #3): bu andan sonra AÇILAN vakalar
+  /// iş-saatiyle damgalanır; rapor dipnotu bu tarihi kullanır. null = takvim
+  /// kaydedilmiş ama geçiş başlamamış (Faz 3 damgası devreye girmez).
+  effectiveFrom DateTime?
+
+  createdByUserId String?  @db.NVarChar(450)
+  updatedByUserId String?  @db.NVarChar(450)
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt       DateTime @updatedAt
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  holidays Holiday[]
+}
+
+/// Resmi tatil — şirket bazlı; dini bayramlar kaydığı için her yıl girilir.
+model Holiday {
+  id         String @id @default(cuid()) @db.NVarChar(450)
+  calendarId String @db.NVarChar(450)
+  companyId  String @db.NVarChar(450) // denormalize: scope guard + sorgu kolaylığı
+
+  /// Yerel takvim günü (saat bileşeni yok).
+  date DateTime @db.Date
+  name String   @db.NVarChar(200)
+
+  /// Arife: mesai halfDayEndMin'de biter (UI default 13:00 = 780 dk).
+  isHalfDay     Boolean @default(false)
+  halfDayEndMin Int?
+
+  createdByUserId String?  @db.NVarChar(450)
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
+
+  // MSSQL çift-cascade tuzağı (CaseLink deseni): Company tarafı NoAction,
+  // calendar silinirse tatiller cascade temizlenir.
+  calendar WorkCalendar @relation(fields: [calendarId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  company  Company      @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([companyId, date])
+  @@index([companyId, date])
+  @@index([calendarId])
 }
 
 // ChecklistTemplate — items snapshot olarak Case.checklistItems'a kopyalanır
@@ -1505,6 +1596,10 @@ model Case {
   // 3rd party
   thirdPartyId   String? @db.NVarChar(450)
   thirdPartyName String? @db.NVarChar(Max)
+  /// U-C — 3. parti bekleme açıklaması. thirdPartyId/thirdPartyName'in aksine
+  /// statüden çıkınca TEMİZLENMEZ; raporlanabilir kalıcı kayıt (cancellationReason
+  /// deseni). ThirdParty.requiresNote=true olan tanımlarda zorunlu.
+  thirdPartyNote String? @db.NVarChar(Max)
 
   // ProactiveTracking alanları
   financialStatus  String? @db.NVarChar(50) // enum:FinancialStatus
@@ -1558,6 +1653,17 @@ model Case {
   slaPausedAt            DateTime?
   slaPausedDurationMin   Int       @default(0)
   slaThirdPartyWaitMin   Int       @default(0)
+  // Faz 3b — müşteri-bekleme duraklatması (WorkCalendar.pauseOnCustomerWait
+  // toggle'ı açıkken). 3rd-party pause'dan (slaPausedAt) AYRI alan: çakışmada
+  // 3rd-party öncelikli, iki sayaç aynı anda işlemez (customerWaitPause.js).
+  slaCustomerWaitStartedAt DateTime?
+  slaCustomerWaitMin       Int      @default(0)
+  // Uzatılmış SLA v1 — hangi hedefin neden uygulandığı vaka üzerinde izlenir:
+  // slaTargetSource 'standard'|'extended' (null = legacy, damga öncesi kayıt);
+  // slaResolutionTargetMin = uygulanan hedef dakika (due'dan geri-türetme
+  // kırılganlığını kaldırır; pano/dry-run hedef kolonunun kalıcı kaynağı).
+  slaTargetSource        String? @db.NVarChar(20)
+  slaResolutionTargetMin Int?
   slaResponseMetAt       DateTime? // ilk yanıt verildiğinde (Incelemede'ye geçiş)
   slaResolutionStartedAt DateTime? // vakayı ilk üstlenen kişinin claim zamanı
 
@@ -1634,6 +1740,17 @@ model Case {
   createdAt  DateTime  @default(dbgenerated("sysutcdatetime()"))
   updatedAt  DateTime  @updatedAt
   resolvedAt DateTime?
+
+  /// Atama/devir sonrası statü otomasyonu — mevcut sorumlu (kişi veya
+  /// ekip) her değiştiğinde damgalanır; pickedUpAt aynı anda null'a
+  /// sıfırlanır. "Açık" (yeniden atanmış, henüz incelemeye alınmamış)
+  /// bekleme süresini ölçmek için. Eski kayıtlarda NULL kalır (backfill
+  /// yok — kasıtlı, bkz. review notu).
+  assignedAt DateTime?
+  /// Mevcut sorumlu vakayı "Açık" → "İncelemede" alarak fiilen işe
+  /// başladığında damgalanır. Yeni atamada assignedAt ile birlikte
+  /// null'a sıfırlanır.
+  pickedUpAt DateTime?
 
   // Relations
   company        Company         @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -1715,6 +1832,10 @@ model Case {
   @@index([companyId, assignedTeamId])
   @@index([companyId, category, subCategory])
   @@index([companyId, resolvedAt])
+  // "Atanmış ama henüz incelemeye alınmamış" dashboard sorgusu için bir
+  // index (companyId, pickedUpAt, assignedAt) faydalı olur — kasıtlı
+  // olarak BURADA eklenmedi, canlı/büyük tabloda CREATE INDEX kilitlenme
+  // riski taşıdığı için ayrı, düşük trafikli bir migration'a bırakıldı.
   // WR-A5 / PM-03 — tier filter / routing Phase 2 için.
   @@index([companyId, supportLevel])
   // PR-SD — list default exclude path için. companyId zaten her sorguda.
@@ -2193,6 +2314,12 @@ model CaseTransfer {
   reasonCode    String?  @db.NVarChar(255)
   transferredBy String   @db.NVarChar(Max)
   transferredAt DateTime @default(dbgenerated("sysutcdatetime()"))
+
+  /// Bu atamayı devralan kişi/ekip vakayı fiilen "İncelemede"ye aldığında
+  /// damgalanır (Case.pickedUpAt ile birlikte, aynı transitionStatus
+  /// çağrısında). Yalnızca vakanın EN SON transfer satırı için doldurulur
+  /// — atama→işe başlama süresi raporlaması bu alan üzerinden yapılır.
+  pickedUpAt DateTime?
 
   // AI önerisi snapshot (uygulandı/yok sayıldı analizi için)
   aiSuggestedTeamId String? @db.NVarChar(450)

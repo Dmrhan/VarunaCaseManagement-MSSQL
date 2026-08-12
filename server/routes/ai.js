@@ -403,8 +403,16 @@ router.post(
     req.aiLog.companyId = companyId;
 
     const system = [
-      "Sen Varuna CRM'de müşteri hizmetleri temsilcilerine yardımcı olan bir asistanısın.",
-      'Vaka bilgilerine dayanarak profesyonel, net ve müşteri dostu çözüm notları yazarsın.',
+      "Sen Varuna CRM'de teknik ekip için iç kayıt (internal note) yazan bir asistansın.",
+      'Amacın müşteriye mesaj yazmak DEĞİL; vakanın nasıl çözüldüğünü ekip içi kayıt olarak nesnel şekilde belgelemektir.',
+      "Üçüncü şahıs / edilgen bir dil kullan. İkinci şahıs hitabı ('sizin için', 'ihtiyacınız olursa', 'bizimle iletişime geçmekten çekinmeyin' gibi) KULLANMA.",
+      'Kapanış veya nezaket cümlesi ekleme (örn. "iyi günler", "çekinmeyin", "başka bir konuda yardımcı olabilirsek").',
+      'Kısa, maddesel bir özet yaz: Yapılan işlem -> Kök neden -> Uygulanan çözüm sırasını izle.',
+      '',
+      'Örnek:',
+      'YANLIŞ (müşteri diline yazılmış, KULLANMA): "Sorununuzu inceledik ve versiyon uyumsuzluğunu düzelttik. Başka bir ihtiyacınız olursa ekibimizle iletişime geçmekten çekinmeyin."',
+      'DOĞRU (iç kayıt dili, BU ŞEKİLDE YAZ): "Yapılan işlem: Log kayıtları incelendi, hata versiyon uyumsuzluğundan kaynaklandı. Kök neden: İstemci sürümü sunucu API sürümüyle uyumsuzdu. Uygulanan çözüm: İstemci v2.3e güncellendi, test edildi ve doğrulandı."',
+      '',
       'Yanıtı Türkçe yaz. Sadece çözüm notunu yaz, başka açıklama ekleme.',
     ].join('\n');
 
@@ -607,7 +615,8 @@ router.post(
             const flagStr = `[${flags.join(', ')}]`;
             const assigned = c.assignedPersonName ?? '(atanmamış)';
             const team = c.assignedTeamName ?? '-';
-            // SLA çözüm süresi — kalan/geçen
+            // SLA çözüm süresi — kalan/geçen (Faz 4: BİLİNÇLİ duvar-saat;
+            // FE snapshot'ında takvim bağlamı yok, metin AI'ya kaba bağlam)
             let slaInfo = '';
             if (c.slaResolutionDueAt) {
               const ms = new Date(c.slaResolutionDueAt).getTime();
@@ -763,7 +772,7 @@ router.post(
     // 3. Strict JSON schema — model sadece geçerli teamId üretebilir
     const teamIdEnum = teams.map((t) => t.id);
     const teamNameEnum = teams.map((t) => t.name);
-    const reasonCodeEnum = ['wrong_team', 'expertise', 'workload', 'escalation', 'customer_request', 'other'];
+    const reasonCodeEnum = ['wrong_team', 'expertise', 'workload', 'escalation', 'customer_request', 'followed_case', 'other'];
 
     const schema = {
       type: 'object',
@@ -820,6 +829,7 @@ router.post(
       '- workload: mevcut takım yoğun, başkasının daha hızlı bakabilir',
       '- escalation: eskalasyon — daha üst yetkili veya destek takımı',
       '- customer_request: müşteri açıkça başka bir takımla ilgilenmek istedi',
+      '- followed_case: takip edilen/izlenen bir vakanın ilgili takıma yönlendirilmesi',
       '- other: yukarıdakilerin hiçbiri uymuyor',
       '',
       'reasonText: max 200 karakter, Türkçe, somut gerekçe (genel söz değil).',
@@ -1137,6 +1147,10 @@ router.post(
  * Vaka SLA bilgilerini human-readable forma çevirir.
  * Returns: { response, resolution, status }
  */
+// Faz 4 notu — BİLİNÇLİ duvar-saat: bu fonksiyon yalnız legacy fallback
+// yolunda, FE'nin gönderdiği kısa snapshot'la çalışır (takvim kapısı için
+// gereken companyId/createdAt bağlamı güvenilir değil). Çıktı AI-bağlam
+// metnidir, damga/uyum hesabı DEĞİL — iş-saati çevrimi kapsam dışı bırakıldı.
 function formatSlaInfo(c) {
   const now = Date.now();
   const fmt = (iso) => {

@@ -88,6 +88,7 @@ async function main() {
       where: {
         assignedPersonId: user.personId,
         companyId: { in: allowedCompanyIds },
+        status: 'Cozuldu',
         resolvedAt: { gte: todayStart, lt: todayEnd },
       },
     });

@@ -32,7 +32,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
-import { formatRelative } from '@/lib/format';
+import { formatRelative, formatSlaRemaining } from '@/lib/format';
 import type { Case } from '../types';
 
 const PLACEHOLDER_TITLE = 'Sonraki L1 fazında bağlanacak (Phase 2D+).';
@@ -349,7 +349,8 @@ export function L1DecisionRail({ item }: { item: Case }) {
             <div className="flex flex-wrap items-baseline gap-1.5">
               <span className="text-slate-500 dark:text-ndark-muted">Yanıt SLA:</span>
               <span className="font-medium text-slate-700 dark:text-ndark-text">
-                {formatRelative(item.slaResponseDueAt)}
+                {formatSlaRemaining(item.slaResponseRemainingMin, item.slaBusinessTime, item.slaDayMinutes)
+                  ?? formatRelative(item.slaResponseDueAt)}
               </span>
             </div>
           )}
@@ -357,7 +358,8 @@ export function L1DecisionRail({ item }: { item: Case }) {
             <div className="flex flex-wrap items-baseline gap-1.5">
               <span className="text-slate-500 dark:text-ndark-muted">Çözüm SLA:</span>
               <span className="font-medium text-slate-700 dark:text-ndark-text">
-                {formatRelative(item.slaResolutionDueAt)}
+                {formatSlaRemaining(item.slaResolutionRemainingMin, item.slaBusinessTime, item.slaDayMinutes)
+                  ?? formatRelative(item.slaResolutionDueAt)}
               </span>
             </div>
           )}

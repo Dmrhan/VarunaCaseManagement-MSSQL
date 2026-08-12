@@ -1,6 +1,6 @@
 import { prisma } from './client.js';
 import { fromDb, toDb, toDbFilters, M_REQUEST } from './enumMap.js';
-import { createUploadUrl, createDownloadUrl, removeObject, verifyStorageToken } from './storage.js';
+import { createUploadUrl, createDownloadUrl, removeObject, verifyStorageToken, storageApi } from './storage.js';
 import { isAcceptedUpload } from '../lib/uploadWhitelist.js';
 import { checkCloseAllowed as checkApprovalCloseAllowed } from './approvalRepository.js';
 import { emitEvent as emitNotificationEvent } from './notificationRepository.js';
@@ -11,7 +11,11 @@ import {
 import { ActorRequiredError } from '../lib/actor.js';
 import { devopsClient, parseWorkItemId } from '../lib/devopsClient.js';
 import crypto from 'node:crypto';
-import { resolveSlaPolicy } from '../lib/sla/slaPolicyResolver.js';
+import { resolveSlaPolicy, resolveTargetMinutes } from '../lib/sla/slaPolicyResolver.js';
+import { getEffectiveCalendar, addBusinessMinutes, businessMinutesBetween, getCalendarGateFor, diffMinutes, netDayMinutes } from '../lib/sla/businessTime.js';
+import { closeCustomerWaitPatch } from '../lib/sla/customerWaitPause.js';
+import { resolveExtendedTargetMinutes, extendedSlaTriggerMet, buildExtendedSlaPatch } from '../lib/sla/extendedSla.js';
+import { resolveThirdPartyNote } from '../lib/thirdPartyNoteGuard.js';
 
 /**
  * PR-1 (Codex P1) + PR-2 — defansif throw helper.
@@ -75,6 +79,7 @@ const SNOOZE_REASON_LABEL = {
 
 // FAZ 2 §20.2 — aktarım gerekçe kodu → activity log etiketi (TR).
 const TRANSFER_REASON_LABEL = {
+  followed_case: 'Takipli Vaka',
   wrong_team: 'Yanlış Takım',
   expertise: 'Uzmanlık',
   workload: 'İş Yükü',
@@ -125,6 +130,35 @@ const CASE_INCLUDE = {
   archivedByUser: { select: { id: true, fullName: true } },
 };
 
+// Faz 4 — SLA görünüm alanları (FE'de takvim kopyası YASAK; BE hesaplar).
+// shape() senkron kalsın diye ayrı, async post-process: yalnız liste + detay
+// dönüşlerinde koşar. Kalan dk, damganın rejimiyle okunur (takvimli şirkette
+// İŞ-dk, kesim öncesi/takvimsiz vakada duvar-dk) — FE alan doluysa onu
+// gösterir, yoksa eski duvar formatına düşer (geriye uyumlu).
+async function enrichSlaView(rows) {
+  const list = Array.isArray(rows) ? rows : [rows];
+  const gates = new Map();
+  for (const r of list) {
+    if (r && !gates.has(r.companyId)) gates.set(r.companyId, await getCalendarGateFor(r.companyId));
+  }
+  const nowMs = Date.now();
+  for (const r of list) {
+    if (!r) continue;
+    const cal = gates.get(r.companyId)(new Date(r.createdAt).getTime());
+    r.slaBusinessTime = !!cal;
+    // dk→gün çevrim katsayısı FE'ye BE'den gider (takvim kopyası yasak):
+    // takvimlide ortalama günlük net mesai, duvar rejiminde 1440.
+    r.slaDayMinutes = Math.round(netDayMinutes(cal));
+    r.slaResponseRemainingMin = r.slaResponseDueAt
+      ? diffMinutes(nowMs, new Date(r.slaResponseDueAt).getTime(), cal)
+      : null;
+    r.slaResolutionRemainingMin = r.slaResolutionDueAt
+      ? diffMinutes(nowMs, new Date(r.slaResolutionDueAt).getTime(), cal)
+      : null;
+  }
+  return rows;
+}
+
 // İzin verilen reaksiyon emojileri — UI + BFF whitelist.
 // Anahtarlar UI'da ikon olarak gösterilir; identifier ile saklanır ki ileride
 // gerekirse aynı anahtar için farklı sembol render edilebilir.
@@ -147,6 +181,88 @@ function shape(c) {
     // PR-SD — Arşiv banner için flat display name (UI JOIN gerekmez).
     archivedByUserName: archivedByUser?.fullName ?? null,
   };
+}
+
+/**
+ * WR-Proje-Kapanış — "aktif proje" TEK tanımı, sistem çapında tutarlı:
+ * isActive === true AND status === 'Active'. Bu tanım zaten
+ * server/db/accountRepository.js'teki picker sorgusunda kullanılıyor; guard
+ * (aşağıda) ve dropdown (CaseDetailPage.tsx client filtresi) da AYNI tanımı
+ * kullanmalı — aksi halde "kural var ama dropdown'da seçenek yok" ya da
+ * "kural yok ama pasif proje seçilebiliyor" gibi tutarsızlıklar oluşur.
+ *
+ * AccountProject doğrudan Account'a bağlı değil:
+ *   Account → AccountCompany → AccountProject
+ * Bu yüzden accountId + companyId üzerinden önce AccountCompany bulunur.
+ * AccountCompany yoksa (account bu şirkete hiç bağlanmamışsa) "seçilebilir
+ * proje yok" kabul edilir — kural devreye girmez, false döner.
+ *
+ * @param {{ accountId: string | null, companyId: string }} params
+ * @returns {Promise<boolean>}
+ */
+export async function hasActiveProjectsForCaseAccount({ accountId, companyId }) {
+  if (!accountId) return false;
+  const accountCompany = await prisma.accountCompany.findUnique({
+    where: { accountId_companyId: { accountId, companyId } },
+    select: { id: true },
+  });
+  if (!accountCompany) return false;
+  const count = await prisma.accountProject.count({
+    where: { accountCompanyId: accountCompany.id, isActive: true, status: 'Active' },
+  });
+  return count > 0;
+}
+
+/**
+ * WR-Proje-Kapanış fix — kapanış kapısı yalnızca "Case.accountProjectId dolu
+ * mu" diye bakıyordu; bu, projesi sonradan Completed/Cancelled/Passive'e
+ * çekilmiş (veya loadAndValidateProject'in eski, yalnız isActive kontrol
+ * eden sürümüyle set edilmiş) STALE bir referansı da "proje seçilmiş" kabul
+ * ediyordu — kapı atlatılabiliyordu. Bu helper, bağlı projenin HÂLÂ aktif
+ * (isActive===true AND status==='Active') olup olmadığını doğrudan sorar;
+ * null/silinmiş/pasif projede false döner.
+ *
+ * @param {string | null | undefined} projectId
+ * @returns {Promise<boolean>}
+ */
+export async function isAccountProjectCurrentlyActive(projectId) {
+  if (!projectId) return false;
+  const project = await prisma.accountProject.findUnique({
+    where: { id: projectId },
+    select: { isActive: true, status: true },
+  });
+  return !!project && project.isActive === true && project.status === 'Active';
+}
+
+/**
+ * shape() + hasAvailableProjects enrichment — TEKİL vaka döndüren her
+ * repository fonksiyonu bunu kullanmalı (shape() değil, doğrudan). Liste
+ * fonksiyonları (list(), vb. — items.map(shape) kalıbı) BU FONKSİYONU
+ * KULLANMAZ: hasAvailableProjects yalnız tekil-vaka görünümlerinde
+ * (CaseDetailPage/CompactStatusStepper/L1WorkbenchPanel — hepsi tekil `item`
+ * prop'u alır, liste satırı render etmez) anlamlı; listeye eklemek her
+ * sayfa yüklemesinde gereksiz ekstra sorgu demek olurdu (performans riski).
+ *
+ * shape()'in kendisi senkron kalır (DB sorgusu yapmaz) — bu sarmalayıcı
+ * onun ÜSTÜNE async enrichment ekler.
+ */
+async function shapeWithProjectAvailability(c) {
+  const shaped = shape(c);
+  if (!shaped) return shaped;
+  const [hasAvailableProjects, accountProjectIsActive] = await Promise.all([
+    hasActiveProjectsForCaseAccount({
+      accountId: shaped.accountId ?? null,
+      companyId: shaped.companyId,
+    }),
+    // Fix — FE'nin projectGateActive'i yalnız accountProjectId'nin dolu
+    // olup olmadığına bakıyordu; bağlı proje sonradan Completed/Cancelled/
+    // Passive'e çekilmişse (backend isAccountProjectCurrentlyActive ile
+    // artık kapanışta reddediyor) FE bunu göremiyor, kapıyı erken kapatıp
+    // seçim kutusunu gizliyordu. Bu alan FE'ye "bağlı proje HÂLÂ aktif mi"
+    // bilgisini taşır.
+    isAccountProjectCurrentlyActive(shaped.accountProjectId ?? null),
+  ]);
+  return { ...shaped, hasAvailableProjects, accountProjectIsActive };
 }
 
 /**
@@ -369,10 +485,17 @@ async function loadAndValidateProject({ projectId, accountId, companyId }) {
       id: true,
       name: true,
       isActive: true,
+      status: true,
       accountCompany: { select: { accountId: true, companyId: true } },
     },
   });
-  if (!project || !project.isActive) {
+  // "Aktif proje" TEK tanımı sistem çapında: isActive===true AND
+  // status==='Active' (bkz. hasActiveProjectsForCaseAccount üstündeki
+  // yorum). Önceden yalnız isActive kontrol ediliyordu — Completed/Cancelled/
+  // Passive statüdeki (ama isActive=true kalmış) bir proje de burada kabul
+  // edilebiliyordu; bu da kapanış kapısının stale bir projeyle atlatılmasına
+  // yol açıyordu (bkz. transitionStatus guard'ındaki ek kontrol).
+  if (!project || !project.isActive || project.status !== 'Active') {
     throw new CaseValidationError('Geçersiz veya pasif proje.', {
       status: 400,
       code: 'invalid_project',
@@ -1197,6 +1320,35 @@ const TAGGING_FIELD_DEFS = [
   { prefix: 'closing', tag: 'PermanentPrevention', customField: 'permanentPrevention', taxonomyType: 'permanentPrevention' },
 ];
 
+// Vaka başına maksimum ek sayısı — kanal (browser upload / Connect ingest)
+// FARK ETMEKSİZİN geçerli bir iş kuralı. requestUpload (browser, aşağıda)
+// VE ingestExternalAttachment (Connect, server-to-server) AYNI sabiti
+// paylaşır — tek kaynak (bkz. server/lib/uploadWhitelist.js docblock'undaki
+// CASE_FILE_MAX_COUNT referansı).
+const CASE_FILE_MAX_COUNT = 20;
+
+// Connect ingest'e özgü, browser flow'un 25MB'lık genel FILE_MAX_SIZE'ından
+// (requestUpload içinde) KASITLI olarak daha sıkı — JSON+base64 taşımanın
+// getirdiği ek yük payı (görev kararı, 10MB). TEK KAYNAK — export edilir;
+// server/routes/connectApi.js kendi (route-seviyesi, DB'ye gitmeden erken
+// ret) kontrolünde AYNI değeri reuse eder (audit nit: iki ayrı sabit aynı
+// değeri iki isimle tutmuyordu artık — defense-in-depth İKİ kontrol noktası
+// (route + repo) KALIR, yalnız değer tek kaynaktan gelir).
+export const CONNECT_ATTACHMENT_MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+// connectResolver.js::isCodeAuthorized ile AYNI mantık (trim + case-
+// insensitive tam eşleşme). BURADA küçük bir KOPYA olarak tutulur çünkü
+// connectResolver.js zaten BU dosyadan (caseRepository) import ediyor —
+// ters yönde bir import (caseRepository → connectResolver) DÖNGÜSEL olurdu.
+// Değişirse İKİ YERİ DE güncelle — küçük, nadiren değişecek saf bir fonksiyon.
+function isProjectCodeAuthorized(projectCode, authorizedCodes) {
+  if (typeof projectCode !== 'string') return false;
+  const normalized = projectCode.trim().toLowerCase();
+  if (!normalized) return false;
+  if (!Array.isArray(authorizedCodes)) return false;
+  return authorizedCodes.some((c) => typeof c === 'string' && c.trim().toLowerCase() === normalized);
+}
+
 export const caseRepository = {
   /**
    * Madde 2 — Smart Ticket akışında KB analyze cevabından extract edilen
@@ -1379,7 +1531,7 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -1394,14 +1546,18 @@ export const caseRepository = {
     if (!Array.isArray(allowedCompanyIds) || allowedCompanyIds.length === 0) {
       return { mode: 'empty' };
     }
-    const scope = { companyId: { in: allowedCompanyIds } };
+    // 2026-07-06 — arşivli vakalar SAYAÇLARA girmez (liste ile tutarlılık).
+    // PR-SD'nin "KPI'da 1-2 arşivli tolere edilir" varsayımı 448 arşivli
+    // temizlik vakasıyla çöktü; scope'a baseline exclude eklendi (tüm
+    // roller/tüm count'lar bu scope'tan türediği için tek nokta yeter).
+    const scope = { companyId: { in: allowedCompanyIds }, isArchived: false };
     const todayRange = buildTodayRange();
     const role = user.role;
     const scoped = (where) => mergeSecurityWhere(where, securityWhere);
 
     if (['Agent', 'Backoffice', 'CSM'].includes(role)) {
       if (!user.personId) {
-        return { mode: 'personal', assignedToMe: 0, slaRiskMine: 0, resolvedToday: 0, snoozedMine: 0 };
+        return { mode: 'personal', assignedToMe: 0, slaRiskMine: 0, resolvedToday: 0, snoozedMine: 0, transferredByMeCount: 0 };
       }
       const personId = user.personId;
       const notSnoozed = notSnoozedClause();
@@ -1432,7 +1588,7 @@ export const caseRepository = {
         agentUnassignedWhere = { assignedPersonId: null };
       }
 
-      const [assignedToMe, slaRiskMine, resolvedToday, snoozedMine, unassigned, critical] = await Promise.all([
+      const [assignedToMe, slaRiskMine, resolvedToday, snoozedMine, transferredByMeCount, unassigned, critical] = await Promise.all([
         // assignedToMe: open + not snoozed (matches list default)
         prisma.case.count({
           where: scoped({ ...scope, assignedPersonId: personId, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }),
@@ -1441,14 +1597,38 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, assignedPersonId: personId, status: { in: STATS_OPEN_STATUSES }, slaViolation: true, AND: [notSnoozed] }),
         }),
-        // resolvedToday: snooze irrelevant — case zaten Cozuldu
+        // resolvedToday: snooze irrelevant — case zaten Cozuldu. Review fix —
+        // İptalEdildi burada sayılmamalı (yalnız gerçekten çözülenler).
         prisma.case.count({
-          where: scoped({ ...scope, assignedPersonId: personId, resolvedAt: todayRange, status: { in: ['Cozuldu', 'IptalEdildi'] } }),
+          where: scoped({ ...scope, assignedPersonId: personId, resolvedAt: todayRange, status: 'Cozuldu' }),
         }),
         // snoozedMine: yalnız snooze-active vakalar (list /api/cases/snoozed ile aynı kontrat)
         prisma.case.count({
           where: scoped({ ...scope, assignedPersonId: personId, snoozeUntil: { gt: new Date() }, status: { in: STATS_OPEN_STATUSES } }),
         }),
+        // transferredByMeCount: "Yönlendirdiklerim" kartı — CaseTransfer
+        // sadece transferredBy+companyId ile filtrelenirse, authorization
+        // security filter (securityWhere) altında GİZLİ olan Case'ler de
+        // sayıma dahil olur (kart sayısı ≠ tıklayınca görünen liste sayısı,
+        // ve gizli vakaların VARLIĞI sızdırılmış olur). listTransferredByMe
+        // ile AYNI görünürlük kontratı: önce distinct caseId'leri topla,
+        // sonra securityWhere ile görünür Case sayısını say (Case.isArchived
+        // filtresi YOK — listTransferredByMe de filtrelemiyor).
+        (async () => {
+          const transferredCaseIds = (
+            await prisma.caseTransfer.groupBy({
+              by: ['caseId'],
+              where: { transferredBy: user.id, companyId: { in: allowedCompanyIds } },
+            })
+          ).map((r) => r.caseId);
+          if (transferredCaseIds.length === 0) return 0;
+          return prisma.case.count({
+            where: mergeSecurityWhere(
+              { id: { in: transferredCaseIds }, companyId: { in: allowedCompanyIds } },
+              securityWhere,
+            ),
+          });
+        })(),
         // unassigned chip: liste görünürlüğüyle tutarlı havuz sayısı.
         // L1 Agent (agentBlockedFromPool) hiç sahipsiz kayıt görmediği için
         // sorgu bile atılmadan 0 sabitlenir.
@@ -1457,7 +1637,7 @@ export const caseRepository = {
           : prisma.case.count({ where: scoped({ ...scope, ...agentUnassignedWhere, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
         prisma.case.count({ where: scoped({ ...scope, priority: 'Critical', status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
       ]);
-      return { mode: 'personal', assignedToMe, slaRiskMine, resolvedToday, snoozedMine, unassigned, critical };
+      return { mode: 'personal', assignedToMe, slaRiskMine, resolvedToday, snoozedMine, transferredByMeCount, unassigned, critical };
     }
 
     if (role === 'Supervisor') {
@@ -1475,7 +1655,7 @@ export const caseRepository = {
         }
       }
       const notSnoozed = notSnoozedClause();
-      const [teamOpenCount, teamSlaRisk, teamEscalation, teamResolvedToday, unassigned, critical] = await Promise.all([
+      const [teamOpenCount, teamSlaRisk, teamEscalation, teamResolvedToday, transferredByMeCount, unassigned, critical] = await Promise.all([
         prisma.case.count({
           where: scoped({ ...scope, ...teamFilter, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }),
         }),
@@ -1485,9 +1665,29 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, ...teamFilter, status: 'Eskalasyon', AND: [notSnoozed] }),
         }),
+        // Review fix — İptalEdildi burada sayılmamalı (yalnız gerçekten çözülenler).
         prisma.case.count({
-          where: scoped({ ...scope, ...teamFilter, resolvedAt: todayRange, status: { in: ['Cozuldu', 'IptalEdildi'] } }),
+          where: scoped({ ...scope, ...teamFilter, resolvedAt: todayRange, status: 'Cozuldu' }),
         }),
+        // transferredByMeCount — Supervisor "Yönlendirdiklerim" kartı (Agent'taki
+        // aynı kartın rol karşılığı). Aynı görünürlük kontratı: distinct caseId'leri
+        // topla, sonra securityWhere ile görünür Case sayısını say (bkz. yukarıdaki
+        // personal mode yorumu — kart sayısı ≠ liste sayısı sızıntısı önlenir).
+        (async () => {
+          const transferredCaseIds = (
+            await prisma.caseTransfer.groupBy({
+              by: ['caseId'],
+              where: { transferredBy: user.id, companyId: { in: allowedCompanyIds } },
+            })
+          ).map((r) => r.caseId);
+          if (transferredCaseIds.length === 0) return 0;
+          return prisma.case.count({
+            where: mergeSecurityWhere(
+              { id: { in: transferredCaseIds }, companyId: { in: allowedCompanyIds } },
+              securityWhere,
+            ),
+          });
+        })(),
         // chip sayıları — scope'taki tüm atanmamış/kritik açık + snooze-dışı vakalar
         prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
         prisma.case.count({ where: scoped({ ...scope, priority: 'Critical', status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
@@ -1498,6 +1698,7 @@ export const caseRepository = {
         teamSlaRisk,
         teamEscalation,
         teamResolvedToday,
+        transferredByMeCount,
         unassigned,
         critical,
         // Echo back resolved teamId for client filter (so click can apply same scope).
@@ -1515,7 +1716,8 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, status: { in: STATS_OPEN_STATUSES }, priority: 'Critical', AND: [notSnoozed] }),
         }),
-        prisma.case.count({ where: scoped({ ...scope, resolvedAt: todayRange, status: { in: ['Cozuldu', 'IptalEdildi'] } }) }),
+        // Review fix — İptalEdildi burada sayılmamalı (yalnız gerçekten çözülenler).
+        prisma.case.count({ where: scoped({ ...scope, resolvedAt: todayRange, status: 'Cozuldu' }) }),
         // chip sayısı — tüm scope'taki atanmamış açık + snooze-dışı vakalar
         prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
       ]);
@@ -1568,7 +1770,7 @@ export const caseRepository = {
       skip,
       take: pagination.pageSize,
     });
-    return { items: items.map(shape), total };
+    return { items: await enrichSlaView(items.map(shape)), total };
   },
 
   async get(id, allowedCompanyIds, actorRole) {
@@ -1580,7 +1782,35 @@ export const caseRepository = {
     // PR-SD — Arşivli vaka direct URL: yalnız SystemAdmin görür. Diğer
     // roller için 404 davranışı (null döner → route 404 yansıtır).
     if (c.isArchived && actorRole !== 'SystemAdmin') return null;
-    return shape(c);
+    return (await enrichSlaView([await shapeWithProjectAvailability(c)]))[0];
+  },
+
+  /**
+   * get()'in kapsam/erişim kontrolü ile AYNISI (allowedCompanyIds +
+   * isArchived guard) ama notes/attachments/history/callLogs (CASE_INCLUDE)
+   * dahil etmeden — yalnız {id, companyId}. Yetki kontrolü yapan
+   * çağrı yerleri (assertCaseResourcePolicy, assertCaseCloseRequiredFields
+   * vb.) döndürülen case'ten yalnız companyId'yi okuyor; onlara tam
+   * CASE_INCLUDE fetch'i vermek gereksiz bir maliyet.
+   *
+   * Perf fix — "İptal Et"/"Çözüldü" gibi close aksiyonlarında route bu iki
+   * assert fonksiyonunu ARKA ARKAYA çağırıyor; ikisi de eskiden get() (tam
+   * include) çağırıyordu → aynı vaka aynı istekte 2 kez ağır şekilde
+   * çekiliyordu (ölçüm: ~590ms sadece bu tekrar için, notu/geçmişi daha
+   * kalabalık vakalarda çok daha fazla). getScopeOnly ile her iki çağrı da
+   * hafifliyor.
+   */
+  async getScopeOnly(id, allowedCompanyIds, actorRole) {
+    const c = await prisma.case.findUnique({
+      where: { id },
+      select: { id: true, companyId: true, isArchived: true },
+    });
+    if (!c) return null;
+    if (allowedCompanyIds && !allowedCompanyIds.includes(c.companyId)) {
+      throw new CaseAccessError();
+    }
+    if (c.isArchived && actorRole !== 'SystemAdmin') return null;
+    return c;
   },
 
   /**
@@ -1834,12 +2064,28 @@ export const caseRepository = {
       priority: m.priority ?? null,
     });
     const slaCreatedAt = new Date();
-    const slaResponseDueAt = slaMatch
-      ? new Date(slaCreatedAt.getTime() + slaMatch.responseHours * 3600000)
-      : null;
-    const slaResolutionDueAt = slaMatch
-      ? new Date(slaCreatedAt.getTime() + slaMatch.resolutionHours * 3600000)
-      : null;
+    // Faz 3 (iş-saati SLA): hedef dakika TEK noktadan (resolveTargetMinutes);
+    // takvim aktif + kesim tarihi geçmişse motor damgalar, aksi halde
+    // duvar-saati (şirket şirket kademeli geçiş). Motor guard-null dönerse
+    // de duvar-saatine düşülür — sessiz yanlış damga sınıf olarak yok.
+    const slaTargets = resolveTargetMinutes(slaMatch);
+    let slaResponseDueAt = null;
+    let slaResolutionDueAt = null;
+    if (slaTargets) {
+      const slaCal = await getEffectiveCalendar(m.companyId, slaCreatedAt.getTime());
+      const respBiz = slaCal
+        ? addBusinessMinutes(slaCreatedAt.getTime(), slaTargets.responseMin, slaCal)
+        : null;
+      const resoBiz = slaCal
+        ? addBusinessMinutes(slaCreatedAt.getTime(), slaTargets.resolutionMin, slaCal)
+        : null;
+      slaResponseDueAt = new Date(
+        respBiz != null ? respBiz : slaCreatedAt.getTime() + slaTargets.responseMin * 60000,
+      );
+      slaResolutionDueAt = new Date(
+        resoBiz != null ? resoBiz : slaCreatedAt.getTime() + slaTargets.resolutionMin * 60000,
+      );
+    }
     const slaResolutionStartedAt = m.assignedPersonId ? slaCreatedAt : null;
 
     const created = await prisma.case.create({
@@ -1850,6 +2096,19 @@ export const caseRepository = {
         description: m.description,
         caseType: m.caseType,
         status: isSmartTicketSelfAssigned ? 'Incelemede' : 'Acik',
+        // 2026-07-09 — atama/devir sonrası statü otomasyonuyla tutarlılık:
+        // oluşturma anında zaten bir sorumlu (kişi VEYA takım) atanıyorsa
+        // assignedAt damgalanır. Yalnız assignedPersonId'ye bakmak, doğrudan
+        // bir takım havuzuna açılan (finalAssignedTeamId set, kişi YOK)
+        // vakaları "atanmamış" gibi gösteriyordu — oysa bu vakalar zaten bir
+        // sahip gruba sahip; "atandı ama kimse başlamadı" dashboard/rapor
+        // sinyali yeniden atanana kadar bu vakaları hiç yakalamıyordu.
+        // Kendine-atanan Smart Ticket vakası doğrudan İncelemede'de
+        // başladığı için (yukarıdaki status) pickedUpAt de aynı anda
+        // damgalanır — atama ile işe başlama arasında sıfır gecikme,
+        // gerçeği doğru yansıtır.
+        assignedAt: (m.assignedPersonId || finalAssignedTeamId) ? new Date() : null,
+        pickedUpAt: isSmartTicketSelfAssigned ? new Date() : null,
         priority: m.priority,
         origin: m.origin,
         originDescription: m.originDescription,
@@ -1955,7 +2214,7 @@ export const caseRepository = {
     // UI/portal/API açılışlarında ACK semantiği yok (kullanıcı UI teyit
     // görür); intake olmayan path'lerde emit zaten beklenmiyor.
 
-    return shape(created);
+    return await shapeWithProjectAvailability(created);
   },
 
   async update(id, patch, actor, allowedCompanyIds, actorRole, actorPersonId = null, actorObject = null) {
@@ -2091,6 +2350,27 @@ export const caseRepository = {
       });
     }
 
+    // 2026-07-09 — Atama/devir sonrası statü otomasyonu. assignedPersonId
+    // veya assignedTeamId gerçekten değişiyorsa (no-op hariç), vaka aktif
+    // çalışma statülerinden birindeyse (bkz. shouldResetStatusOnReassignment)
+    // otomatik "Açık"a alınır. Aynı PATCH içinde status da açıkça
+    // gönderilmişse (nadir, örn. eşzamanlı bir işlem) o EXPLICIT değer
+    // önceliklidir — otomatik reset onu ezmez.
+    const assignmentFieldsChanged =
+      ('assignedPersonId' in dbPatch && dbPatch.assignedPersonId !== before.assignedPersonId) ||
+      ('assignedTeamId' in dbPatch && dbPatch.assignedTeamId !== before.assignedTeamId);
+    const assignmentStatusReset =
+      assignmentFieldsChanged &&
+      !('status' in patch) &&
+      shouldResetStatusOnReassignment(before.status);
+    const assignmentAutomationPatch = assignmentFieldsChanged
+      ? {
+          assignedAt: new Date(),
+          pickedUpAt: null,
+          ...(assignmentStatusReset ? { status: 'Acik' } : {}),
+        }
+      : {};
+
     // Phase D — customerMatchPending lifecycle:
     //   patch içinde accountId alanı geliyorsa pending flag'i otomatik toggle et.
     //   accountId set ediliyor → pending=false; accountId clear ediliyor → pending=true.
@@ -2146,6 +2426,20 @@ export const caseRepository = {
     }
     // Neither accountId nor accountProjectId in patch → existing project link
     // is preserved by the absence of any lifecyclePatch entry.
+
+    // Aktiviteler'de "Proje: <ID>" yerine "Proje: <ad>" görünsün diye —
+    // genel historyEntries döngüsü (yukarıda) patch'teki ham accountProjectId
+    // değerini String() ile logluyor; burada proje adı çözüldükten SONRA o
+    // kaydı isimle güncelliyoruz (accountId değişiminin yan etkisiyle sessizce
+    // temizlenen proje için ayrı bir kayıt açılmıyor — patch'te alan hiç
+    // gelmediğinden zaten history girdisi de yok, mevcut davranış korunur).
+    if (projectIdInPatch) {
+      const projectHistoryEntry = historyEntries.find((h) => h.fieldName === 'accountProjectId');
+      if (projectHistoryEntry) {
+        projectHistoryEntry.fromValue = before.accountProjectName ?? null;
+        projectHistoryEntry.toValue = lifecyclePatch.accountProjectName ?? null;
+      }
+    }
 
     // WR-A7b / DI.6 — Product / Package lifecycle on PATCH.
     //
@@ -2225,6 +2519,7 @@ export const caseRepository = {
       data: {
         ...dbPatch,
         ...lifecyclePatch,
+        ...assignmentAutomationPatch,
         history: historyEntries.length > 0 ? { create: historyEntries } : undefined,
       },
       include: CASE_INCLUDE,
@@ -2261,7 +2556,28 @@ export const caseRepository = {
       });
     }
 
-    return shape(updated);
+    // 2026-07-09 — atama/devir audit kaydı (CaseTransfer + CaseActivity).
+    // transferCase() dışındaki bu yolda da AYNI kayıt oluşsun diye ortak
+    // helper kullanılır (bkz. recordAssignmentChangeAudit).
+    if (assignmentFieldsChanged) {
+      await recordAssignmentChangeAudit(prisma, {
+        caseId: id,
+        companyId,
+        fromTeamId: before.assignedTeamId ?? null,
+        fromTeamName: before.assignedTeamName ?? null,
+        fromPersonId: before.assignedPersonId ?? null,
+        fromPersonName: before.assignedPersonName ?? null,
+        toTeamId: updated.assignedTeamId ?? null,
+        toTeamName: updated.assignedTeamName ?? null,
+        toPersonId: updated.assignedPersonId ?? null,
+        toPersonName: updated.assignedPersonName ?? null,
+        statusReset: assignmentStatusReset,
+        actorUserId: actorUserIdOf(actorObject),
+        actorName: actor,
+      });
+    }
+
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -2418,7 +2734,7 @@ export const caseRepository = {
       where: { id: caseId },
       include: CASE_INCLUDE,
     });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -2454,7 +2770,7 @@ export const caseRepository = {
       // Idempotent: zaten arşivli — current state'i döndür (UI'da double-click
       // edilirse 409 yerine sessizce success).
       const current = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
-      return shape(current);
+      return await shapeWithProjectAvailability(current);
     }
 
     await prisma.$transaction([
@@ -2482,7 +2798,7 @@ export const caseRepository = {
     ]);
 
     const updated = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -2559,6 +2875,118 @@ export const caseRepository = {
   },
 
   /**
+   * Toplu iptal (2026-07-10) — Agent HARİÇ rollere açık (route requireRole
+   * ile korunur; otorite orada). bulkArchive'ın rol/statü-değişmiş ikizi
+   * AMA arşiv değil terminal STATÜ GEÇİŞİ: her vaka için transitionStatus
+   * ('İptalEdildi') çağrılır → SLA durdurma + per-case StatusChange history
+   * + cancellationReason kaydı + İptal-muaf kapanış guard yolu REUSE edilir
+   * (kopyalanmaz). Çözüldü'nün aksine İptal müşteri/ürün grubu/kapanış
+   * etiket kapılarından muaftır (bkz. transitionStatus, ~satır 4002).
+   *
+   * Partial-success YOK: bulunamayan/cross-tenant id → hiçbir şey yazmadan
+   * { error } / CaseAccessError. Zaten IptalEdildi olan atlanır (idempotent).
+   * bulkUpdate'in terminal yasağına (3804) DOKUNULMAZ — bu ayrı, yetkili yol.
+   */
+  async bulkCancel({ caseIds, cancellationReason }, { actorDisplay, allowedCompanyIds, actorObject }) {
+    // actorObject = ActorContext (userId + role). transitionStatus geçmiş/
+    // bildirim stamp'ı actorUserIdOf(actorObject).userId okur — Codex #520 P2:
+    // req.user.id DEĞİL (req.user'da alan adı 'id', ActorContext'te 'userId').
+    // actorDisplay = geçmiş 'actor' string'i (tekil transition paritesi).
+    assertActor(actorObject, 'caseRepository.bulkCancel');
+    if (!Array.isArray(caseIds) || caseIds.length === 0) {
+      return { error: 'caseIds dizisi gerekli (boş olamaz).' };
+    }
+    if (caseIds.length > 100) {
+      return { error: 'En fazla 100 vaka tek seferde iptal edilebilir.' };
+    }
+    const trimmedReason = typeof cancellationReason === 'string' ? cancellationReason.trim() : '';
+    if (trimmedReason.length < 3) {
+      return { error: 'İptal nedeni gerekli (en az 3 karakter).' };
+    }
+
+    const ids = [...new Set(caseIds)];
+    const cases = await prisma.case.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, companyId: true, status: true, isArchived: true },
+    });
+    if (cases.length !== ids.length) {
+      const foundIds = new Set(cases.map((c) => c.id));
+      const missing = ids.filter((id) => !foundIds.has(id));
+      return { error: `Bazı vakalar bulunamadı: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ` (+${missing.length - 3})` : ''}` };
+    }
+    // Cross-tenant fail-fast (bulkArchive paritesi) — döngüye girmeden reddet.
+    if (allowedCompanyIds) {
+      const outsider = cases.find((c) => !allowedCompanyIds.includes(c.companyId));
+      if (outsider) {
+        throw new CaseAccessError('Toplu iptal: erişiminiz olmayan vaka(lar) listede.');
+      }
+    }
+
+    // Codex #520 P2 — iptal edilemez olanları hedef DIŞI bırak (hata değil,
+    // atlanır): terminal statüler (Cozuldu = çözülmüş vaka İPTALE çekilmez;
+    // IptalEdildi = zaten iptal) + arşivli vakalar (aktif akış dışı;
+    // transitionStatus scope'u zaten reddederdi). Liste toplu seçime terminal/
+    // arşivli vaka da alabildiğinden bu filtre gerekli.
+    const NOT_CANCELABLE = new Set(['IptalEdildi', 'Cozuldu']);
+    const targets = cases.filter((c) => !NOT_CANCELABLE.has(c.status) && !c.isArchived);
+    let skipped = cases.length - targets.length;
+    if (targets.length === 0) {
+      return { cancelled: 0, skipped, requested: ids.length };
+    }
+
+    // Terminal statü GEÇİŞİ (reuse). Bilinen tüm hata modları yukarıda
+    // elendi (bulunamadı/cross-tenant/terminal/arşiv); İptal guard-muaf →
+    // transitionStatus başarılı olmalı. Codex #520 P2 — hata YUTULMAZ:
+    // beklenmedik hata/null (race) olursa DÖNGÜYÜ DURDUR ve kısmi durumu
+    // dürüstçe raporla (sessizce devam edip başarısızı gizleme). Tam
+    // atomiklik transitionStatus tek-tx olmadığından mümkün değil; upfront
+    // validasyon + abort-on-error en dürüst yol.
+    let cancelled = 0;
+    for (const c of targets) {
+      // Codex #521 P2 (TOCTOU) — upfront filtre ile transition arasında başka
+      // kullanıcı vakayı Çözüldü'ye çekmiş/arşivlemiş olabilir. İptal
+      // guard-muaf olduğundan transitionStatus terminal Cozuldu'yu KOŞULSUZ
+      // İptal'e çevirirdi. Transition ÖNCESİ taze status oku; terminal/arşivli
+      // olduysa ATLA (iptale çekme). Pencereyi mikro-saniyeye indirir;
+      // transitionStatus kendi tek-tx olmadığından teorik kalıntı race kalır
+      // ama Cozuldu'yu ezme pratik riski kapanır (hard-lock ayrı transition
+      // refactoru ister — bu haftanın korunan alanı).
+      const fresh = await prisma.case.findUnique({
+        where: { id: c.id },
+        select: { status: true, isArchived: true },
+      });
+      if (!fresh || NOT_CANCELABLE.has(fresh.status) || fresh.isArchived) {
+        skipped += 1;
+        continue;
+      }
+      let r;
+      try {
+        r = await caseRepository.transitionStatus(
+          c.id,
+          'İptalEdildi',
+          { cancellationReason: trimmedReason },
+          actorDisplay,
+          allowedCompanyIds,
+          actorObject,
+        );
+      } catch (err) {
+        return {
+          error: `İptal yarıda kesildi — ${cancelled} vaka iptal edildi, ${c.id}'de hata: ${String(err?.message ?? err).slice(0, 120)}`,
+          cancelled, skipped, requested: ids.length,
+        };
+      }
+      if (!r) {
+        return {
+          error: `İptal yarıda kesildi — ${cancelled} vaka iptal edildi, ${c.id} işlenemedi (erişim/bulunamadı).`,
+          cancelled, skipped, requested: ids.length,
+        };
+      }
+      cancelled += 1;
+    }
+    return { cancelled, skipped, requested: ids.length };
+  },
+
+  /**
    * PR-SD — Arşivli vakayı geri yükle (SystemAdmin-only). Status enum
    * dokunulmaz. Audit: CaseActivity actionType='Restored', actor.
    */
@@ -2576,7 +3004,7 @@ export const caseRepository = {
     if (!before.isArchived) {
       // Idempotent: zaten arşivli değil.
       const current = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
-      return shape(current);
+      return await shapeWithProjectAvailability(current);
     }
 
     await prisma.$transaction([
@@ -2603,7 +3031,7 @@ export const caseRepository = {
     ]);
 
     const updated = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -2651,7 +3079,7 @@ export const caseRepository = {
     if (existingArr.some((entry) => entry?.id === workItemId)) {
       // Idempotent: zaten bağlı, güncel state'i döndür.
       const c = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
-      return shape(c);
+      return await shapeWithProjectAvailability(c);
     }
 
     // Faz 2.1 — per-tenant config (DB-first, env fallback). companyId
@@ -2710,10 +3138,82 @@ export const caseRepository = {
           at: new Date(),
         },
       });
+
+      const row = await prisma.case.findUnique({ where: { id: caseId } });
+
+      // Ürün kararı — her DevOps kaydı hata/defect kabul edilir: work item
+      // bağlanınca Talep Türü otomatik "Hata"ya çekilir, mevcut değer ne
+      // olursa olsun ezilir. Zaten "Hata" ise no-op (gereksiz update/log
+      // yok — aynı vakaya birden fazla work item bağlanabiliyor).
+      // Tek yönlü: unlinkDevops'ta bilinçli karşılığı YOK, aşağıdaki SLA
+      // uzatma emsaliyle aynı prensip (U-E — geri daraltma yok).
+      if (row && row.requestType !== 'Hata') {
+        await prisma.case.update({
+          where: { id: caseId },
+          data: {
+            requestType: 'Hata',
+            history: {
+              create: [{
+                companyId,
+                actionType: 'FieldUpdate',
+                fieldName: 'requestType',
+                fromValue: row.requestType,
+                toValue: 'Hata',
+                action: 'Talep Türü otomatik güncellendi (DevOps bağlantısı)',
+                actor: actor.displayName,
+                actorUserId: actor.userId ?? null,
+              }],
+            },
+          },
+        });
+      }
+
+      // Uzatılmış SLA v1 — koşulun İKİNCİ yarısı sonradan tamamlanabilir:
+      // vaka ZATEN bayraklı 3. partide beklerken DevOps kaydı şimdi
+      // bağlandıysa uzatma bu olayla tetiklenir. Kendi içinde atomik:
+      // due + damga + ihlal + history TEK update. unlinkDevops'ta bilinçli
+      // karşılığı YOK (U-E — geri daraltma yok).
+      if (row?.status === 'ThirdPartyWaiting' && row.thirdPartyId && row.slaTargetSource !== 'extended') {
+        const tp = await prisma.thirdParty.findUnique({
+          where: { id: row.thirdPartyId },
+          select: { name: true, triggersExtendedSla: true, extendedSlaRequiresDevopsLink: true },
+        });
+        if (extendedSlaTriggerMet(tp, readDevopsArray(row.customFields).length)) {
+          const extMatch = await resolveSlaPolicy({
+            companyId: row.companyId,
+            productGroup: row.productGroup ?? null,
+            categoryName: row.category ?? null,
+            subCategoryName: row.subCategory ?? null,
+            requestType: row.requestType ?? null,
+            priority: row.priority ?? null,
+          });
+          const extendedPatch = await buildExtendedSlaPatch(
+            row,
+            resolveExtendedTargetMinutes(extMatch),
+            `${tp.name} + DevOps #${workItemId}`,
+          );
+          if (extendedPatch) {
+            await prisma.case.update({
+              where: { id: caseId },
+              data: {
+                ...extendedPatch.data,
+                history: {
+                  create: [{
+                    companyId,
+                    ...extendedPatch.historyEntry,
+                    actor: actor.displayName,
+                    actorUserId: actor.userId ?? null,
+                  }],
+                },
+              },
+            });
+          }
+        }
+      }
     }
 
     const updated = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -2766,7 +3266,7 @@ export const caseRepository = {
     }
 
     const updated = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -2984,7 +3484,7 @@ export const caseRepository = {
       }
     }
 
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -3442,7 +3942,7 @@ export const caseRepository = {
       data: { updatedAt: new Date() },
       include: CASE_INCLUDE,
     });
-    return { caseUpdated: shape(caseUpdated), callLog: fromDb(log) };
+    return { caseUpdated: await shapeWithProjectAvailability(caseUpdated), callLog: fromDb(log) };
   },
 
   async addActivity(caseId, input, allowedCompanyIds, actor) {
@@ -3470,7 +3970,7 @@ export const caseRepository = {
       data: { updatedAt: new Date() },
       include: CASE_INCLUDE,
     });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   async toggleChecklistItem(caseId, itemId, checked, actor, allowedCompanyIds) {
@@ -3478,7 +3978,7 @@ export const caseRepository = {
     const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
     if (!companyId) return null;
     const c = await prisma.case.findUnique({ where: { id: caseId } });
-    if (!c?.checklistItems) return shape(c);
+    if (!c?.checklistItems) return await shapeWithProjectAvailability(c);
 
     const items = c.checklistItems.map((it) => {
       if (it.id !== itemId) return it;
@@ -3505,7 +4005,7 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -3522,15 +4022,14 @@ export const caseRepository = {
     }
     if (!(await assertCaseInScope(id, allowedCompanyIds))) return null;
     const FILE_MAX_SIZE = 25 * 1024 * 1024;
-    const FILE_MAX_COUNT = 20;
 
     const c = await prisma.case.findUnique({
       where: { id },
       include: { attachments: true },
     });
     if (!c) return null;
-    if (c.attachments.length >= FILE_MAX_COUNT) {
-      return { error: `Bu vakada en fazla ${FILE_MAX_COUNT} dosya olabilir.` };
+    if (c.attachments.length >= CASE_FILE_MAX_COUNT) {
+      return { error: `Bu vakada en fazla ${CASE_FILE_MAX_COUNT} dosya olabilir.` };
     }
     if (input.fileSize > FILE_MAX_SIZE) {
       return { error: `Dosya boyutu üst sınırı ${Math.round(FILE_MAX_SIZE / (1024 * 1024))} MB.` };
@@ -3620,7 +4119,135 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
-    return { caseUpdated: shape(caseUpdated), file };
+    return { caseUpdated: await shapeWithProjectAvailability(caseUpdated), file };
+  },
+
+  /**
+   * Varuna↔Connect entegrasyonu — server-to-server dosya ekleme (POST
+   * /api/connect/tickets/:id/attachments, server/routes/connectApi.js).
+   *
+   * requestUpload/finalizeUpload'un İKİ-ADIMLI, tarayıcı-actor'a bağlı
+   * (JWT userId token binding, signed PUT URL) akışını KULLANMAZ — Connect
+   * zaten dosya bytes'ını (base64 decode edilmiş) TEK istekte taşıyor,
+   * signed-URL indirection'a gerek yok. Bunun yerine storage.js'in yazma
+   * primitifi (storageApi.saveObject — bkz. dosya başı yorumu, mutable
+   * yüzey ÖZELLİKLE test edilebilirlik için) + AYNI path şeması
+   * (storageApi.buildPath) doğrudan kullanılır, sonra CaseAttachment satırı +
+   * history log finalizeUpload ile SİMETRİK şekilde yazılır.
+   *
+   * İş kuralları BYPASS EDİLMEZ: CASE_FILE_MAX_COUNT (paylaşımlı sabit,
+   * requestUpload ile AYNI) + isAcceptedUpload (whitelist, AYNI fonksiyon,
+   * server/routes/connectApi.js zaten bir kez kontrol etmiş olsa da burada
+   * defense-in-depth olarak TEKRAR — finalizeUpload'un kendi requestUpload
+   * sonrası tekrar kontrol etme deseniyle AYNI) + CONNECT_ATTACHMENT_MAX_SIZE
+   * (10MB, görev kararı — genel 25MB'lık FILE_MAX_SIZE'tan KASITLI daha sıkı,
+   * JSON+base64 taşımanın getirdiği ek yük payı).
+   *
+   * NOT (bilinen sınır): caller (route) birden fazla dosyayı SIRAYLA bu
+   * metodu çağırarak ekler; bir dosya validasyonu ortada reddederse ÖNCEKİ
+   * başarıyla eklenmiş dosyalar GERİ ALINMAZ (transaction yok — disk+DB
+   * atomik değil, finalizeUpload ile aynı sınırlama). Route bunu 4xx ile
+   * durdurur; Connect eksik kalan dosyaları ayrıca tekrar gönderebilir.
+   *
+   * @param {string} caseId - Case.id (cuid, caseNumber DEĞİL — çağıran
+   *   connectResolver.js::resolveAuthorizedCaseId zaten caseNumber→id +
+   *   IDOR çözümlemesini yapmış olmalı).
+   * @param {object} params
+   * @param {string} params.fileName
+   * @param {string} params.mimeType
+   * @param {Buffer} params.buffer - decode edilmiş dosya bytes'ı (route
+   *   zaten base64 decode + boyut/tip ön-kontrolünü yapmış olmalı; burası
+   *   defense-in-depth katmanıdır, tek doğrulama noktası DEĞİL).
+   * @param {string} params.uploadedByLabel - denormalized "kim yükledi" adı
+   *   (Connect için CONNECT_ACTOR_DISPLAY_NAME — gerçek User YOK,
+   *   uploadedByUserId NULL kalır, User FK ihlali olmaz).
+   * @param {string[]} [params.authorizedCodes] - OPSİYONEL — verilirse
+   *   Case'in accountProject.code'u bu sette olmalı (finalizeUpload'un
+   *   assertCaseInScope ile yaptığı repo-katmanı scope doğrulamasıyla AYNI
+   *   simetri, audit nit). Verilmezse (undefined) bu kontrol ATLANIR —
+   *   geriye dönük uyumlu, çağıran zaten kendi IDOR guard'ını (ör.
+   *   resolveAuthorizedCaseId) geçmiş olabilir.
+   * @returns {Promise<object|null>} oluşturulan CaseAttachment satırı; Case
+   *   bulunamazsa VEYA authorizedCodes verilmiş ve yetkisizse null (route
+   *   404'e çevirir — ama normalde route zaten çağırmadan önce case
+   *   varlığını/yetkisini doğrulamış olur, burası defense-in-depth).
+   * @throws {CaseValidationError} dosya sayısı/tip/boyut ihlali (400/413).
+   */
+  async ingestExternalAttachment(caseId, { fileName, mimeType, buffer, uploadedByLabel, authorizedCodes }) {
+    const c = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: {
+        id: true,
+        companyId: true,
+        attachments: { select: { id: true } },
+        accountProject: { select: { code: true } },
+      },
+    });
+    if (!c) return null;
+
+    if (authorizedCodes !== undefined && !isProjectCodeAuthorized(c.accountProject?.code ?? null, authorizedCodes)) {
+      // IDOR kapatma (repo-katmanı, defense-in-depth) — route zaten
+      // resolveAuthorizedCaseId ile aynı kontrolü yapmış olmalı; bu yalnız
+      // simetri/ikinci savunma katmanı.
+      return null;
+    }
+
+    if (c.attachments.length >= CASE_FILE_MAX_COUNT) {
+      throw new CaseValidationError(`Bu vakada en fazla ${CASE_FILE_MAX_COUNT} dosya olabilir.`, {
+        status: 400,
+        code: 'case_file_limit_reached',
+      });
+    }
+    if (!isAcceptedUpload(mimeType, fileName)) {
+      throw new CaseValidationError('Bu dosya türü kabul edilmiyor.', {
+        status: 400,
+        code: 'unsupported_file_type',
+      });
+    }
+    if (buffer.length > CONNECT_ATTACHMENT_MAX_FILE_BYTES) {
+      throw new CaseValidationError(
+        `Dosya boyutu üst sınırı ${Math.round(CONNECT_ATTACHMENT_MAX_FILE_BYTES / (1024 * 1024))} MB.`,
+        { status: 413, code: 'file_too_large' },
+      );
+    }
+
+    const attachmentId = `cmsa_${crypto.randomBytes(12).toString('hex')}`;
+    const relPath = storageApi.buildPath(caseId, attachmentId, fileName);
+    await storageApi.saveObject(relPath, buffer);
+
+    const file = await prisma.caseAttachment.create({
+      data: {
+        id: attachmentId,
+        caseId,
+        companyId: c.companyId,
+        fileName,
+        fileSize: buffer.length,
+        mimeType,
+        fileUrl: relPath,
+        uploadedBy: uploadedByLabel,
+        uploadedByUserId: null,
+      },
+    });
+
+    await prisma.case.update({
+      where: { id: caseId },
+      data: {
+        updatedAt: new Date(),
+        history: {
+          create: {
+            companyId: c.companyId,
+            action: 'Dosya yüklendi (Connect)',
+            actionType: 'FileUploaded',
+            fieldName: 'files',
+            toValue: file.fileName,
+            actor: uploadedByLabel,
+            actorUserId: null,
+          },
+        },
+      },
+    });
+
+    return file;
   },
 
   /** Download için kısa ömürlü token'lı URL üret (local disk; Faz 4). */
@@ -3643,7 +4270,7 @@ export const caseRepository = {
     const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
     if (!target || target.caseId !== id) {
       const c = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
-      return shape(c);
+      return await shapeWithProjectAvailability(c);
     }
     // Önce Storage'dan sil — başarısız olursa DB satırı yine silinir, orphan log'lanır.
     if (target.fileUrl) {
@@ -3667,7 +4294,7 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -3725,7 +4352,11 @@ export const caseRepository = {
     // Cross-tenant validation: tüm vakaları tek query'de çek, scope'a bak.
     const cases = await prisma.case.findMany({
       where: { id: { in: caseIds } },
-      select: { id: true, companyId: true, assignedPersonId: true, assignedTeamId: true },
+      select: {
+        id: true, companyId: true, status: true,
+        assignedPersonId: true, assignedPersonName: true,
+        assignedTeamId: true, assignedTeamName: true,
+      },
     });
     if (cases.length !== caseIds.length) {
       const foundIds = new Set(cases.map((c) => c.id));
@@ -3798,30 +4429,60 @@ export const caseRepository = {
             actorUserId: actorUserIdOf(actorObject), // PR-5 follow-up
           });
         }
-        await prisma.case.update({
-          where: { id: c.id },
-          data: { ...dataPatch, history: { create: historyEntries } },
-        });
-
+        // 2026-07-09 — atama/devir sonrası statü otomasyonu. Bulk update
+        // de diğer atama yollarıyla (transferCase, generic update) AYNI
+        // kuralı uygular — aksi halde toplu atama bu davranışı bypass
+        // ederdi (bkz. shouldResetStatusOnReassignment).
+        let assignmentChanged = false;
+        let statusReset = false;
+        let finalAssignedPersonId = c.assignedPersonId;
+        let finalAssignedTeamId = c.assignedTeamId;
         if (bulkTouchesAssignment) {
-          const finalAssignedPersonId =
+          finalAssignedPersonId =
             filtered.assignedPersonId !== undefined ? filtered.assignedPersonId : c.assignedPersonId;
-          const finalAssignedTeamId =
+          finalAssignedTeamId =
             filtered.assignedTeamId !== undefined ? filtered.assignedTeamId : c.assignedTeamId;
-          const assignmentChanged =
+          assignmentChanged =
             finalAssignedPersonId !== c.assignedPersonId || finalAssignedTeamId !== c.assignedTeamId;
           if (assignmentChanged) {
-            await notifyAssignmentTargets({
-              caseId: c.id,
-              companyId: c.companyId,
-              assignedPersonId: finalAssignedPersonId,
-              assignedTeamId: finalAssignedTeamId,
-              actorUserId: actorUserIdOf(actorObject),
-              message: 'Toplu işlemle atama değişti.',
-              eventType: 'watcher_update',
-              kind: 'assignment',
-            });
+            statusReset = !('status' in filtered) && shouldResetStatusOnReassignment(c.status);
           }
+        }
+        const assignmentAutomationPatch = assignmentChanged
+          ? { assignedAt: new Date(), pickedUpAt: null, ...(statusReset ? { status: 'Acik' } : {}) }
+          : {};
+
+        await prisma.case.update({
+          where: { id: c.id },
+          data: { ...dataPatch, ...assignmentAutomationPatch, history: { create: historyEntries } },
+        });
+
+        if (assignmentChanged) {
+          await notifyAssignmentTargets({
+            caseId: c.id,
+            companyId: c.companyId,
+            assignedPersonId: finalAssignedPersonId,
+            assignedTeamId: finalAssignedTeamId,
+            actorUserId: actorUserIdOf(actorObject),
+            message: 'Toplu işlemle atama değişti.',
+            eventType: 'watcher_update',
+            kind: 'assignment',
+          });
+          await recordAssignmentChangeAudit(prisma, {
+            caseId: c.id,
+            companyId: c.companyId,
+            fromTeamId: c.assignedTeamId ?? null,
+            fromTeamName: c.assignedTeamName ?? null,
+            fromPersonId: c.assignedPersonId ?? null,
+            fromPersonName: c.assignedPersonName ?? null,
+            toTeamId: finalAssignedTeamId ?? null,
+            toTeamName: assignedTeamName ?? c.assignedTeamName ?? null,
+            toPersonId: finalAssignedPersonId ?? null,
+            toPersonName: assignedPersonName ?? c.assignedPersonName ?? null,
+            statusReset,
+            actorUserId: actorUserIdOf(actorObject),
+            actorName: actor,
+          });
         }
 
         updated++;
@@ -3841,7 +4502,7 @@ export const caseRepository = {
     };
     if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
     const found = await prisma.case.findFirst({ where: mergeSecurityWhere(where, securityWhere), include: CASE_INCLUDE });
-    return shape(found);
+    return await shapeWithProjectAvailability(found);
   },
 
   /**
@@ -3876,6 +4537,128 @@ export const caseRepository = {
       }
     }
 
+    // 2026-07-06 — Müşteri zorunluluğu (kapanış kapısı). Müşterisiz
+    // (accountId null) vaka ÇÖZÜLDÜ'ye geçemez: müşterisiz çözümler
+    // raporları/analitiği kirletiyor ve müşteri geçmişi kayboluyordu.
+    // Karar: yalnız Cozuldu (IptalEdildi muaf — spam/test meşru müşterisiz);
+    // SystemAdmin istisna (nadir kenar durum kaçış kapısı). Bilinçli SERT
+    // kapı — fail-safe değil. Frontend aynı koşulda müşteri-eşleştirme
+    // adımını gösterir; bu guard authoritative (her arayüzü kapsar).
+    if (
+      dbNext === 'Cozuldu' &&
+      prev.status !== 'Cozuldu' &&
+      !prev.accountId &&
+      actorObject?.role !== 'SystemAdmin'
+    ) {
+      throw new CaseValidationError(
+        'Vaka müşteri eşleştirilmeden çözülemez. Lütfen önce müşteri seçin (öneriler veya elle ekle).',
+        { status: 400, code: 'account_required_for_closure' },
+      );
+    }
+
+    // Proje zorunluluğu (kapanış kapısı) — WR-Proje-Kapanış. Müşteride
+    // seçilebilir AKTİF proje tanımlıysa (isActive:true AND status:'Active',
+    // bkz. hasActiveProjectsForCaseAccount) proje seçimi zorunlu; müşteride
+    // hiç aktif proje yoksa kural devreye girmez (projesiz kapanabilir).
+    // CompanySettings.projectsRequired bu kuralı ETKİLEMEZ — o yalnız
+    // create-time davranışı (bkz. yukarıdaki accountId+projectsRequired
+    // bloğu); kapanış kuralı tenant bazlı değil, müşteri bazlı çalışır.
+    // account_required_for_closure guard'ından HEMEN SONRA, product_group
+    // guard'ından ÖNCE — prev.accountId burada zaten var olduğu garanti
+    // (üstteki guard geçtiyse).
+    if (
+      dbNext === 'Cozuldu' &&
+      prev.status !== 'Cozuldu' &&
+      prev.accountId &&
+      actorObject?.role !== 'SystemAdmin'
+    ) {
+      const hasActiveProjects = await hasActiveProjectsForCaseAccount({
+        accountId: prev.accountId,
+        companyId: prev.companyId,
+      });
+      if (hasActiveProjects) {
+        // Fix — önceden yalnız "accountProjectId dolu mu" bakılıyordu; bu,
+        // projesi sonradan Completed/Cancelled/Passive'e çekilmiş (ya da
+        // loadAndValidateProject'in eski, yalnız isActive kontrol eden
+        // sürümüyle set edilmiş) STALE bir referansı da "proje seçilmiş"
+        // sayıp kapıyı atlatıyordu. Artık bağlı projenin HÂLÂ aktif olduğu
+        // ayrıca doğrulanıyor — değilse (null veya stale) kural devam eder.
+        const linkedProjectStillActive = await isAccountProjectCurrentlyActive(prev.accountProjectId);
+        if (!linkedProjectStillActive) {
+          throw new CaseValidationError(
+            'Bu müşteri için tanımlı proje(ler) var; vaka çözülmeden önce proje seçilmelidir.',
+            { status: 400, code: 'project_required_for_closure' },
+          );
+        }
+      }
+    }
+
+    // Ürün Grubu zorunluluğu (kapanış kapısı) — kayıtlarda bu bilginin
+    // kesin olması gerekiyor. Açılış kanalı fark etmeksizin (Smart Ticket,
+    // klasik form, mail intake) uygulanır: mail'den otomatik açılan
+    // vakalar oluşturma anında etkilenmez, sadece Cozuldu'ya geçerken
+    // agent'ın alanı doldurmuş olması gerekir. Karar: yalnız Cozuldu
+    // (IptalEdildi muaf — müşteri kapısıyla aynı gerekçe); SystemAdmin
+    // istisna. Frontend aynı koşulda inline seçim/kaydet gösterir; bu
+    // guard authoritative (her arayüzü kapsar).
+    if (
+      dbNext === 'Cozuldu' &&
+      prev.status !== 'Cozuldu' &&
+      !prev.productGroup &&
+      actorObject?.role !== 'SystemAdmin'
+    ) {
+      throw new CaseValidationError(
+        'Vaka ürün grubu belirtilmeden çözülemez. Lütfen önce ürün grubunu seçin.',
+        { status: 400, code: 'product_group_required_for_closure' },
+      );
+    }
+
+    // Açılış etiketleri zorunluluğu (kapanış kapısı) — TÜM Univera vakalarında
+    // (müşteri/proje eşleşmiş olsun olmasın): platform/businessProcess/
+    // operationType/affectedObject/impact taksonomi alanlarının kaydın
+    // kesinliği için dolu olması gerekiyor. Smart Ticket akışında bu alanlar
+    // açılışta zaten zorunlu ama YALNIZ o admin ilgili alan için taksonomi
+    // tanımlamışsa (canCreate ile aynı fail-safe); mail intake gibi diğer
+    // kanallar açılış anında etkilenmez. Karar: yalnız Cozuldu (IptalEdildi
+    // muaf); SystemAdmin istisna. Frontend'deki gibi, bir alan yalnız o
+    // şirkette en az bir aktif taksonomi tanımı VARSA zorunlu sayılır — admin
+    // tanımlamamışsa vaka tıkanmasın. Fail-safe: taksonomi sorgusu başarısız
+    // olursa zorunluluk UYGULANMAZ (kapatma bloklanmaz).
+    // KB tenant kapısı (kbEnabled) ile aynı koşula bağlıdır — düzeltme
+    // arayüzü olan SmartClassificationCard, kbEnabled=false + veri yok
+    // durumunda hiç render edilmiyor (bkz. bileşen içi TENANT KAPISI notu);
+    // düzeltme yolu yokken kapanışı bloklamak vakayı çıkmaza sokar.
+    if (
+      dbNext === 'Cozuldu' &&
+      prev.status !== 'Cozuldu' &&
+      prev.companyId === 'COMP-UNIVERA' &&
+      actorObject?.role !== 'SystemAdmin' &&
+      (await prisma.externalKbSetting
+        .findUnique({ where: { companyId: 'COMP-UNIVERA' }, select: { enabled: true } })
+        .then((s) => s?.enabled === true)
+        .catch(() => false))
+    ) {
+      const OPENING_TAXONOMY_FIELDS = ['platform', 'businessProcess', 'operationType', 'affectedObject', 'impact'];
+      const definedTypes = await prisma.taxonomyDef
+        .findMany({
+          where: { companyId: 'COMP-UNIVERA', taxonomyType: { in: OPENING_TAXONOMY_FIELDS }, isActive: true },
+          select: { taxonomyType: true },
+          distinct: ['taxonomyType'],
+        })
+        .then((rows) => new Set(rows.map((r) => r.taxonomyType)))
+        .catch(() => new Set());
+      const smartTicketFields = prev.customFields?.smartTicket ?? {};
+      const missing = OPENING_TAXONOMY_FIELDS.filter(
+        (key) => definedTypes.has(key) && !smartTicketFields[key],
+      );
+      if (missing.length > 0) {
+        throw new CaseValidationError(
+          'Vaka açılış etiketleri (platform / iş süreci / işlem türü / etkilenen nesne / etki) tamamlanmadan çözülemez. Lütfen önce sınıflandırma alanlarını doldurun.',
+          { status: 400, code: 'opening_tags_required_for_closure' },
+        );
+      }
+    }
+
     // Kapanış analizi zorunluluğu — vaka (açılış kanalı fark etmeksizin:
     // Smart Ticket, mail, telefon…) Cozuldu'ya geçerken "KB ile Analiz Et"
     // en az bir kez çalıştırılmış (closureSuggestion telemetrisi payload'da)
@@ -3901,20 +4684,27 @@ export const caseRepository = {
         .catch(() => false))
     ) {
       const prevClosure = prev.customFields?.smartTicket?.closure;
+      // Kapanış SINIFLANDIRMA zorunluluğu: "KB ile Analiz Et"e basmak YETMEZ — en az bir
+      // kapanış etiketi (kök neden grubu / detay / çözüm tipi / kalıcı önleme) SEÇİLMİŞ
+      // olmalı. Daha önce ETİKETLENMİŞ vaka muaf; ama bare KB analizi (closureSuggestion)
+      // artık muafiyet saymaz — etiket şart.
+      // Muafiyet, zorunlulukla (hasAnyLabel) HİZALI olmalı: 4 sınıftan HERHANGİ biri
+      // daha önce set edilmişse vaka "etiketlenmiş" sayılır (yalnız rootCauseGroup değil).
       const alreadyAnalyzed = !!(
         prevClosure?.rootCauseGroup ||
         prevClosure?.rootCauseGroupLabel ||
-        prevClosure?.closureSuggestion
+        prevClosure?.rootCauseDetail ||
+        prevClosure?.resolutionType ||
+        prevClosure?.permanentPrevention
       );
       if (!alreadyAnalyzed) {
         const cl = payload.smartTicketClosure ?? {};
         const hasAnyLabel = !!(
           cl.rootCauseGroup || cl.rootCauseDetail || cl.resolutionType || cl.permanentPrevention
         );
-        const hasKbAnalysis = !!cl.closureSuggestion;
-        if (!hasAnyLabel && !hasKbAnalysis) {
+        if (!hasAnyLabel) {
           throw new CaseValidationError(
-            'Vaka çözülmeden önce "KB ile Analiz Et" ile kapanış analizi yapılmalı (veya kapanış etiketleri elle seçilmeli).',
+            'Vaka çözülmeden önce en az bir kapanış etiketi seçilmeli (kök neden grubu / detay / çözüm tipi / kalıcı önleme).',
             { status: 400, code: 'smart_ticket_closure_required' },
           );
         }
@@ -3935,18 +4725,41 @@ export const caseRepository = {
     const enteringPause = dbNext === 'ThirdPartyWaiting' && prev.status !== 'ThirdPartyWaiting';
     const leavingPause = prev.status === 'ThirdPartyWaiting' && dbNext !== 'ThirdPartyWaiting';
 
+    // Faz 3b — müşteri-bekleme duraklaması şu geçişlerde KAPANIR:
+    //  (a) 3rdPartyBekleniyor'a giriş: çakışma kuralı — 3rd-party pause
+    //      öncelikli, iki sayaç aynı anda işlemez (çifte due ötelemesi yok).
+    //  (b) terminal (Cozuldu/IptalEdildi): kapanışta bekleme muhasebesi
+    //      kapatılır ki uyum hesabı (resolvedAt<=dueAt) ötelenmiş due görsün.
+    const cwCloseNeeded = enteringPause || dbNext === 'Cozuldu' || dbNext === 'IptalEdildi';
+    const cwClose = cwCloseNeeded ? await closeCustomerWaitPatch(prev) : null;
+
+    // Uzatılmış SLA v1 — 3P girişinde tanım bayrağı tetiklerse dolar;
+    // data + history TEK update'e girer (kabul şartı: atomiklik).
+    let extendedPatch = null;
+
     let nextSlaPausedAt = prev.slaPausedAt;
-    let nextPausedDurationMin = prev.slaPausedDurationMin;
+    let nextPausedDurationMin = cwClose ? cwClose.slaPausedDurationMin : prev.slaPausedDurationMin;
     let nextThirdPartyWaitMin = prev.slaThirdPartyWaitMin;
-    let nextResolutionDueAt = prev.slaResolutionDueAt;
+    let nextResolutionDueAt = cwClose?.slaResolutionDueAt ?? prev.slaResolutionDueAt;
     let resolvedThirdPartyId = prev.thirdPartyId;
     let resolvedThirdPartyName = prev.thirdPartyName;
+    // U-C — thirdPartyId/Name'in aksine leavingPause'da TEMİZLENMEZ; kalıcı
+    // ve raporlanabilir kalması istendi (cancellationReason deseni).
+    let resolvedThirdPartyNote = prev.thirdPartyNote;
 
     if (enteringPause) {
       if (payload.thirdPartyId) {
         const tp = await prisma.thirdParty.findUnique({
           where: { id: payload.thirdPartyId },
-          select: { id: true, name: true, companyId: true, pausesSla: true },
+          select: {
+            id: true,
+            name: true,
+            companyId: true,
+            pausesSla: true,
+            triggersExtendedSla: true,
+            extendedSlaRequiresDevopsLink: true,
+            requiresNote: true,
+          },
         });
         // Codex P2 fix — Global (companyId=null) 3. partiler tüm
         // şirketler için kullanılabilir; admin UI bunları oluşturuyor +
@@ -3958,10 +4771,44 @@ export const caseRepository = {
         if (!tp || (tp.companyId !== null && tp.companyId !== companyId)) {
           throw new CaseValidationError('Seçilen 3. parti bu şirkete ait değil.', { status: 400, code: 'invalid_third_party' });
         }
+        // U-C — tanım requiresNote=true ise açıklama zorunlu. Backend
+        // otoriter kapı; frontend gate bypass edilse bile burada durur.
+        // Karar saf fonksiyonda (thirdPartyNoteGuard.js) — DB'siz test edilebilir.
+        const noteResult = resolveThirdPartyNote(tp, payload);
+        if (noteResult.missing) {
+          throw new CaseValidationError('Bu 3. parti için bekleme açıklaması zorunlu.', { status: 400, code: 'third_party_note_required' });
+        }
         resolvedThirdPartyId = tp.id;
         resolvedThirdPartyName = tp.name;
+        resolvedThirdPartyNote = noteResult.note;
         if (tp.pausesSla) {
           nextSlaPausedAt = new Date();
+        }
+        // Uzatılmış SLA v1 (U-B) — tanım bayraklı devir: uzatılmış hedef,
+        // GÜNCEL politika satırından okunur (tek kaynak; vaka açılışındaki
+        // eşleşme boyutlarıyla yeniden çözülür). Guard'lar helper'da
+        // (tek-yön/terminal/fail-safe) — koşul tutmazsa hiçbir şey değişmez.
+        if (extendedSlaTriggerMet(tp, readDevopsArray(prev.customFields).length)) {
+          const extMatch = await resolveSlaPolicy({
+            companyId: prev.companyId,
+            productGroup: prev.productGroup ?? null,
+            categoryName: prev.category ?? null,
+            subCategoryName: prev.subCategory ?? null,
+            requestType: prev.requestType ?? null,
+            priority: prev.priority ?? null,
+          });
+          const devopsIds = readDevopsArray(prev.customFields).map((e) => e?.id).filter(Boolean);
+          // cwClose bu geçişte duraklama dk'sı eklemiş olabilir — patch,
+          // GÜNCEL toplamı (nextPausedDurationMin) görmeli ki sıfırdan
+          // türetilen due o dakikaları da taşısın.
+          extendedPatch = await buildExtendedSlaPatch(
+            { ...prev, slaPausedDurationMin: nextPausedDurationMin },
+            resolveExtendedTargetMinutes(extMatch),
+            `${tp.name}${devopsIds.length ? ` + DevOps #${devopsIds.join(', #')}` : ''}`,
+          );
+          if (extendedPatch) {
+            nextResolutionDueAt = extendedPatch.data.slaResolutionDueAt;
+          }
         }
       } else {
         // thirdPartyId yoksa geri uyumluluk: SLA dursun.
@@ -3969,13 +4816,20 @@ export const caseRepository = {
       }
     } else if (leavingPause) {
       if (prev.slaPausedAt) {
-        const pausedMin = Math.round((Date.now() - new Date(prev.slaPausedAt).getTime()) / 60000);
+        const pausedFromMs = new Date(prev.slaPausedAt).getTime();
+        const nowMs = Date.now();
+        // Faz 3 (iş-saati SLA): takvimli şirkette duraklama İŞ-DAKİKASIYLA
+        // ölçülür ve due iş-zamanında ötelenir — gece/hafta sonu geçen
+        // duraklama due'yu şişirmez. Takvimsiz şirkette mevcut duvar-dk.
+        const pauseCal = await getEffectiveCalendar(prev.companyId, nowMs);
+        const bizPaused = pauseCal ? businessMinutesBetween(pausedFromMs, nowMs, pauseCal) : null;
+        const pausedMin = bizPaused != null ? bizPaused : Math.round((nowMs - pausedFromMs) / 60000);
         nextPausedDurationMin += pausedMin;
         nextThirdPartyWaitMin += pausedMin;
         if (prev.slaResolutionDueAt) {
-          nextResolutionDueAt = new Date(
-            new Date(prev.slaResolutionDueAt).getTime() + pausedMin * 60000,
-          );
+          const dueMs = new Date(prev.slaResolutionDueAt).getTime();
+          const shifted = pauseCal ? addBusinessMinutes(dueMs, pausedMin, pauseCal) : null;
+          nextResolutionDueAt = new Date(shifted != null ? shifted : dueMs + pausedMin * 60000);
         }
         nextSlaPausedAt = null;
       }
@@ -4014,6 +4868,17 @@ export const caseRepository = {
       },
     ];
 
+    // Uzatılmış SLA v1 — hedef değişimi, statü geçişiyle AYNI update'in
+    // history'sine düşer (atomiklik; kim/ne zaman/eski→yeni izlenebilir).
+    if (extendedPatch) {
+      historyEntries.push({
+        companyId,
+        ...extendedPatch.historyEntry,
+        actor,
+        actorUserId: stampUid,
+      });
+    }
+
     // 3rdPartyBekleniyor'a girilirken hangi 3. parti tanımına gönderildiği
     // history'ye düşer. Alanın kendisi (thirdPartyId/thirdPartyName) bu
     // statüden çıkılınca sessizce temizlenir (bkz. leavingPause bloğu) —
@@ -4026,6 +4891,9 @@ export const caseRepository = {
         fieldName: 'thirdPartyId',
         fromValue: null,
         toValue: resolvedThirdPartyName,
+        // U-C — bu giriş anına ait açıklama (varsa). Case.thirdPartyNote
+        // kalıcı "son değer"i tutar; bu satır o anki audit izini taşır.
+        note: resolvedThirdPartyNote || null,
         actor,
         actorUserId: stampUid,
       });
@@ -4102,11 +4970,33 @@ export const caseRepository = {
         // geçişlerde prev ile aynı (init değeri prev.thirdPartyId'ydi).
         thirdPartyId: resolvedThirdPartyId,
         thirdPartyName: resolvedThirdPartyName,
+        // U-C — kalıcı/raporlanabilir; leavingPause'da temizlenmez (yukarıda
+        // resolvedThirdPartyNote init'i prev.thirdPartyNote'dan gelir).
+        thirdPartyNote: resolvedThirdPartyNote,
         escalationLevel: newEscalationLevel,
         slaPausedAt: nextSlaPausedAt,
         slaPausedDurationMin: nextPausedDurationMin,
         slaThirdPartyWaitMin: nextThirdPartyWaitMin,
         slaResolutionDueAt: nextResolutionDueAt,
+        // Faz 3b — cwClose'un dk/due etkisi yukarıdaki next* değişkenlerinden
+        // akar; burada yalnız damga temizliği + müşteri-bekleme sayacı yazılır.
+        ...(cwClose
+          ? {
+              slaCustomerWaitStartedAt: null,
+              slaCustomerWaitMin: cwClose.slaCustomerWaitMin,
+            }
+          : {}),
+        // Uzatılmış SLA v1 — due ötelemesi nextResolutionDueAt üzerinden
+        // aktı; burada kaynak/hedef damgası + U-F koşullu ihlal geri çekme.
+        ...(extendedPatch
+          ? {
+              slaTargetSource: extendedPatch.data.slaTargetSource,
+              slaResolutionTargetMin: extendedPatch.data.slaResolutionTargetMin,
+              ...('slaViolation' in extendedPatch.data
+                ? { slaViolation: extendedPatch.data.slaViolation }
+                : {}),
+            }
+          : {}),
         slaResponseMetAt: nextSlaResponseMetAt,
         resolvedAt: (dbNext === 'Cozuldu' || dbNext === 'IptalEdildi') ? new Date() : prev.resolvedAt,
         // M6.1 — terminal'e (Çözüldü/İptal) geçişte pendingCustomerReply
@@ -4117,10 +5007,33 @@ export const caseRepository = {
           : {}),
         ...(mergedCustomFields !== prev.customFields ? { customFields: mergedCustomFields } : {}),
         ...autoAssignData,
+        // 2026-07-09 — atama/devir sonrası "işe başlama" damgası. Açık →
+        // İncelemede geçişi, mevcut sorumlunun vakayı fiilen ele aldığı
+        // an olarak kabul edilir (bkz. shouldResetStatusOnReassignment).
+        ...(prev.status === 'Acik' && dbNext === 'Incelemede' && !prev.pickedUpAt
+          ? { pickedUpAt: new Date() }
+          : {}),
         history: { create: historyEntries },
       },
       include: CASE_INCLUDE,
     });
+
+    // En son CaseTransfer satırının pickedUpAt'i de damgalanır — tarihsel/
+    // raporlama tarafı (atama→işe başlama süresi) bu alan üzerinden
+    // yapılır. Ana update'i bloklamaz; hata olursa sessiz warn (audit
+    // alanı, ana akışı durdurmamalı).
+    if (prev.status === 'Acik' && dbNext === 'Incelemede') {
+      await prisma.caseTransfer
+        .findFirst({ where: { caseId: id, pickedUpAt: null }, orderBy: { transferredAt: 'desc' } })
+        .then((latestTransfer) => {
+          if (!latestTransfer) return null;
+          return prisma.caseTransfer.update({
+            where: { id: latestTransfer.id },
+            data: { pickedUpAt: new Date() },
+          });
+        })
+        .catch((err) => console.warn('[transitionStatus] CaseTransfer.pickedUpAt damgalama hatası', err?.message ?? err));
+    }
 
     // FAZ 2 Collab — watcher bildirimleri (statü + opsiyonel eskalasyon)
     const kind = enteringEscalation ? 'escalation' : 'status';
@@ -4159,7 +5072,7 @@ export const caseRepository = {
       void emitNotificationEvent({ event: 'status_changed', caseId: id });
     }
 
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -4174,12 +5087,20 @@ export const caseRepository = {
    *
    * SLA değiştirilmez (kuralı: aktarım SLA sayacını duraklatmaz/sıfırlamaz).
    */
-  async transferCase(id, input, allowedCompanyIds) {
+  async transferCase(id, input, allowedCompanyIds, actorRole = null, actorPersonId = null) {
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
 
     const c = await prisma.case.findUnique({ where: { id } });
     if (!c) return null;
+
+    // L1 Agent tab-visibility (F3) — Agent rolündeki kullanıcı, sadece
+    // kendine atanmış vakayı devredebilir. assertCaseResourcePolicy'nin
+    // yerine geçmez, ona ek sert bir ownership guard'ıdır (policy sistemi
+    // kapalıysa bile bu kontrol çalışır).
+    if (actorRole === 'Agent' && c.assignedPersonId !== actorPersonId) {
+      throw new CaseAccessError('Bu vakayı devretme yetkiniz yok — yalnız size atanmış vakaları devredebilirsiniz.');
+    }
 
     // Kapalı vakalar aktarılamaz
     if (c.status === 'Cozuldu' || c.status === 'IptalEdildi') {
@@ -4218,6 +5139,13 @@ export const caseRepository = {
     const fromTeamId = c.assignedTeamId ?? null;
     const fromPersonId = c.assignedPersonId ?? null;
     const fromTeamName = c.assignedTeamName ?? '—';
+    const fromPersonName = c.assignedPersonName ?? null;
+
+    // 2026-07-09 — Atama/devir sonrası statü otomasyonu. Vaka aktif
+    // çalışma statülerinden birindeyse (Açık/İncelemede/YenidenAçıldı)
+    // devir sonrası otomatik "Açık"a alınır; 3rdPartyBekleniyor/
+    // Eskalasyon gibi özel statüler etkilenmez (bkz. shouldResetStatusOnReassignment).
+    const statusReset = shouldResetStatusOnReassignment(c.status);
 
     // Activity action satırı: "↔ Vaka aktarıldı: <from> → <to>"
     // Note alanı: gerekçe etiketi + serbest metin.
@@ -4226,6 +5154,16 @@ export const caseRepository = {
     let noteText = reasonLabel
       ? `Gerekçe: ${reasonLabel} — ${trimmedReason}`
       : `Gerekçe: ${trimmedReason}`;
+    // 2026-07-09 — kişi bazlı önceki/yeni sorumlu audit'te anlaşılır olsun
+    // (action/fromValue/toValue yalnız takım adı taşıyor, CaseTransfer'de
+    // fromPersonId/toPersonId var ama okunabilir isim burada lazım).
+    const toPersonNameForNote = person?.name ?? null;
+    if (fromPersonName || toPersonNameForNote) {
+      noteText += `\n\nKişi: ${fromPersonName ?? '—'} → ${toPersonNameForNote ?? '—'}`;
+    }
+    if (statusReset) {
+      noteText += '\n\nYeni sorumlu henüz incelemeye almadı — statü Açık\'a alındı.';
+    }
 
     // WR-Smart-Ticket Phase T1 — Smart Ticket akışı devir bağlamı varsa
     // customFields.smartTicket.transferContext merge edilir (atomik, aynı txn);
@@ -4304,6 +5242,10 @@ export const caseRepository = {
           assignedPersonId: person?.id ?? null,
           assignedPersonName: person?.name ?? null,
           transferCount: { increment: 1 },
+          // 2026-07-09 — atama/devir sonrası statü otomasyonu.
+          assignedAt: new Date(),
+          pickedUpAt: null,
+          ...(statusReset ? { status: 'Acik' } : {}),
           ...(nextCustomFields ? { customFields: nextCustomFields } : {}),
           ...(priorityChange ? { priority: priorityChange.to } : {}),
         },
@@ -4389,7 +5331,7 @@ export const caseRepository = {
     // (c.transferCount + 1) eş zamanlı transfer'lerde supervisor uyarı
     // eşiğini atlatabilir.
     return {
-      case: shape(updated),
+      case: await shapeWithProjectAvailability(updated),
       transferCount: updated.transferCount,
       fromTeamId,
       fromTeamName,
@@ -4501,7 +5443,7 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -4515,7 +5457,7 @@ export const caseRepository = {
     const exists = await prisma.case.findUnique({ where: { id } });
     if (!exists) return null;
     if (!exists.snoozeUntil) {
-      return shape(await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE }));
+      return await shapeWithProjectAvailability(await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE }));
     }
 
     const restored = pickRestoreStatus(exists.snoozePreviousStatus, exists.status);
@@ -4541,7 +5483,7 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
-    return shape(updated);
+    return await shapeWithProjectAvailability(updated);
   },
 
   /**
@@ -4579,18 +5521,102 @@ export const caseRepository = {
   },
 
   /**
+   * "Yönlendirdiklerim" KPI kartı (Agent) — kullanıcının transferredBy
+   * olduğu CaseTransfer kayıtlarını caseId bazında tekilleştirip listeler.
+   * Aynı vaka birden çok kez devredilmişse (transferredAt desc sıralı
+   * olduğu için) İLK görülen satır "benim son yönlendirmem" kabul edilir,
+   * geri kalanlar sadece transferCount'a katkı sağlar. Vaka sonradan
+   * başka kişiye/takıma devredilse bile listede kalır — Case'in GÜNCEL
+   * status/assignedTeamName/assignedPersonName'i döner, "myLastTransferTo*"
+   * alanları ise o anki (benim yaptığım) devrin hedefidir, güncel atama
+   * değildir. Multi-tenant: CaseTransfer.companyId VE Case.companyId
+   * ikisi de allowedCompanyIds ile kısıtlanır (çift kilit).
+   */
+  async listTransferredByMe(userId, allowedCompanyIds, securityWhere = null) {
+    if (!userId) return { items: [], total: 0 };
+    const transferWhere = { transferredBy: userId };
+    if (allowedCompanyIds) transferWhere.companyId = { in: allowedCompanyIds };
+    const transfers = await prisma.caseTransfer.findMany({
+      where: transferWhere,
+      orderBy: { transferredAt: 'desc' },
+      select: { caseId: true, transferredAt: true, reason: true, toTeamId: true, toPersonId: true },
+    });
+    if (transfers.length === 0) return { items: [], total: 0 };
+
+    const byCase = new Map();
+    for (const t of transfers) {
+      const existing = byCase.get(t.caseId);
+      if (existing) {
+        existing.transferCount += 1;
+      } else {
+        byCase.set(t.caseId, {
+          transferCount: 1,
+          myLastTransferAt: t.transferredAt,
+          myLastTransferReason: t.reason,
+          toTeamId: t.toTeamId,
+          toPersonId: t.toPersonId,
+        });
+      }
+    }
+
+    const where = { id: { in: [...byCase.keys()] } };
+    if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
+    const rows = await prisma.case.findMany({
+      where: mergeSecurityWhere(where, securityWhere),
+      include: CASE_INCLUDE,
+    });
+
+    const metas = [...byCase.values()];
+    const teamIds = [...new Set(metas.map((v) => v.toTeamId).filter(Boolean))];
+    const personIds = [...new Set(metas.map((v) => v.toPersonId).filter(Boolean))];
+    const [teams, persons] = await Promise.all([
+      teamIds.length
+        ? prisma.team.findMany({ where: { id: { in: teamIds } }, select: { id: true, name: true } })
+        : [],
+      personIds.length
+        ? prisma.person.findMany({ where: { id: { in: personIds } }, select: { id: true, name: true } })
+        : [],
+    ]);
+    const teamName = new Map(teams.map((t) => [t.id, t.name]));
+    const personName = new Map(persons.map((p) => [p.id, p.name]));
+
+    const items = rows.map((row) => {
+      const meta = byCase.get(row.id);
+      return {
+        ...shape(row),
+        transferCount: meta.transferCount,
+        myLastTransferAt: meta.myLastTransferAt,
+        myLastTransferReason: meta.myLastTransferReason,
+        myLastTransferToTeamName: meta.toTeamId ? teamName.get(meta.toTeamId) ?? null : null,
+        myLastTransferToPersonName: meta.toPersonId ? personName.get(meta.toPersonId) ?? null : null,
+      };
+    });
+    items.sort((a, b) => new Date(b.myLastTransferAt).getTime() - new Date(a.myLastTransferAt).getTime());
+    return { items, total: items.length };
+  },
+
+  /**
    * Cron (her 5 dk) — snoozeUntil geçmiş vakaları Acik'e döndür, log üret.
    * Mutation idempotent: zaten snoozeUntil null olanlar where'de eşleşmez.
    * Bildirim tetikleme şu aşamada uygulama-içi log; Faz 2 §6 bildirim sistemi
    * canlı olunca CaseNotification kaydı buradan üretilir.
+   *
+   * Perf — üst sınırsız fetch riski: aynı saate çok sayıda vaka snooze
+   * edilirse (örn. "Pazartesi 09:00" toplu deseni), bu cron turu vaka
+   * başına sıralı update+history yazdığı için uzayabilir. SNOOZE_WAKEUP_BATCH_CAP
+   * ile bir turda işlenecek kayıt sınırlanır; kalan kayıtlar bir sonraki
+   * 5 dk'lık turda işlenir — veri kaybı yok, sadece uyanma gecikmesi.
    */
   async processSnoozeWakeups() {
+    const SNOOZE_WAKEUP_BATCH_CAP = 200;
     const due = await prisma.case.findMany({
       where: {
         snoozeUntil: { lte: new Date() },
         NOT: { snoozeUntil: null },
       },
       select: { id: true, companyId: true, status: true, snoozeReason: true, snoozePreviousStatus: true },
+      orderBy: { snoozeUntil: 'asc' },
+      take: SNOOZE_WAKEUP_BATCH_CAP,
     });
     if (due.length === 0) return { woken: 0, ids: [] };
 
@@ -5113,6 +6139,81 @@ export const notificationRepo = {
 };
 
 /**
+ * Atama/devir sonrası statü otomasyonu (2026-07-09) — bir vakanın mevcut
+ * sorumlusu (kişi veya ekip) değiştiğinde, vaka aktif çalışma
+ * statülerinden (Açık/İncelemede/YenidenAçıldı) birindeyse otomatik
+ * olarak "Açık"a alınır. "3rdPartyBekleniyor"/"Eskalasyon" gibi özel/
+ * duraklatılmış statüler ve terminal statüler (Çözüldü/İptalEdildi)
+ * ETKİLENMEZ — o statülerde atama değişse bile statüye dokunulmaz.
+ *
+ * Amaç: "atandı" ile "fiilen incelemeye alındı" anını ayırmak. Yeni
+ * sorumlu vakayı mevcut Açık→İncelemede geçişiyle ele aldığında
+ * transitionStatus() Case.pickedUpAt + en son CaseTransfer.pickedUpAt'i
+ * damgalar (bkz. transitionStatus).
+ *
+ * TÜM atama değiştiren yollar (transferCase, generic update, bulkUpdate)
+ * bu kuralı AYNI fonksiyondan okumalı — yalnız decision (reset edilsin
+ * mi) burada; her yol kendi CaseTransfer/CaseActivity yazımını kendi
+ * bağlamına göre yapar (transferCase zaten zengin bir kayıt oluşturuyor,
+ * generic/bulk yollar aşağıdaki recordAssignmentChangeAudit'i kullanır).
+ */
+const ASSIGNMENT_RESET_ELIGIBLE_STATUSES = new Set(['Acik', 'Incelemede', 'YenidenAcildi']);
+function shouldResetStatusOnReassignment(prevStatus) {
+  return ASSIGNMENT_RESET_ELIGIBLE_STATUSES.has(prevStatus);
+}
+
+/**
+ * transferCase() DIŞINDAKİ atama-değiştiren yollar (generic update,
+ * bulkUpdate) için ortak audit kaydı — CaseTransfer + CaseActivity.
+ * transferCase() kendi zengin kaydını (AI önerisi snapshot, Smart Ticket
+ * merge, gerekçe metni) kendi oluşturur, bu helper'ı çağırmaz; ama AYNI
+ * shouldResetStatusOnReassignment() kuralını kullanır ki davranış
+ * yollar arasında sapmasın (bkz. review — aynı takım içi devir eskiden
+ * CaseTransfer hiç oluşturmuyordu, aynı hata sınıfı burada tekrarlanmasın
+ * diye tek noktadan yönetiliyor).
+ *
+ * toTeamId (CaseTransfer şemasında NOT NULL) çözülemezse (ne yeni ne eski
+ * takım biliniyorsa) kayıt ATLANIR — çağıran yine de Case üzerindeki
+ * assignedAt/pickedUpAt/status yan etkisini uygulamaya devam eder.
+ */
+async function recordAssignmentChangeAudit(tx, {
+  caseId, companyId,
+  fromTeamId, fromTeamName, fromPersonId, fromPersonName,
+  toTeamId, toTeamName, toPersonId, toPersonName,
+  statusReset, actorUserId, actorName,
+}) {
+  const resolvedToTeamId = toTeamId ?? fromTeamId ?? null;
+  if (!resolvedToTeamId) return;
+
+  await tx.caseTransfer.create({
+    data: {
+      caseId,
+      companyId,
+      fromTeamId: fromTeamId ?? null,
+      toTeamId: resolvedToTeamId,
+      fromPersonId: fromPersonId ?? null,
+      toPersonId: toPersonId ?? null,
+      reason: 'Atanan kişi/takım güncellendi.',
+      transferredBy: actorUserId ?? 'system',
+    },
+  });
+
+  await tx.caseActivity.create({
+    data: {
+      caseId,
+      companyId,
+      action: `↔ Atama değişti: ${fromPersonName ?? fromTeamName ?? '—'} → ${toPersonName ?? toTeamName ?? '—'}`,
+      actionType: 'Transfer',
+      fieldName: 'assignedPersonId',
+      fromValue: fromPersonName ?? fromTeamName ?? '—',
+      toValue: toPersonName ?? toTeamName ?? '—',
+      note: statusReset ? 'Yeni sorumlu henüz incelemeye almadı — statü Açık\'a alındı.' : null,
+      actor: actorName ?? actorUserId ?? 'system',
+    },
+  });
+}
+
+/**
  * notifyWatchers — bir vakaya watcher olarak eklenmiş tüm kullanıcılara
  * CaseNotification yazar (eventType='watcher_update', channel='InApp').
  *
@@ -5184,7 +6285,11 @@ async function notifyAssignmentTargets({
     const normalizeEmail = (value) =>
       typeof value === 'string' ? value.trim().toLowerCase() : '';
 
-    const personEmails = new Set();
+    // Kişisel atama (assignedPersonId) ve takım yayılımı (assignedTeamId)
+    // kaynaklı e-postalar AYRI tutulur — takım yayılımından gelen Agent
+    // alıcılar aşağıda filtrelenir, kişisel atama filtrelenmez (bkz. altta).
+    const personalEmails = new Set();
+    const teamBroadcastEmails = new Set();
 
     if (assignedPersonId) {
       const assignedPerson = await prisma.person.findUnique({
@@ -5192,7 +6297,7 @@ async function notifyAssignmentTargets({
         select: { email: true },
       });
       const assignedEmail = normalizeEmail(assignedPerson?.email);
-      if (assignedEmail) personEmails.add(assignedEmail);
+      if (assignedEmail) personalEmails.add(assignedEmail);
     }
 
     if (assignedTeamId) {
@@ -5202,19 +6307,26 @@ async function notifyAssignmentTargets({
       });
       for (const member of teamMembers) {
         const email = normalizeEmail(member.email);
-        if (email) personEmails.add(email);
+        if (email) teamBroadcastEmails.add(email);
       }
     }
 
+    const personEmails = new Set([...personalEmails, ...teamBroadcastEmails]);
     if (personEmails.size === 0) return;
 
+    // role — takım yayılımından gelen Agent alıcıları filtrelemek için.
+    // User.role kullanılır (UserCompany.role DEĞİL — o alan rol
+    // değişikliklerinde senkronize edilmiyor, bkz. adminRepository.js
+    // updateSystemRole: "UserCompany.role'e dokunulmaz; sadece User.role
+    // güncellenir". UserCompany.role'e bakmak, terfi/görev değişikliği
+    // sonrası bayat bir role göre yanlış filtreleme yapardı.
     const users = await prisma.user.findMany({
       where: {
         email: { in: [...personEmails] },
         isActive: true,
         companies: { some: { companyId, isActive: true } },
       },
-      select: { id: true, email: true },
+      select: { id: true, email: true, role: true },
     });
     if (users.length === 0) return;
 
@@ -5242,6 +6354,12 @@ async function notifyAssignmentTargets({
       if (!user.id) continue;
       if (actorUserId && user.id === actorUserId) continue;
       if (watcherUserIds.has(user.id)) continue;
+      const email = normalizeEmail(user.email);
+      const isPersonalTarget = personalEmails.has(email);
+      // Takım yayılımından gelen (kişisel atama olmayan) Agent alıcı → atla.
+      // Kişisel atama her zaman önceliklidir (aynı kişi hem kendine atanmış
+      // hem takım üyesi olabilir — bu durumda bildirim almaya devam eder).
+      if (!isPersonalTarget && teamBroadcastEmails.has(email) && user.role === 'Agent') continue;
       recipients.add(user.id);
     }
     if (recipients.size === 0) return;
@@ -5933,7 +7051,10 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null, roleDefaultScope
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const end = new Date(); end.setHours(23, 59, 59, 999);
     where.resolvedAt = { gte: start, lte: end };
-    where.status = { in: ['Cozuldu', 'IptalEdildi'] };
+    // Review fix — "Bugün Çözüldü" İptalEdildi'yi kapsamaz. resolvedAt
+    // her iki terminal statüde de damgalanıyor (transitionStatus), bu
+    // yüzden burada status ile daraltılması ŞART; sadece Cozuldu.
+    where.status = 'Cozuldu';
   }
   // WR-A4 — Project-bazlı vaka filtresi.
   if (f.accountProjectId) where.accountProjectId = f.accountProjectId;

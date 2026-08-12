@@ -28,6 +28,15 @@ import {
   type SmartTicketTaxonomyItem,
   type SuggestClosureResponse,
 } from '@/services/caseService';
+import { useAuth } from '@/services/AuthContext';
+import { CustomerMatchSuggestionsPanel } from './components/CustomerMatchSuggestionsPanel';
+import { AccountSearchPicker, type PickedProject } from '@/features/accounts/AccountSearchPicker';
+import {
+  accountService,
+  canLookupAccountForCaseProject,
+  type AccountListItem,
+  type AccountProjectSummary,
+} from '@/services/accountService';
 import { aiService, aiErrorMessage } from '@/services/aiService';
 import { externalKbService } from '@/services/externalKbService';
 import {
@@ -85,7 +94,10 @@ const STATUS_META: Record<CaseStatus, {
 }> = {
   'Açık': {
     icon: <Inbox size={18} />,
-    description: 'Yeni oluşturuldu, atama bekliyor.',
+    // 2026-07-09 — artık yalnız "yeni vaka" anlamına gelmiyor; atama/devir
+    // sonrası da otomatik bu duruma alınıyor (bkz. caseRepository
+    // shouldResetStatusOnReassignment).
+    description: 'Yeni veya yeniden atanmış, henüz incelemeye alınmamış vaka.',
     ring: 'ring-blue-200',
     bg: 'bg-blue-50/40',
     text: 'text-blue-700',
@@ -162,7 +174,178 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   const [pending, setPending] = useState<CaseStatus | null>(initialPending ?? null);
   const [resolutionNote, setResolutionNote] = useState('');
   const [cancelReason, setCancelReason] = useState('');
+  // 2026-07-06 — Kapanış müşteri kapısı. Müşterisiz vaka Çözüldü'ye geçemez;
+  // SystemAdmin istisna (backend guard ile aynı kural). linkAccount DB'ye
+  // yazar → local linkedCustomer un-gate eder (item prop bu turda tazelenmez
+  // ama transitionStatus taze DB okur, guard geçer).
+  const { user } = useAuth();
+  const [linkedCustomer, setLinkedCustomer] = useState<{ id: string; name: string } | null>(null);
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  // Müşteri arama modalında proje alt-listesi göstermek tenant'ın "Proje
+  // kullanımı aktif" ayarına bağlı (Smart Ticket'taki kullanım ile aynı
+  // kapı) — CompanySettings.projectsEnabled=false olan tenant'larda picker
+  // sade müşteri-seçim moduna düşer.
+  const projectsEnabledForCompany = useMemo(
+    () => lookupService.companies().find((c) => c.id === item.companyId)?.projectsEnabled ?? false,
+    [item.companyId],
+  );
+  // Proje kapısı bu turda item.accountId'ye değil, panel içinde YENİ
+  // bağlanan müşterinin taze dönen alanlarına (accountId/companyId/
+  // hasAvailableProjects/accountProjectId) ihtiyaç duyar — item prop'u bu
+  // turda tazelenmiyor (bkz. üstteki not). linkAccount() zaten
+  // shapeWithProjectAvailability ile dönüyor, o yüzden `updated`'ı burada
+  // saklamak yeterli.
+  const [linkedCaseSnapshot, setLinkedCaseSnapshot] = useState<Case | null>(null);
+  const customerGateActive =
+    pending === 'Çözüldü' &&
+    !item.accountId &&
+    !linkedCustomer &&
+    user?.role !== 'SystemAdmin';
+  async function handleLinkCustomer(accountId: string, accountName: string) {
+    const updated = await caseService.linkAccount(item.id, accountId);
+    if (updated) {
+      setLinkedCustomer({ id: accountId, name: accountName });
+      setLinkedCaseSnapshot(updated);
+    }
+  }
+  // Müşteri arama modalı — Smart Ticket'taki "müşteri + proje tek adımda"
+  // akışıyla aynı (AccountSearchPicker.onSelectWithProject, projectsEnabled).
+  // Müşteri bağlandıktan hemen sonra seçilen proje de kaydedilir; böylece
+  // proje kapısı (aşağıda) aynı adımda kapanmış olur. project null gelirse
+  // (müşterinin projesi yok / "projesiz devam et") ek işlem yapılmaz — proje
+  // kapısı zaten hasAvailableProjects=false olduğu için devreye girmeyecek.
+  async function handleLinkCustomerWithProject(account: AccountListItem, project: PickedProject | null) {
+    const updated = await caseService.linkAccount(item.id, account.id);
+    if (!updated) return;
+    setLinkedCustomer({ id: account.id, name: account.name });
+    setLinkedCaseSnapshot(updated);
+    if (project) {
+      const withProject = await caseService.update(item.id, { accountProjectId: project.id });
+      if (withProject) {
+        setLinkedCaseSnapshot(withProject);
+        setProjectSet({ id: project.id, label: `${project.name} (${project.code})` });
+      }
+    }
+  }
+  // Ürün Grubu kapısı — kapanışta veri kesinliği için zorunlu. Müşteri
+  // kapısıyla aynı desen: SystemAdmin istisna, local override state
+  // (productGroupSet) item prop'u bu turda tazelenmese bile ekranı
+  // un-gate eder (backend transitionStatus taze DB okur, guard geçer).
+  const [productGroupSet, setProductGroupSet] = useState<string | null>(null);
+  const [productGroupDraft, setProductGroupDraft] = useState('');
+  const [productGroupSaving, setProductGroupSaving] = useState(false);
+  const productGroupGateActive =
+    pending === 'Çözüldü' &&
+    !item.productGroup &&
+    !productGroupSet &&
+    user?.role !== 'SystemAdmin';
+  // Proje kapısı — WR-Proje-Kapanış. Müşteride vaka açıldıktan sonra
+  // yeniden adlandırılmış/silinmiş bir proje SNAPSHOT'ı değil, backend'in
+  // hasAvailableProjects hesabı (server/db/caseRepository.js
+  // hasActiveProjectsForCaseAccount, isActive:true AND status:'Active')
+  // kullanılıyor — CaseDetailPage'in local accountProjects state'ine değil,
+  // ortak Case payload alanına bağlı (Panel, L1WorkbenchPanel/
+  // CompactStatusStepper'da da reuse ediliyor, o bağlamlarda local state yok).
+  const [projectSet, setProjectSet] = useState<{ id: string; label: string } | null>(null);
+  // Panel içinde yeni bağlanan müşteri varsa (linkedCaseSnapshot) onun taze
+  // alanları geçerli; yoksa item prop'u kullanılır (sayfa ilk açıldığında
+  // veya müşteri zaten bağlıysa bu zaten günceldir).
+  const effectiveAccountId = linkedCaseSnapshot?.accountId ?? item.accountId;
+  const effectiveCompanyId = linkedCaseSnapshot?.companyId ?? item.companyId;
+  const effectiveHasAvailableProjects = linkedCaseSnapshot?.hasAvailableProjects ?? item.hasAvailableProjects;
+  // Fix — accountProjectId'nin DOLU olması yetmez; o proje sonradan
+  // Completed/Cancelled/Passive'e çekilmiş (stale) olabilir. Backend artık
+  // kapanışta bunu reddediyor (isAccountProjectCurrentlyActive); FE de aynı
+  // "hâlâ aktif mi" sinyaline bakmalı — aksi halde kapı erken kapanır, seçim
+  // kutusu hiç görünmez, kullanıcı Uygula'ya basıp backend hatasından
+  // öğrenir. accountProjectIsActive true DIŞINDA her şey (false, undefined —
+  // proje yok ya da alan henüz taşınmıyor) kapıyı açık tutar; strict eşitlik
+  // bilinçli (diğer kapılarla aynı desen, bkz. hasAvailableProjects===true).
+  const effectiveAccountProjectIsActive = linkedCaseSnapshot?.accountProjectIsActive ?? item.accountProjectIsActive;
+  const projectGateActive =
+    pending === 'Çözüldü' &&
+    !!effectiveAccountId &&
+    effectiveHasAvailableProjects === true &&
+    effectiveAccountProjectIsActive !== true &&
+    !projectSet &&
+    user?.role !== 'SystemAdmin';
+  const [gateAccountProjects, setGateAccountProjects] = useState<AccountProjectSummary[]>([]);
+  const [projectDraft, setProjectDraft] = useState('');
+  const [projectSaving, setProjectSaving] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (!projectGateActive || !effectiveAccountId || !effectiveCompanyId || !canLookupAccountForCaseProject(user?.role)) {
+      return;
+    }
+    void accountService.get(effectiveAccountId).then((detail) => {
+      if (!alive) return;
+      const company = detail?.companies.find((c) => c.companyId === effectiveCompanyId);
+      setGateAccountProjects((company?.projects ?? []).filter((p) => p.isActive && p.status === 'Active'));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [projectGateActive, effectiveAccountId, effectiveCompanyId, user?.role]);
+  async function handleSaveProject() {
+    if (!projectDraft) return;
+    setProjectSaving(true);
+    try {
+      const updated = await caseService.update(item.id, { accountProjectId: projectDraft });
+      if (updated) {
+        const found = gateAccountProjects.find((p) => p.id === projectDraft);
+        setProjectSet({ id: projectDraft, label: found ? `${found.name} (${found.code})` : projectDraft });
+      }
+    } finally {
+      setProjectSaving(false);
+    }
+  }
+  // Fix — Ürün Kataloğu'nda (ProductGroup) tanımlı ama henüz hiçbir vakada
+  // kullanılmamış gruplar da bu kapı select'ine düşsün diye (bkz. aynı fix
+  // CaseDetailPage.tsx'te); lookupService.productGroups() yalnız daha önce
+  // vakalarda kullanılmış distinct değerleri döner — kataloğa yeni eklenen
+  // bir grup bu kapıda hiç seçilemezdi.
+  const [catalogProductGroupNames, setCatalogProductGroupNames] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    if (!productGroupGateActive || !item.companyId) return;
+    void lookupService
+      .caseCatalog({ companyId: item.companyId, accountId: item.accountId || null })
+      .then((data) => {
+        if (alive) setCatalogProductGroupNames(data.productGroups.map((g) => g.name));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [productGroupGateActive, item.companyId, item.accountId]);
+  const productGroupSelectOptions = (() => {
+    const names = new Set<string>();
+    const merged: string[] = [];
+    for (const name of catalogProductGroupNames) {
+      if (!names.has(name)) {
+        names.add(name);
+        merged.push(name);
+      }
+    }
+    for (const p of lookupService.productGroups()) {
+      if (!names.has(p)) {
+        names.add(p);
+        merged.push(p);
+      }
+    }
+    return merged;
+  })();
+  async function handleSaveProductGroup() {
+    if (!productGroupDraft) return;
+    setProductGroupSaving(true);
+    try {
+      const updated = await caseService.update(item.id, { productGroup: productGroupDraft });
+      if (updated) setProductGroupSet(productGroupDraft);
+    } finally {
+      setProductGroupSaving(false);
+    }
+  }
   const [thirdPartyId, setThirdPartyId] = useState('');
+  const [thirdPartyNote, setThirdPartyNote] = useState('');
   const [escalationLevel, setEscalationLevel] = useState<EscalationLevel | ''>('');
   const [escalationReason, setEscalationReason] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -225,6 +408,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     setResolutionNote('');
     setCancelReason('');
     setThirdPartyId('');
+    setThirdPartyNote('');
     setEscalationLevel('');
     setEscalationReason('');
     setError(null);
@@ -237,6 +421,16 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     setKbSuggestion(null);
     setKbSuggestionError(null);
     kbSuggestedAtRef.current = null;
+    setLinkedCustomer(null); // 2026-07-06 — vaka değişince müşteri-bağla state'i sıfırla
+    setCustomerPickerOpen(false);
+    // Codex #494 P2 fix — ürün-grubu gate state'i de vaka değişince sıfırla.
+    // Aksi halde bir vakada grup kaydedildikten sonra panel BAŞKA vakaya
+    // geçince productGroupSet dolu kalıyor → gate gizli + Uygula açık →
+    // backend product_group_required_for_closure ile reddediyor (kullanıcı
+    // sebepsiz duvara çarpıyordu).
+    setProductGroupSet(null);
+    setProductGroupDraft('');
+    setProductGroupSaving(false);
     // initialPending kasıtlı olarak dep değil — panel mount'unda Compact
     // Stepper'dan gelen preselect bir kez uygulanır. Sonraki kullanıcı
     // tıklamaları normal akışla pending'i değiştirir.
@@ -246,9 +440,14 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   // Çözüldü kararı seçildiğinde taxonomy listelerini çek. Kapanış-tüm-vakalar
   // genişletmesi: klasik (mail/telefon) vakalarda da kapanış etiketi yazılır;
   // dropdown'lar herkese görünür. Endpoint per-tenant; companyId Case'de var.
+  // COMP-UNIVERA için ayrıca ERKEN çekilir (pending seçilmeden) — açılış
+  // etiketleri kapısı (openingTagsMissing) "Çöz" kartının SEÇİLEBİLİRLİĞİNİ
+  // belirlerken hangi taksonomi tiplerinin bu şirkette tanımlı olduğunu
+  // bilmesi gerekiyor (P2 review — bkz. openingTagsMissing yorumu).
   useEffect(() => {
     let alive = true;
-    if (pending !== 'Çözüldü' || closureTax) return;
+    if (closureTax) return;
+    if (pending !== 'Çözüldü' && item.companyId !== 'COMP-UNIVERA') return;
     setClosureTaxLoading(true);
     void lookupService
       .smartTicketTaxonomies(item.companyId)
@@ -390,8 +589,37 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
       item.escalationLevel === 'Direktör' ||
       item.escalationLevel === 'ÜstYönetim');
 
+  // Açılış etiketleri kapanış kapısı — caseRepository.js transitionStatus
+  // guard'ının (opening_tags_required_for_closure) client-side aynası.
+  // P2 review fix — backend YALNIZ o şirkette en az bir aktif TaxonomyDef
+  // tanımlı olan alanları zorunlu sayar (admin tanımlamadıysa vaka
+  // tıkanmasın); bu panel eskiden 5 alanı KOŞULSUZ zorunlu sayıyordu —
+  // backend kapatmaya izin verse bile UI "Çöz" yolunu tamamen kapatıyordu.
+  // Artık closureTax (yukarıda taxonomy fetch) ile aynı "tanımlı tip" seti
+  // kullanılır: closureTax[key].length > 0 ⇔ backend'in definedTypes.has(key).
+  // closureTaxLoading sırasında (kısa geçiş penceresi) eski konservatif
+  // davranış korunur — kbEnabled===null ile aynı "güvenli taraf" deseni.
+  // Fetch başarısız olup closureTax null'da kalırsa (loading bitmiş) HİÇBİR
+  // alan zorunlu sayılmaz — backend'in "sorgu başarısız → zorunluluk
+  // UYGULANMAZ" fail-safe'iyle hizalı.
+  const OPENING_TAG_FIELDS = ['platform', 'businessProcess', 'operationType', 'affectedObject', 'impact'] as const;
+  const smartTicketOpening = (
+    item.customFields as { smartTicket?: Record<string, unknown> } | undefined
+  )?.smartTicket;
+  const definedOpeningTagKeys = new Set(
+    OPENING_TAG_FIELDS.filter((key) => (closureTax?.[key]?.length ?? 0) > 0),
+  );
+  const openingTagsMissing =
+    item.companyId === 'COMP-UNIVERA' &&
+    kbEnabled !== false &&
+    user?.role !== 'SystemAdmin' &&
+    (closureTaxLoading
+      ? OPENING_TAG_FIELDS.some((key) => !smartTicketOpening?.[key])
+      : [...definedOpeningTagKeys].some((key) => !smartTicketOpening?.[key]));
+
   function isCardDisabled(target: CaseStatus): boolean {
     if (target === item.status) return true;
+    if (target === 'Çözüldü' && openingTagsMissing) return true;
     return !allowedTransitions.includes(target);
   }
 
@@ -406,42 +634,72 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     setResolutionNote('');
     setCancelReason('');
     setThirdPartyId('');
+    setThirdPartyNote('');
     setEscalationLevel('');
     setEscalationReason('');
   }
+
+  // thirdPartyId değişince (farklı 3. parti seçilince) önceki açıklama
+  // taşınmasın — her tanımın kendi zorunluluğu ayrı.
+  useEffect(() => {
+    setThirdPartyNote('');
+  }, [thirdPartyId]);
 
   // FAZ 4 — Çözüldü transition için zorunlu kontrol listesi maddelerinin
   // tamamlanmış olması gerekir. Eksik varsa transition bloklanır.
   const requiredChecklistPending =
     item.checklistItems?.filter((it) => it.required && !it.checked) ?? [];
 
-  // Kapanış analizi zorunluluğu — backend'deki smart_ticket_closure_required
-  // guard'ının aynası. Vaka (açılış kanalı fark etmeksizin) Çözüldü'ye
-  // geçerken "KB ile Analiz Et" en az bir kez çalıştırılmış (kbSuggestion
-  // alınmış) VEYA en az bir kapanış etiketi elle seçilmiş olmalı. 4 alanın
-  // dolu olması şart değil — AI kararsız kalıp boş bırakabilir; boş kalması
-  // istenir (gelişim verisi). Daha önce analiz edilmiş vaka muaf.
+  // Kapanış ETİKET zorunluluğu — backend'deki smart_ticket_closure_required
+  // guard'ının aynası. Vaka (açılış kanalı fark etmeksizin) Çözüldü'ye geçerken
+  // 4 sınıftan (kök neden grubu / detay / çözüm tipi / kalıcı önleme) EN AZ BİRİ
+  // SEÇİLMİŞ olmalı. "KB ile Analiz Et"e basmak TEK BAŞINA YETMEZ (butona basılıp
+  // etiket boş kalırsa kapatılamaz); ama KB analizi etiketleri otomatik doldurup
+  // bu şartı sağlayabilir. 4 alanın hepsi dolu olmak zorunda değil. Daha önce
+  // ETİKETLENMİŞ vaka muaf (bare KB analizi muafiyet saymaz).
   const prevClosureCf = (
     item.customFields as {
-      smartTicket?: { closure?: { rootCauseGroup?: string; rootCauseGroupLabel?: string; closureSuggestion?: unknown } };
+      smartTicket?: {
+        closure?: {
+          rootCauseGroup?: string; rootCauseGroupLabel?: string;
+          rootCauseDetail?: string; resolutionType?: string; permanentPrevention?: string;
+          closureSuggestion?: unknown;
+        };
+      };
     } | undefined
   )?.smartTicket?.closure;
+  // Muafiyet, zorunlulukla HİZALI: 4 sınıftan herhangi biri daha önce set edilmişse muaf.
   const closureAlreadyAnalyzed = !!(
-    prevClosureCf?.rootCauseGroup || prevClosureCf?.rootCauseGroupLabel || prevClosureCf?.closureSuggestion
+    prevClosureCf?.rootCauseGroup || prevClosureCf?.rootCauseGroupLabel ||
+    prevClosureCf?.rootCauseDetail || prevClosureCf?.resolutionType || prevClosureCf?.permanentPrevention
   );
-  const kbAnalysisPending =
+  // KB analizine basmak (kbSuggestion) YETMEZ — en az bir kapanış etiketi SEÇİLMİŞ olmalı.
+  const closureLabelsPending =
     kbEnabled !== false &&
     !closureAlreadyAnalyzed &&
-    !kbSuggestion &&
     !(closureRcg || closureRcd || closureRt || closurePp);
+
+  // openingTagsMissing yukarıda (isCardDisabled yakınında) tanımlı — "Çöz"
+  // kartı zaten seçilemez durumda olur. Bu, panel açıkken (örn. Compact
+  // Stepper'dan initialPending ile önceden seçilmiş gelirse) Uygula'yı da
+  // kilitleyen ikinci savunma hattı.
+  const openingTagsGateActive = pending === 'Çözüldü' && openingTagsMissing;
+
+  // U-C — seçili 3. parti tanımı, requiresNote gate'i için.
+  const selectedThirdParty = thirdParties.find((tp) => tp.id === thirdPartyId);
 
   function applyDisabled(): boolean {
     if (!pending) return true;
+    if (customerGateActive) return true; // müşterisiz Çözüldü engeli (SystemAdmin muaf)
+    if (productGroupGateActive) return true; // ürün grubu boşken Çözüldü engeli (SystemAdmin muaf)
+    if (projectGateActive) return true; // aktif proje varken projesiz Çözüldü engeli (SystemAdmin muaf)
     if (pending === 'Çözüldü' && !resolutionNote.trim()) return true;
     if (pending === 'Çözüldü' && requiredChecklistPending.length > 0) return true;
-    if (pending === 'Çözüldü' && kbAnalysisPending) return true;
+    if (pending === 'Çözüldü' && closureLabelsPending) return true;
+    if (openingTagsGateActive) return true;
     if (pending === 'İptalEdildi' && !cancelReason.trim()) return true;
     if (pending === '3rdPartyBekleniyor' && !thirdPartyId) return true;
+    if (pending === '3rdPartyBekleniyor' && selectedThirdParty?.requiresNote === true && !thirdPartyNote.trim()) return true;
     if (pending === 'Eskalasyon' && (!escalationLevel || !escalationReason.trim())) return true;
     return false;
   }
@@ -507,6 +765,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
       cancellationReason: pending === 'İptalEdildi' ? cancelReason.trim() : undefined,
       thirdPartyId: pending === '3rdPartyBekleniyor' ? tp?.id : undefined,
       thirdPartyName: pending === '3rdPartyBekleniyor' ? tp?.name : undefined,
+      thirdPartyNote: pending === '3rdPartyBekleniyor' ? thirdPartyNote.trim() : undefined,
       escalationLevel: pending === 'Eskalasyon' && escalationLevel ? (escalationLevel as EscalationLevel) : undefined,
       escalationReason: pending === 'Eskalasyon' ? escalationReason.trim() : undefined,
       smartTicketClosure: smartTicketClosurePayload,
@@ -538,6 +797,11 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
       } else if (pending === 'İptalEdildi' && MENTION_RE.test(cancelReason)) {
         await caseService.addNote(item.id, {
           content: `Vaka iptal edildi. Gerekçe: ${cancelReason.trim()}`,
+          visibility: 'Internal',
+        });
+      } else if (pending === '3rdPartyBekleniyor' && MENTION_RE.test(thirdPartyNote)) {
+        await caseService.addNote(item.id, {
+          content: `3. parti bekleme açıklaması: ${thirdPartyNote.trim()}`,
           visibility: 'Internal',
         });
       }
@@ -658,12 +922,137 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
 
           {pending === 'Çözüldü' && (
             <>
+              {/* Açılış etiketleri kapısı — Univera'da 5 sınıflandırma alanı
+                  (platform/iş süreci/işlem tipi/etkilenen nesne/etki) boşken
+                  Çözüldü uygulanamaz. Düzenleme burada değil, Detay
+                  sekmesindeki "Akıllı Tanımlar" kartında yapılır — kullanıcı
+                  önce oraya yönlendirilir. */}
+              {openingTagsGateActive && (
+                <div className="flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">
+                  <span>⚠️</span>
+                  <span>
+                    Açılış etiketleri (platform / iş süreci / işlem türü / etkilenen nesne / etki)
+                    tamamlanmadan vaka çözülemez. Lütfen önce{' '}
+                    <strong>Detay sekmesindeki Akıllı Tanımlar</strong> kartından sınıflandırmayı
+                    tamamlayın.
+                  </span>
+                </div>
+              )}
+              {/* 2026-07-06 — Müşteri kapısı: müşterisiz vaka çözülemez.
+                  Öneriler (deterministik) + manuel ara; bağlanınca "Çöz"
+                  butonu açılır. SystemAdmin bu bloğu görmez (istisna). */}
+              {customerGateActive && (
+                <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/40">
+                  <div className="flex items-start gap-2 text-sm font-medium text-amber-900 dark:text-amber-200">
+                    <span>⚠️</span>
+                    <span>Müşteri seçilmedi — bu vaka müşteri eşleştirilmeden çözülemez. Aşağıdan önerilen müşterilerden seç ya da elle ara.</span>
+                  </div>
+                  <CustomerMatchSuggestionsPanel
+                    caseId={item.id}
+                    onConfirmLink={async (s) => {
+                      await handleLinkCustomer(s.accountId, s.accountName);
+                    }}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCustomerPickerOpen(true)}
+                    className="w-full justify-center"
+                  >
+                    Müşteri Ara (elle)
+                  </Button>
+                </div>
+              )}
+              {linkedCustomer && (
+                <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200">
+                  ✓ Müşteri bağlandı: <strong>{linkedCustomer.name}</strong> — artık çözebilirsin.
+                </div>
+              )}
+              {/* Ürün Grubu kapısı — kayıtlarda bu bilginin kesin olması için
+                  Çözüldü'ye geçişte zorunlu. Maille otomatik açılan vakalar da
+                  buradan geçer (oluşturma anında etkilenmezler, sadece
+                  kapanışta). SystemAdmin bu bloğu görmez (istisna). */}
+              {productGroupGateActive && (
+                <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/40">
+                  <div className="flex items-start gap-2 text-sm font-medium text-amber-900 dark:text-amber-200">
+                    <span>⚠️</span>
+                    <span>Ürün grubu seçilmedi — bu vaka ürün grubu belirtilmeden çözülemez.</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={productGroupDraft}
+                      onChange={(e) => setProductGroupDraft(e.target.value)}
+                      className="flex-1"
+                    >
+                      <option value="">— Seçin —</option>
+                      {productGroupSelectOptions.map((g) => (
+                        <option key={g} value={g}>{g}</option>
+                      ))}
+                    </Select>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleSaveProductGroup()}
+                      disabled={!productGroupDraft || productGroupSaving}
+                      leftIcon={productGroupSaving ? <Loader2 size={12} className="animate-spin" /> : undefined}
+                    >
+                      Kaydet
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {productGroupSet && (
+                <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200">
+                  ✓ Ürün grubu kaydedildi: <strong>{productGroupSet}</strong> — artık çözebilirsin.
+                </div>
+              )}
+              {/* Proje kapısı — WR-Proje-Kapanış. Ürün grubu kapısıyla aynı
+                  desen: uyarı + inline seçim, müşteri kartına gitmeye gerek
+                  yok. gateAccountProjects yalnız kapı aktifken (ve izin
+                  varsa) fetch edilir — CaseDetailPage'in kendi accountProjects
+                  state'inden bağımsız, bu panel başka bağlamlarda da
+                  (L1WorkbenchPanel/CompactStatusStepper) tek başına render
+                  olabildiği için. */}
+              {projectGateActive && (
+                <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/40">
+                  <div className="flex items-start gap-2 text-sm font-medium text-amber-900 dark:text-amber-200">
+                    <span>⚠️</span>
+                    <span>Bu müşteri için aktif proje tanımlı — vaka çözülmeden önce proje seçilmelidir.</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={projectDraft}
+                      onChange={(e) => setProjectDraft(e.target.value)}
+                      className="flex-1"
+                    >
+                      <option value="">— Seçin —</option>
+                      {gateAccountProjects.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
+                      ))}
+                    </Select>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleSaveProject()}
+                      disabled={!projectDraft || projectSaving}
+                      leftIcon={projectSaving ? <Loader2 size={12} className="animate-spin" /> : undefined}
+                    >
+                      Kaydet
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {projectSet && (
+                <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200">
+                  ✓ Proje kaydedildi: <strong>{projectSet.label}</strong> — artık çözebilirsin.
+                </div>
+              )}
               <RunaAiCard
                 title="Çözüm Notu Taslağı"
                 body={
                   resolutionNote
                     ? 'Taslak alana yazıldı; düzenleyebilirsiniz veya yeni bir taslak üretebilirsiniz.'
-                    : 'Vaka geçmişine ve notlara bakarak müşteri dostu bir çözüm notu önerilir.'
+                    : 'Vaka geçmişine ve notlara bakarak ekip içi bir çözüm özeti (iç kayıt) önerilir.'
                 }
                 isLoading={drafting}
                 primaryAction={{
@@ -675,7 +1064,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
               <Field
                 label="Çözüm Notu"
                 required
-                hint="@ ile yardım eden kişi veya QA'yı etiketleyebilirsin."
+                hint="İç kayıt amaçlıdır, müşteriye gönderilmez. @ ile yardım eden kişi veya QA'yı etiketleyebilirsin."
                 actions={
                   <VoiceNoteButton
                     onTranscript={(chunk) =>
@@ -722,17 +1111,17 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
               <div className="rounded-md border border-brand-100 bg-brand-50/40 p-3 dark:border-brand-900/30 dark:bg-brand-950/20">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-xs font-medium text-brand-700 dark:text-brand-200">
-                    Kapanış Bilgileri (Kök Neden){closureAlreadyAnalyzed ? '' : ' — KB analizi zorunlu'}
+                    Kapanış Bilgileri (Kök Neden){closureAlreadyAnalyzed ? '' : ' — etiket seçimi zorunlu'}
                   </span>
                     {closureTaxLoading && (
                       <span className="text-[11px] text-slate-500">yükleniyor…</span>
                     )}
                   </div>
-                  {kbAnalysisPending && (
+                  {closureLabelsPending && (
                     <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-                      Vakayı çözmeden önce çözüm notunu yazıp{' '}
-                      <strong>KB ile Analiz Et</strong> butonuna bir kez basın (veya etiketleri
-                      elle seçin). AI&apos;ın boş bıraktığı alanlar boş kalabilir.
+                      Vakayı çözmeden önce <strong>en az bir kapanış etiketi</strong> seçin (kök
+                      neden grubu / detay / çözüm tipi / kalıcı önleme). İpucu: çözüm notunu yazıp{' '}
+                      <strong>KB ile Analiz Et</strong> ile etiketleri otomatik doldurabilirsiniz.
                     </div>
                   )}
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -796,7 +1185,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                   <p className="mt-2 text-[11px] text-slate-500 dark:text-ndark-muted">
                     {closureAlreadyAnalyzed
                       ? 'Bu vaka daha önce analiz edilmiş; alanlar boş bırakılırsa mevcut etiketler korunur.'
-                      : 'Vaka kapatmadan önce KB analizi zorunludur; AI\'ın boş bıraktığı alanlar boş kalabilir.'}{' '}
+                      : 'Vaka kapatmadan önce en az bir kapanış etiketi seçilmelidir; KB analizi etiketleri otomatik doldurabilir.'}{' '}
                     Kapanışla aynı transaction içinde
                     <code className="ml-1 font-mono">customFields.smartTicket.closure</code> alanına
                     yazılır; mevcut Smart Ticket açılış bilgileri korunur.
@@ -849,6 +1238,18 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                   </option>
                 ))}
               </Select>
+            </Field>
+          )}
+
+          {pending === '3rdPartyBekleniyor' && selectedThirdParty?.requiresNote === true && (
+            <Field label="Bekleme Açıklaması" required>
+              <MentionTextarea
+                caseId={item.id}
+                value={thirdPartyNote}
+                onChange={setThirdPartyNote}
+                placeholder="Neden bekleniyor? Kısa açıklama yazın… (@kişi)"
+                rows={2}
+              />
             </Field>
           )}
 
@@ -947,6 +1348,26 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
           </div>
         </div>
       )}
+
+      {/* Kapanış müşteri kapısı — manuel arama modalı (öneri yetmezse).
+          Smart Ticket'taki "müşteri + proje tek adımda" akışıyla aynı:
+          projectsEnabled olan tenant'larda müşteri satırının altında proje
+          alt-listesi de görünür, seçilirse aynı adımda kaydedilir. */}
+      <AccountSearchPicker
+        open={customerPickerOpen}
+        companyId={item.companyId}
+        onClose={() => setCustomerPickerOpen(false)}
+        onSelect={(account) => {
+          setCustomerPickerOpen(false);
+          if (account) void handleLinkCustomer(account.id, account.name);
+        }}
+        projectsEnabled={projectsEnabledForCompany}
+        projectsRequired
+        onSelectWithProject={(account, project) => {
+          setCustomerPickerOpen(false);
+          void handleLinkCustomerWithProject(account, project);
+        }}
+      />
     </section>
   );
 }

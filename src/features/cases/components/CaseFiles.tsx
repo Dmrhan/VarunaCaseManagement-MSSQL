@@ -49,6 +49,7 @@ export function FilesTab({
   item,
   onItemUpdated,
   onUploadingChange,
+  canDelete = true,
 }: {
   item: Case;
   onItemUpdated: (c: Case) => void;
@@ -57,6 +58,15 @@ export function FilesTab({
    *  disable edilir. Verilmezse default davranış (Case Detail Files tab'ı)
    *  hiçbir değişiklik görmez. */
   onUploadingChange?: (uploading: boolean) => void;
+  /**
+   * 2026-07-12 — kullanıcı kararı: dosya EKLEME artık "Tümü" (wide,
+   * dar-kapsam-kanıtlanmamış) görünümde de serbest (kendi vakası olmayan
+   * bir vakaya da dosya eklenebilir) — bu yüzden upload artık hiçbir
+   * prop'a bağlı değil, her zaman açık. SİLME ayrı kaldı: canDelete=false
+   * iken "Sil" butonu görünmez / handleRemove no-op (CaseDetailPage
+   * wideViewReadOnly'yi buraya canDelete=false olarak geçiriyor).
+   */
+  canDelete?: boolean;
 }) {
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -172,6 +182,11 @@ export function FilesTab({
   }
 
   async function handleRemove(file: CaseFile) {
+    // P2 review fix — uploadFiles zaten gate'liydi, handleRemove'un aynı
+    // korumadan yoksun kalması "Tümü" salt-okunur görünümünden dosya
+    // silinebilmesine izin veriyordu. 2026-07-12 — upload artık serbest
+    // (canDelete'ten bağımsız); silme burada hâlâ korunuyor.
+    if (!canDelete) return;
     if (!window.confirm(`"${file.fileName}" dosyasını silmek istediğinizden emin misiniz?`)) {
       return;
     }
@@ -364,15 +379,17 @@ export function FilesTab({
                 >
                   <Download size={14} />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleRemove(f)}
-                  className="flex h-9 w-9 items-center justify-center rounded-md text-rose-600 ring-1 ring-rose-200 hover:bg-rose-50"
-                  title="Sil"
-                  aria-label="Sil"
-                >
-                  <Trash2 size={14} />
-                </button>
+                {canDelete && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(f)}
+                    className="flex h-9 w-9 items-center justify-center rounded-md text-rose-600 ring-1 ring-rose-200 hover:bg-rose-50"
+                    title="Sil"
+                    aria-label="Sil"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </li>
             );
           })}

@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { prisma } from '../db/client.js';
 import { logAIUsage } from '../lib/aiClient.js';
+import { getCalendarGateFor, diffMinutes } from '../lib/sla/businessTime.js';
 
 /**
  * Smart QA Lite — Faz 1.5 Madde 4.
@@ -89,9 +90,11 @@ export async function runScoreCase(caseId) {
 
   let slaInfo = 'SLA bilgisi yok';
   if (c.slaResolutionDueAt && c.resolvedAt) {
-    const dueMs = new Date(c.slaResolutionDueAt).getTime();
-    const resMs = new Date(c.resolvedAt).getTime();
-    const diffHours = Math.round((dueMs - resMs) / (60 * 60 * 1000));
+    // Faz 4 — fark, damganın rejimiyle okunur (takvimli şirkette İŞ-saati).
+    const cal = (await getCalendarGateFor(c.companyId))(new Date(c.createdAt).getTime());
+    const diffHours = Math.round(
+      diffMinutes(new Date(c.resolvedAt).getTime(), new Date(c.slaResolutionDueAt).getTime(), cal) / 60,
+    );
     slaInfo =
       diffHours >= 0
         ? `SLA'dan ${diffHours} saat önce çözüldü`
@@ -196,7 +199,8 @@ export async function runScoreCase(caseId) {
  */
 export async function runQaScoreBatch() {
   const candidates = await prisma.case.findMany({
-    where: { status: 'Cozuldu', qaScoredAt: null },
+    // 2026-07-06 — arşivli vakaya QA skoru üretme (AI maliyeti + sayaç kirliliği)
+    where: { status: 'Cozuldu', qaScoredAt: null, isArchived: false },
     select: { id: true },
     take: BATCH_SIZE,
     orderBy: { resolvedAt: 'desc' },

@@ -226,7 +226,7 @@ async function bootstrapInner(allowedCompanyIds) {
           where: allowedCompanyIds
             ? { isActive: true, OR: [{ companyId: { in: allowedCompanyIds } }, { companyId: null }] }
             : { isActive: true },
-          select: { id: true, name: true, description: true, isActive: true, companyId: true, pausesSla: true },
+          select: { id: true, name: true, description: true, isActive: true, companyId: true, pausesSla: true, requiresNote: true },
           orderBy: { name: 'asc' },
         }),
         prisma.documentType.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),

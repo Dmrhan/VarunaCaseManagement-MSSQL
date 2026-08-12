@@ -31,7 +31,9 @@
  * alır ve bunu zorunlu kılar; ham FK insert'i kabul etmez.
  */
 
+import crypto from 'node:crypto';
 import { prisma } from './client.js';
+import { closeCustomerWaitPatch, startCustomerWaitPatch } from '../lib/sla/customerWaitPause.js';
 
 /** Visibility default. Plan K2: composer'dan toggle kaldırıldı; sabit 'Customer'. */
 const DEFAULT_VISIBILITY = 'Customer';
@@ -105,6 +107,16 @@ function shape(row) {
           fileSize: a.fileSize,
           contentId: a.contentId,
           isInline: a.isInline,
+          // Evidence Preservation (2026-07-09) — DOSYA KİMLİĞİ. Snapshot
+          // satırları aynı dosyaya (storageKey) birden fazla CaseEmailAttachment
+          // referansı yaratır (outbound alıntı kopyaları). FE thread-fallback
+          // belirsizlik guard'ı "aynı cid farklı EK id" yerine "aynı cid farklı
+          // DOSYA" ile ölçmeli — yoksa snapshot kopyaları meşru fallback'i
+          // zehirler. storageKey'in kendisi FE'ye sızdırılmaz (sunucu yolu);
+          // kısa hash yeterli eşitlik anahtarı.
+          fileKey: a.storageKey
+            ? crypto.createHash('sha1').update(a.storageKey).digest('hex').slice(0, 12)
+            : null,
         }))
       : [],
   };
@@ -206,7 +218,15 @@ async function appendInbound(params) {
     // bekleniyor" hatalı şekilde set edilebiliyordu).
     const c = await tx.case.findUnique({
       where: { id: caseId },
-      select: { lastEmailInboundAt: true, lastEmailOutboundAt: true },
+      select: {
+        lastEmailInboundAt: true,
+        lastEmailOutboundAt: true,
+        companyId: true,
+        slaCustomerWaitStartedAt: true,
+        slaResolutionDueAt: true,
+        slaPausedDurationMin: true,
+        slaCustomerWaitMin: true,
+      },
     });
     const prevIn = c?.lastEmailInboundAt ?? null;
     const prevOut = c?.lastEmailOutboundAt ?? null;
@@ -214,6 +234,9 @@ async function appendInbound(params) {
       ? receivedAtFinal
       : prevIn;
     const pending = !prevOut || effectiveIn.getTime() > prevOut.getTime();
+    // Faz 3b — müşteri döndü: aktif müşteri-bekleme duraklaması kapanır,
+    // çözüm due'su bekleme kadar (takvimli şirkette İŞ-dk) ötelenir.
+    const cwClose = await closeCustomerWaitPatch(c);
     await tx.case.update({
       where: { id: caseId },
       data: {
@@ -221,6 +244,7 @@ async function appendInbound(params) {
           ? {}
           : { lastEmailInboundAt: receivedAtFinal }),
         pendingCustomerReply: pending,
+        ...(cwClose ?? {}),
       },
     });
 
@@ -338,7 +362,13 @@ async function appendOutbound(params) {
     //     son outbound, son inbound'dan sonraysa yanıt beklenmez.
     const c = await tx.case.findUnique({
       where: { id: caseId },
-      select: { lastEmailInboundAt: true, lastEmailOutboundAt: true, status: true },
+      select: {
+        lastEmailInboundAt: true,
+        lastEmailOutboundAt: true,
+        status: true,
+        companyId: true,
+        slaCustomerWaitStartedAt: true,
+      },
     });
     const prevIn = c?.lastEmailInboundAt ?? null;
     const prevOut = c?.lastEmailOutboundAt ?? null;
@@ -391,11 +421,18 @@ async function appendOutbound(params) {
       !isOldReply
       && (!prevOut || prevOut.getTime() < sentAtFinal.getTime());
 
+    // Faz 3b — ajan yanıtladı, top müşteride: toggle açıksa (K-F) çözüm
+    // sayacı durur. Eski mail'e cevapta (isOldReply) BAŞLATILMAZ — top
+    // hâlâ ajanda. Terminal/3rdParty/zaten-aktif guard'ları helper'da.
+    const cwStart = (!isTerminal && !isOldReply && pending === false)
+      ? await startCustomerWaitPatch(c)
+      : null;
     await tx.case.update({
       where: { id: caseId },
       data: {
         ...(advanceOutbound ? { lastEmailOutboundAt: sentAtFinal } : {}),
         pendingCustomerReply: pending,
+        ...(cwStart ?? {}),
       },
     });
 
@@ -425,7 +462,8 @@ async function listForCase(caseId, { allowedCompanyIds } = {}) {
     },
     include: {
       attachments: {
-        select: { id: true, fileName: true, mimeType: true, fileSize: true, contentId: true, isInline: true },
+        // storageKey yalnız fileKey hash'i için — shape() FE'ye ham yolu vermez.
+        select: { id: true, fileName: true, mimeType: true, fileSize: true, contentId: true, isInline: true, storageKey: true },
       },
       sentBy: { select: { fullName: true } },
     },

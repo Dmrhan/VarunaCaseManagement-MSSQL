@@ -20,8 +20,13 @@ export const M_STATUS = {
   'YenidenAcildi': 'YenidenAcildi',
   'İptalEdildi': 'IptalEdildi',
 };
+// 'Connect' — Varuna↔Connect entegrasyonu POST /api/connect/tickets create
+// akışı (server/db/connectResolver.js::createConnectCase). DB'de CK_Case_origin
+// CHECK constraint'i var (bkz. prisma/migrations/20260727_case_origin_connect) —
+// bu satır TEK BAŞINA yeterli DEĞİL, migration UYGULANMADAN INSERT 547 hatası verir.
 export const M_ORIGIN = {
   'Telefon': 'Telefon', 'E-posta': 'Eposta', 'Web': 'Web', 'Chatbot': 'Chatbot', 'Diğer': 'Diger',
+  'Connect': 'Connect',
 };
 export const M_REQUEST = {
   'Bilgi': 'Bilgi', 'Öneri': 'Oneri', 'Talep': 'Talep', 'Şikayet': 'Sikayet', 'Hata': 'Hata',

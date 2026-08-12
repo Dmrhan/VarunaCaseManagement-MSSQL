@@ -1,4 +1,5 @@
 import { prisma } from './client.js';
+import { getCalendarGateFor, diffMinutes } from '../lib/sla/businessTime.js';
 
 /**
  * /my/* — kişisel ekranlar için repository (Takvim, Hatırlatıcılar).
@@ -87,7 +88,8 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
       : Promise.resolve([]),
 
     // 2) Snooze — assignedPersonId = me.personId. personId yoksa skip.
-    //    Kapalı/iptal vakalarda snooze hedefi yok; gizle.
+    //    Kapalı/iptal vakalarda snooze hedefi yok; gizle. Arşivli de aynı
+    //    şekilde gizli — arşivlenmiş vaka hiçbir yerde görünmemeli.
     want('snooze') && personId
       ? prisma.case.findMany({
           where: {
@@ -95,6 +97,7 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
             assignedPersonId: personId,
             snoozeUntil: { not: null, ...dateRange },
             status: { notIn: CLOSED_CASE_STATUSES },
+            isArchived: false,
           },
           select: {
             id: true,
@@ -119,6 +122,7 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
             slaResponseDueAt: { not: null, ...dateRange },
             slaViolation: false,
             status: { notIn: CLOSED_CASE_STATUSES },
+            isArchived: false,
           },
           select: {
             id: true,
@@ -142,6 +146,7 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
             slaResolutionDueAt: { not: null, ...dateRange },
             slaViolation: false,
             status: { notIn: CLOSED_CASE_STATUSES },
+            isArchived: false,
           },
           select: {
             id: true,
@@ -164,7 +169,7 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
           where: {
             ...companyScope,
             nextFollowupDate: { not: null, ...dateRange },
-            case: { assignedPersonId: personId, status: { notIn: CLOSED_CASE_STATUSES } },
+            case: { assignedPersonId: personId, status: { notIn: CLOSED_CASE_STATUSES }, isArchived: false },
           },
           include: {
             case: { select: { id: true, caseNumber: true, accountName: true, priority: true } },
@@ -436,11 +441,13 @@ function endOfToday() {
 
 // myTopCases için her vakaya tek bir "en acil" AI signal'ı seçer.
 // Spec'teki sıraya göre öncelikli: SLA ihlal/yaklaşma → followup → sentiment(skip).
-function deriveAiSignal(c) {
+// Faz 4 — kalan süre, damganın rejimiyle okunur: cal takvimliyse İŞ-saati
+// (eşik "4 iş-saati" olur — mesai-dışı geceler yanlış alarm üretmez).
+function deriveAiSignal(c, cal) {
   if (c.slaViolation) return '⚡ SLA ihlal edildi';
   if (c.slaResolutionDueAt) {
-    const remainingMs = new Date(c.slaResolutionDueAt).getTime() - Date.now();
-    const remainingHours = remainingMs / (60 * 60 * 1000);
+    const remainingHours =
+      diffMinutes(Date.now(), new Date(c.slaResolutionDueAt).getTime(), cal) / 60;
     if (remainingHours > 0 && remainingHours <= 4) {
       return `⚡ SLA ${Math.round(remainingHours)} saat kaldı`;
     }
@@ -464,7 +471,12 @@ export async function getDashboard({ user }) {
   }
 
   const companyScope = { companyId: { in: allowedCompanyIds } };
-  const personScope = personId ? { ...companyScope, assignedPersonId: personId } : null;
+  // Review fix — arşivli vakalar hiçbir Ana Sayfa kartına/sayacına dahil
+  // olmamalı (caseRepository.getStats()'taki scope ile aynı kural). SADECE
+  // Case modeli sorgularında kullanılır — CaseReminder/CaseCallLog/
+  // PatternAlert'te isArchived alanı yok, onlar plain companyScope kullanır.
+  const caseScope = { ...companyScope, isArchived: false };
+  const personScope = personId ? { ...caseScope, assignedPersonId: personId } : null;
 
   // Paralel sorgu seti — single round-trip esprisi (15 paralel query).
   const [
@@ -548,10 +560,13 @@ export async function getDashboard({ user }) {
       : Promise.resolve(0),
     personScope
       ? prisma.caseCallLog.findMany({
+          // NOT: companyScope burada spread edilemez — CaseCallLog'da
+          // isArchived alanı yok (Case'e özgü). Arşiv dışlama, ilişkili
+          // case üzerinden uygulanır.
           where: {
-            ...companyScope,
+            companyId: { in: allowedCompanyIds },
             nextFollowupDate: { gte: today0, lte: today23 },
-            case: { assignedPersonId: personId },
+            case: { assignedPersonId: personId, isArchived: false },
           },
           select: { id: true },
           take: 100,
@@ -603,6 +618,7 @@ export async function getDashboard({ user }) {
             updatedAt: true,
             createdAt: true,
             snoozeUntil: true,
+            companyId: true,
           },
           orderBy: [{ updatedAt: 'desc' }],
           take: 50,
@@ -631,7 +647,7 @@ export async function getDashboard({ user }) {
     // her sütunu bağımsız ortalardı (farklı semantik).
     prisma.case.aggregate({
       where: {
-        ...companyScope,
+        ...caseScope,
         qaScoredAt: { gte: day30Ago },
         AND: [
           { qaEmpathyScore: { not: null } },
@@ -649,7 +665,7 @@ export async function getDashboard({ user }) {
 
     // dailySummary
     prisma.case.count({
-      where: { ...companyScope, createdAt: { gte: today0, lte: today23 } },
+      where: { ...caseScope, createdAt: { gte: today0, lte: today23 } },
     }),
     personScope
       ? prisma.case.findMany({
@@ -724,6 +740,13 @@ export async function getDashboard({ user }) {
   }
   todayCalendar.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
+  // Faz 4 — iş-saati kapıları (şirket başına bir kez; satır kapısı createdAt)
+  const myCalGates = new Map();
+  for (const cid of new Set(myActiveCases.map((c) => c.companyId))) {
+    myCalGates.set(cid, await getCalendarGateFor(cid));
+  }
+  const rowCal = (c) => myCalGates.get(c.companyId)(new Date(c.createdAt).getTime());
+
   // ─── myTopCases — slaViolation desc, priority desc, updatedAt asc → max 5 ───
   const PRIORITY_ORDER = { Critical: 0, High: 1, Medium: 2, Low: 3 };
   const sortedTopCases = [...myActiveCases].sort((a, b) => {
@@ -741,7 +764,7 @@ export async function getDashboard({ user }) {
     priority: c.priority,
     status: c.status,
     slaViolation: c.slaViolation,
-    aiSignal: deriveAiSignal(c),
+    aiSignal: deriveAiSignal(c, rowCal(c)),
   }));
 
   // ─── pendingApprovals: heuristik öneriler ───
@@ -750,8 +773,8 @@ export async function getDashboard({ user }) {
   for (const c of myActiveCases) {
     if (pendingApprovals.length >= 5) break;
     if (!c.slaResolutionDueAt) continue;
-    const remainingMs = new Date(c.slaResolutionDueAt).getTime() - now.getTime();
-    const remainingHours = remainingMs / (60 * 60 * 1000);
+    const remainingHours =
+      diffMinutes(now.getTime(), new Date(c.slaResolutionDueAt).getTime(), rowCal(c)) / 60;
     if (!c.slaViolation && remainingHours > 0 && remainingHours <= 6) {
       pendingApprovals.push({
         caseId: c.id,

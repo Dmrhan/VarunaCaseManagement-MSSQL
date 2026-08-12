@@ -3,8 +3,10 @@ import crypto from 'node:crypto';
 import { prisma } from '../db/client.js';
 import { checkAccountInScope } from '../analytics/accountScopeGuard.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
-import { computeOperationsOverview } from '../analytics/operationsAggregator.js';
+import { computeOperationsOverview, computePeoplePerformanceOverview } from '../analytics/operationsAggregator.js';
+import { computePersonDetail, computePersonEngagement } from '../analytics/personDetailAggregator.js';
 import { computeMonthlyBulletin } from '../analytics/bulletinAggregator.js';
+import { computeSlaDashboard } from '../analytics/slaDashboard.js';
 import { enrichPatternAlert } from '../lib/patternInsight.js';
 import { generatePatternHypothesis } from '../lib/patternHypothesisAi.js';
 import { FORMULA_VERSION } from '../analytics/metricFormulas.js';
@@ -253,18 +255,33 @@ router.get('/patterns', requireSupervisorAnalytics, async (req, res) => {
     // Her alarm için commonThread + spike + impact + severity hesapla.
     // enrichPatternAlert fail olursa kart `insight=null` ile döner
     // (graceful degrade — mevcut consumer'lar etkilenmez).
+    //
+    // Perf fix — N+1: eskiden TÜM alarmlar (take:100) tek Promise.all'de
+    // SINIRSIZ eşzamanlı enrichPatternAlert() çağırıyordu; her çağrı 4-5
+    // Case sorgusu (findMany + 2x count, biri 7 günlük baseline taraması)
+    // içeriyor — 100 alarımda ~400-500 eşzamanlı sorgu, aynı Case tablosu
+    // bölgesinde PAGELATCH_UP kilitlenmesi yaratıyordu (operationsAggregator.js
+    // queryPatternAlertSummary ile aynı kök sebep, ayrı çağrı yeri).
+    // Fix: aynı desen — en fazla PATTERN_INSIGHT_CONCURRENCY tanesi aynı anda,
+    // küçük gruplar hâlinde sırayla.
     const allowedCompanyIds = req.user.allowedCompanyIds ?? [];
-    const enriched = await Promise.all(
-      items.map(async (alert) => {
-        try {
-          const insight = await enrichPatternAlert(alert, { allowedCompanyIds });
-          return { ...alert, insight };
-        } catch (insightErr) {
-          console.warn('[analytics:patterns] insight failed for', alert.id, insightErr?.message);
-          return { ...alert, insight: null };
-        }
-      }),
-    );
+    const PATTERN_INSIGHT_CONCURRENCY = 10;
+    const enriched = [];
+    for (let i = 0; i < items.length; i += PATTERN_INSIGHT_CONCURRENCY) {
+      const chunk = items.slice(i, i + PATTERN_INSIGHT_CONCURRENCY);
+      const chunkResults = await Promise.all(
+        chunk.map(async (alert) => {
+          try {
+            const insight = await enrichPatternAlert(alert, { allowedCompanyIds });
+            return { ...alert, insight };
+          } catch (insightErr) {
+            console.warn('[analytics:patterns] insight failed for', alert.id, insightErr?.message);
+            return { ...alert, insight: null };
+          }
+        }),
+      );
+      enriched.push(...chunkResults);
+    }
 
     res.json({ value: enriched, '@odata.count': enriched.length });
   } catch (e) {
@@ -695,7 +712,11 @@ router.patch('/patterns/:id/dismiss', requireSupervisorAnalytics, async (req, re
 // docs/OPERATIONS_DASHBOARD_DESIGN.md §2.1, §2.6
 // ─────────────────────────────────────────────────────────────────
 
-const MAX_PERIOD_DAYS = 90;
+// Analytics tarih-aralığı üst sınırı. 90 → 365 (kullanıcı kararı 2026-07-07):
+// koçluk/performans yıllık trend + uzmanlık için 90 gün kısıtlıydı. Sorgular
+// resolvedAt/createdAt indeksli; medyan/P90 pencere fonksiyonları 1 yılda da kabul
+// edilebilir. Tüm analytics uçları (ops/drilldown/people-performance/detail/engagement) paylaşır.
+const MAX_PERIOD_DAYS = 365;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DRILLDOWN_PAGE_SIZE = 200;
 
@@ -731,7 +752,7 @@ router.post('/cases/overview', requireOverviewAnalytics, async (req, res) => {
   try {
     const body = req.body ?? {};
 
-    // 1) Validation — from/to zorunlu + 90 gun cap
+    // 1) Validation — from/to zorunlu + 365 gun cap
     const validation = validateOverviewBody(body);
     if (validation.error) {
       return res.status(400).json({ error: 'invalid_input', message: validation.error });
@@ -826,6 +847,115 @@ router.post('/cases/overview', requireOverviewAnalytics, async (req, res) => {
       error: 'internal',
       message: err?.message ?? 'Operasyon ozeti hesaplanamadi',
     });
+  }
+});
+
+/**
+ * POST /api/analytics/people-performance — Performans Panosu FAZ 1a.
+ * Kişi bazlı performans (yöneticinin dilinde metrikler + birim/hesap gömülü)
+ * + ekip benchmark (bağlam). Supervisor+ (requireOverviewAnalytics ile aynı
+ * rol kapısı; kişi-kendi görünümü FAZ 1b). from/to overview ile aynı
+ * validation + scope zinciri — body scope'u genişletemez.
+ */
+router.post('/people-performance', requireSupervisorAnalytics, async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    const validation = validateOverviewBody(body);
+    if (validation.error) {
+      return res.status(400).json({ error: 'invalid_input', message: validation.error });
+    }
+    const { from, to } = validation;
+    const scope = deriveAnalyticsScope(req.user, body);
+    // Codex #453 P2 — dashboard slice filtreleri iletilir (yoksa kişi kartları
+    // filtreli panonun geri kalanıyla çelişir). statuses BİLİNÇLİ hariç: kişi
+    // metrikleri çözülen-bazlı + WIP kendi açık-durum mantığını taşır; status
+    // filtresi ikisini de yanlış kısıtlar.
+    const filters = {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      productGroups: sanitizeStringArray(body.productGroups),
+      caseTypes: sanitizeStringArray(body.caseTypes),
+    };
+    const payload = await computePeoplePerformanceOverview({ scope, filters });
+    res.json({
+      ...payload,
+      scope: {
+        kind: scope.scopeKind,
+        companyIds: scope.companyIds,
+        teamIds: scope.teamIds,
+        personIds: scope.personIds,
+        narrative: describeScope(scope),
+      },
+    });
+  } catch (err) {
+    console.error('[analytics:people-performance]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Performans verisi hesaplanamadı' });
+  }
+});
+
+/**
+ * POST /api/analytics/person-detail — Performans Panosu FAZ 2a.
+ * Kişi uzmanlık profili drill-down: uzmanlık parmak izi + en çok karşılaştığı
+ * sorunlar + ürün + en uzun işler + çözüm imzası + günlük süre trendi.
+ * Supervisor+. Tüm sorgular scope.companyIds ile scoped — scope dışı personId
+ * verilse aggregator boş döner (cross-company sızıntı yok). PII: başlık dışında
+ * müşteri PII'si payload'a girmez.
+ */
+router.post('/person-detail', requireSupervisorAnalytics, async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    if (typeof body.personId !== 'string' || !body.personId) {
+      return res.status(400).json({ error: 'invalid_input', message: 'personId gerekli.' });
+    }
+    const validation = validateOverviewBody(body);
+    if (validation.error) {
+      return res.status(400).json({ error: 'invalid_input', message: validation.error });
+    }
+    const { from, to } = validation;
+    const scope = deriveAnalyticsScope(req.user, body);
+    const payload = await computePersonDetail({
+      personId: body.personId,
+      allowedCompanyIds: scope.companyIds,
+      teamIds: scope.teamIds, // Codex #455 P2 — daraltılmış takım kapsamını onore et
+      from: from.toISOString(),
+      to: to.toISOString(),
+    });
+    res.json(payload);
+  } catch (err) {
+    console.error('[analytics:person-detail]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Kişi profili hesaplanamadı' });
+  }
+});
+
+/**
+ * POST /api/analytics/person-engagement — Performans Panosu FAZ 2c (HASSAS).
+ * Etkinlik & Katkı: gizlenme tespiti — 5 davranış sinyali (dokunuş/gün,
+ * üstlenme, dokunulmayan iş, zor iş payı, hızlı devir) + muhafazakâr verdict
+ * (tek skor DEĞİL). Supervisor+; scope.companyIds + teamIds ile korunuyor.
+ */
+router.post('/person-engagement', requireSupervisorAnalytics, async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    if (typeof body.personId !== 'string' || !body.personId) {
+      return res.status(400).json({ error: 'invalid_input', message: 'personId gerekli.' });
+    }
+    const validation = validateOverviewBody(body);
+    if (validation.error) {
+      return res.status(400).json({ error: 'invalid_input', message: validation.error });
+    }
+    const { from, to } = validation;
+    const scope = deriveAnalyticsScope(req.user, body);
+    const payload = await computePersonEngagement({
+      personId: body.personId,
+      allowedCompanyIds: scope.companyIds,
+      teamIds: scope.teamIds,
+      from: from.toISOString(),
+      to: to.toISOString(),
+    });
+    res.json(payload);
+  } catch (err) {
+    console.error('[analytics:person-engagement]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Etkinlik verisi hesaplanamadı' });
   }
 });
 
@@ -1060,7 +1190,7 @@ router.post('/monthly-bulletin', requireOverviewAnalytics, async (req, res) => {
   try {
     const body = req.body ?? {};
 
-    // 1) Validation — accountId + from/to + 90-gün cap (mevcut helper reuse)
+    // 1) Validation — accountId + from/to + 365-gün cap (mevcut helper reuse)
     if (!body.accountId || typeof body.accountId !== 'string') {
       return res.status(400).json({ error: 'invalid_input', message: 'accountId zorunlu.' });
     }
@@ -1153,6 +1283,57 @@ router.post('/monthly-bulletin', requireOverviewAnalytics, async (req, res) => {
     });
   } catch (err) {
     console.error('[analytics:monthly-bulletin]', err?.message, err?.stack);
+    res.status(500).json({ error: 'internal_error', message: err?.message ?? 'beklenmeyen hata' });
+  }
+});
+
+/**
+ * GET /api/analytics/sla-dashboard — CS Yönetim Panosu (SLA İzleme).
+ * n4b Power BI panosunun Varuna karşılığı; hesap slaDashboard.js'te.
+ *
+ * Yetki: TÜM roller (kullanıcı kararı 2026-07-13 — "yetki sınırı yapmayalım,
+ * sonra kullanıcı tipine göre daraltırız"). Daraltma günü geldiğinde YALNIZ
+ * aşağıdaki rol listesi değişir; requireRole zinciri şimdiden yerinde.
+ * Tenant kapsamı her durumda req.user.allowedCompanyIds ile sınırlı.
+ */
+const requireSlaDashboard = requireRole(
+  'Agent',
+  'Backoffice',
+  'CSM',
+  'Supervisor',
+  'Admin',
+  'SystemAdmin',
+);
+
+router.get('/sla-dashboard', requireSlaDashboard, async (req, res) => {
+  try {
+    const q = req.query ?? {};
+    const payload = await computeSlaDashboard(
+      {
+        year: q.year,
+        month: q.month,
+        createdFrom: q.createdFrom,
+        createdTo: q.createdTo,
+        // Çoklu seçim: aynı isimli tekrar eden query paramları express dizi
+        // olarak verir; compute tekil|dizi ikisini de kabul eder (toList).
+        companyId: q.companyId ?? null,
+        waitingDept: q.waitingDept ?? null,
+        supportLevel: q.supportLevel ?? null,
+        status: q.status ?? null,
+        accountId: q.accountId ?? null,
+        accountProjectName: q.accountProjectName ?? null,
+        openAge: q.openAge ?? null,
+        requestType: q.requestType ?? null,
+        page: q.page,
+        pageSize: q.pageSize,
+        exportAll: q.export === '1' || q.export === 'true',
+        optionsOnly: q.optionsOnly === '1',
+      },
+      req.user?.allowedCompanyIds ?? [],
+    );
+    res.json(payload);
+  } catch (err) {
+    console.error('[analytics:sla-dashboard]', err?.message, err?.stack);
     res.status(500).json({ error: 'internal_error', message: err?.message ?? 'beklenmeyen hata' });
   }
 });

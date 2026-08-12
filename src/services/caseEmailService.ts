@@ -22,6 +22,9 @@ export interface CaseEmailAttachmentInfo {
   fileSize: number;
   contentId: string | null;
   isInline: boolean;
+  /** Dosya kimliği (storageKey hash'i) — snapshot kopyaları aynı dosyayı
+   *  paylaşır; thread-fallback belirsizliği ek id yerine bununla ölçülür. */
+  fileKey: string | null;
 }
 
 export type CaseEmailDirection = 'inbound' | 'outbound';
@@ -107,6 +110,28 @@ export async function getFromAliases(caseId: string): Promise<FromAliasOption[]>
   return Array.isArray(out?.items) ? out!.items : [];
 }
 
+export interface RecipientSuggestion {
+  address: string;
+  name: string | null;
+  source: 'correspondence' | 'team';
+}
+
+/**
+ * GET /api/cases/:caseId/email-recipients — alıcı önerisi v1 havuzu
+ * (yazışma geçmişi + iç ekip; kaynak etiketiyle). Composer açılışında
+ * TEK fetch ile önyüklenir; filtre client-side (ContactPicker).
+ * silent: hata halinde composer bugünkü davranışına düşer — bu çağrı
+ * mail akışı için hiçbir koşulda kritik değildir.
+ */
+export async function getRecipientSuggestions(caseId: string): Promise<RecipientSuggestion[]> {
+  const out = await apiFetch<{ items: RecipientSuggestion[] }>(
+    `/api/cases/${encodeURIComponent(caseId)}/email-recipients`,
+    undefined,
+    { silent: true },
+  );
+  return Array.isArray(out?.items) ? out!.items : [];
+}
+
 export interface ReplyContext {
   caseNumber: string | null;
   to: CaseEmailAddress[];
@@ -114,6 +139,15 @@ export interface ReplyContext {
   bcc: CaseEmailAddress[];
   subject: string;
   inReplyTo: string | null;
+  /** Yanıtlanan mesajın standart nested alıntısı (composer baseline'a eklenir). */
+  quotedBodyHtml: string;
+  /** Taslak hydration'ı — alıntıdaki cid görsellerinin kaynak ek referansları.
+   *  Composer bunları blob URL'e çevirip taslakta gösterir (tarayıcı cid:
+   *  çözemez), gönderirken cid'e geri çevirir. */
+  quotedInlineRefs?: Array<{ cid: string; emailId: string; attachmentId: string }>;
+  /** Multi-inbox: mailin geldiği/ilgili paylaşımlı kutu adresi — composer From
+   *  varsayılanı buna eşleşen alias'a ayarlanır. Eşleşme yoksa null. */
+  suggestedFromAddress: string | null;
 }
 
 /**
@@ -195,6 +229,8 @@ export interface ForwardContext {
   subject: string;
   /** Composer gövdesinin SONUNA eklenen alıntılı orijinal mesaj (HTML). */
   quotedBodyHtml: string;
+  /** Taslak hydration'ı — bkz. ReplyContext.quotedInlineRefs. */
+  quotedInlineRefs?: Array<{ cid: string; emailId: string; attachmentId: string }>;
   inReplyTo: string | null;
 }
 
@@ -330,6 +366,7 @@ export const caseEmailService = {
   listEmails,
   getAttachmentDownload,
   getFromAliases,
+  getRecipientSuggestions,
   getReplyContext,
   getForwardContext,
   sendEmail,

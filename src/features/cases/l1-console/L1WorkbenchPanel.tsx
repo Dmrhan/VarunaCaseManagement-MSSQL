@@ -35,7 +35,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { StatusPill, PriorityBadge } from '@/components/ui/StatusPill';
-import { formatRelative, formatDateTime } from '@/lib/format';
+import { formatRelative, formatDateTime, formatSlaRemaining } from '@/lib/format';
 import type { Case } from '../types';
 import { StatusTransitionPanel } from '../StatusTransitionPanel';
 import { CaseNotesSection } from '../components/CaseNotes';
@@ -149,7 +149,9 @@ export function L1WorkbenchPanel({
               ) : item.slaResolutionDueAt ? (
                 <span className="text-slate-700 dark:text-ndark-text">
                   <Clock size={11} className="mr-1 inline" />
-                  Çözüm {formatRelative(item.slaResolutionDueAt)}
+                  Çözüm{' '}
+                  {formatSlaRemaining(item.slaResolutionRemainingMin, item.slaBusinessTime, item.slaDayMinutes)
+                    ?? formatRelative(item.slaResolutionDueAt)}
                 </span>
               ) : (
                 <span className="text-slate-400">—</span>

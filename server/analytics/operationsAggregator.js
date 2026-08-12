@@ -14,6 +14,9 @@ import {
   isInsufficientSample,
   minSampleNote,
   roundInt,
+  roundPct,
+  roundHours,
+  safePct,
   MIN_SAMPLE,
 } from './metricFormulas.js';
 
@@ -329,6 +332,11 @@ function buildWhereSql(scope, filters) {
   } else {
     addIn('[companyId]', scope.companyIds);
   }
+
+  // 2026-07-06 — arşivli vakalar TÜM pano metriklerinden dışlanır (liste
+  // paritesi; 448 arşivli temizlik vakası sayaçları şişirmişti). buildWhereSql
+  // tüm query ailelerinin tek where kaynağı olduğu için tek nokta yeter.
+  clauses.push('[isArchived] = 0');
 
   if (scope.teamIds && scope.teamIds.length > 0) addIn('[assignedTeamId]', scope.teamIds);
   if (scope.personIds && scope.personIds.length > 0) addIn('[assignedPersonId]', scope.personIds);
@@ -734,57 +742,79 @@ async function queryPatternAlertSummary(scope, filters) {
   if (scope.companyIds.length === 0) return { activeCount: 0, largestSpike: null };
   const alerts = await prisma.patternAlert.findMany({
     where: { companyId: { in: scope.companyIds }, status: 'active' },
-    select: { category: true, caseCount: true, caseIds: true },
+    select: { companyId: true, category: true, detectedAt: true, windowMinutes: true },
   });
   if (alerts.length === 0) return { activeCount: 0, largestSpike: null };
 
   // Codex R1 P2 (PR #418) — kapsam takım/kişi/müşteri ile DARALTILMIŞSA
   // alarm yalnız tetikleyici vakalarından EN AZ BİRİ scoped kümede ise
-  // sayılır; sayı da scoped kesişim adedidir. Aksi halde daraltılmış pano
-  // şirket genelindeki alakasız kümeyi gösterir (kapsam-dışı aggregate
-  // sızıntısı). Şirket-geneli görünümde davranış değişmez.
+  // sayılır; sayı da scoped kesişim adedidir.
+  //
+  // Codex #443 P2 — şirket-geneli kestirme KALDIRILDI: kalıcı
+  // PatternAlert.caseCount snapshot'ı, tetik vakaları sonradan arşivlenince
+  // bayatlıyor (448'lik temizlik sonrası pano hâlâ sel alarmını gösterirdi).
+  // Artık HER görünümde canlı (arşivsiz) kesişimden sayılır; scope
+  // daraltmaları varsa ek filtre olarak biner.
   const narrowed =
     (scope.teamIds && scope.teamIds.length > 0) ||
     (scope.personIds && scope.personIds.length > 0) ||
     (filters && typeof filters.accountId === 'string' && filters.accountId);
-  const parseIds = (raw) => {
-    try {
-      const v = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [];
-    } catch {
-      return [];
-    }
-  };
-
-  if (!narrowed) {
-    const largest = alerts.reduce((a, b) => (b.caseCount > (a?.caseCount ?? -1) ? b : a), null);
-    return {
-      activeCount: alerts.length,
-      largestSpike: largest ? { category: largest.category, caseCount: largest.caseCount } : null,
-    };
+  // Codex #444 P2 — persisted caseIds en fazla 100 id taşır (patternDetect
+  // take:100); kesişim yaklaşımı 100+ vakalık kümeleri kırpar. Bunun yerine
+  // her alarm için TANIM PREDİKATIYLA cap'siz canlı sayım: alarmın tespit
+  // penceresi (detectedAt - windowMinutes) içinde açılan, aynı şirket+kategori
+  // arşivsiz vakalar; daraltılmış görünümde scope filtreleri aynı sorguya
+  // biner. patternDetect'in tetik sorgusuyla birebir aynı predikat.
+  //
+  // Perf fix — N+1: eskiden her alarm için AYRI prisma.case.count() SINIRSIZ
+  // Promise.all ile paralel atılıyordu (255 aktif alarmda 255 eşzamanlı
+  // sorgu). Bunların hepsi Case tablosunun aynı bölgesine (yakın tarihli
+  // kayıtlar) düşüp PAGELATCH_UP kilitlenmesi yaratıyordu — canlıda 20+
+  // sorgu birbirini kilitleyip başka bir sistemin (Power BI refresh)
+  // sorgusunu bile 29sn bekletti.
+  //
+  // İlk düzeltme (tüm alarmların pencerelerini kapsayan TEK geniş aralıkla
+  // adayları bir kerede çekip bellekte gruplamak) geri alındı — alarmlar
+  // otomatik süresi dolmuyor, yalnız elle "dismiss" ediliyor
+  // (patternDetect.js dedupe'u yalnız SON 60 dk'ya bakıyor; eski, dismiss
+  // edilmemiş bir alarm + yeni bir alarm aynı kategoride bir arada
+  // durabiliyor). Dismiss edilmeyen eski bir alarm aralığı aylara kadar
+  // genişletip TÜM o dönemin vakalarını (alarmla ilgisiz kategoriler dahil)
+  // belleğe çekme riski taşıyordu — düzelttiğimiz N+1'den daha ağır bir
+  // tam-tablo aktarımına dönüşebilirdi (canlıda en eski alarm 20+ gün,
+  // sınır yok).
+  //
+  // Bunun yerine: her alarm YİNE kendi dar penceresiyle (indeksli, hafif)
+  // ayrı sayılıyor — ama SINIRLI eşzamanlılıkla (aynı anda en fazla
+  // PATTERN_ALERT_COUNT_CONCURRENCY tanesi), sırayla küçük gruplar hâlinde.
+  // Böylece ne kilitlenme (aynı anda çok az sorgu) ne de sınırsız bellek
+  // riski (her sorgu hâlâ kendi dar tarihine bağlı) oluşuyor.
+  const PATTERN_ALERT_COUNT_CONCURRENCY = 10;
+  const counted = [];
+  for (let i = 0; i < alerts.length; i += PATTERN_ALERT_COUNT_CONCURRENCY) {
+    const chunk = alerts.slice(i, i + PATTERN_ALERT_COUNT_CONCURRENCY);
+    const chunkResults = await Promise.all(chunk.map(async (a) => {
+      const windowStart = new Date(a.detectedAt.getTime() - (a.windowMinutes ?? 60) * 60 * 1000);
+      const liveCount = await prisma.case.count({
+        where: {
+          companyId: a.companyId,
+          category: a.category,
+          createdAt: { gte: windowStart, lte: a.detectedAt },
+          isArchived: false, // 2026-07-06 — arşivli vaka alarm sayımına girmez
+          ...(narrowed && scope.teamIds && scope.teamIds.length > 0 ? { assignedTeamId: { in: scope.teamIds } } : {}),
+          ...(narrowed && scope.personIds && scope.personIds.length > 0 ? { assignedPersonId: { in: scope.personIds } } : {}),
+          ...(narrowed && filters?.accountId ? { accountId: filters.accountId } : {}),
+        },
+      });
+      return { category: a.category, liveCount };
+    }));
+    counted.push(...chunkResults);
   }
-
-  const withIds = alerts.map((a) => ({ ...a, ids: parseIds(a.caseIds) }));
-  const allIds = [...new Set(withIds.flatMap((a) => a.ids))];
-  if (allIds.length === 0) return { activeCount: 0, largestSpike: null };
-  const scopedRows = await prisma.case.findMany({
-    where: {
-      id: { in: allIds },
-      companyId: { in: scope.companyIds },
-      ...(scope.teamIds && scope.teamIds.length > 0 ? { assignedTeamId: { in: scope.teamIds } } : {}),
-      ...(scope.personIds && scope.personIds.length > 0 ? { assignedPersonId: { in: scope.personIds } } : {}),
-      ...(filters?.accountId ? { accountId: filters.accountId } : {}),
-    },
-    select: { id: true },
-  });
-  const scopedSet = new Set(scopedRows.map((r) => r.id));
-  const visible = withIds
-    .map((a) => ({ category: a.category, scopedCount: a.ids.filter((id) => scopedSet.has(id)).length }))
-    .filter((a) => a.scopedCount > 0);
-  const largest = visible.reduce((a, b) => (b.scopedCount > (a?.scopedCount ?? -1) ? b : a), null);
+  const visible = counted.filter((a) => a.liveCount > 0);
+  const largest = visible.reduce((a, b) => (b.liveCount > (a?.liveCount ?? -1) ? b : a), null);
   return {
     activeCount: visible.length,
-    largestSpike: largest ? { category: largest.category, caseCount: largest.scopedCount } : null,
+    largestSpike: largest ? { category: largest.category, caseCount: largest.liveCount } : null,
   };
 }
 
@@ -945,6 +975,326 @@ async function queryByTeam(scope, filters, from, to, baseWhere) {
     count: Number(r.cnt),
     avgTtrHours: r.avg_ttr_hours == null ? null : Math.round(Number(r.avg_ttr_hours) * 10) / 10,
   }));
+}
+
+// ===================================================================
+// Performans Panosu — FAZ 1a: kişi bazında metrik motoru
+// ===================================================================
+// queryByTeam deseninin kişi kırılımı. Her metrik { value, unit, formula,
+// sampleSize } SÖZLEŞMESİYLE döner — birim ve hesap UI'da uydurulmaz, tek
+// kaynak backend. Oran/medyan metrikleri MIN_SAMPLE.agentPerformance (20)
+// altında null (guardrail — az örneklemle "performans" gürültüdür).
+// Tüm oranların paydası = dönemde ÇÖZÜLEN iş (kişinin bitirdiği iş);
+// WIP anlık (dönemden bağımsız). Arşivli vakalar baseWhere ile zaten dışarıda.
+
+const AGENT_MIN_KIND = 'agentPerformance';
+
+async function queryByPerson(scope, filters, from, to, baseWhere) {
+  if (scope.companyIds.length === 0) return [];
+
+  // 1) Dönemde çözülen işlerden kişi-bazlı agregat + medyan/P90
+  //    (PERCENTILE_CONT window func → PARTITION BY kişi, dış GROUP BY'da MIN
+  //     ile partition-sabiti değer alınır).
+  const p1 = withParam(baseWhere, from);
+  const p2 = withParam(p1, to);
+  const mainSql = `
+    SELECT [assignedPersonId] AS id, MAX([assignedPersonName]) AS name,
+      COUNT(*) AS resolved_cnt,
+      MIN(median_h) AS median_h,
+      MIN(p90_h)    AS p90_h,
+      SUM(CASE WHEN [status] = 'YenidenAcildi' THEN 1 ELSE 0 END) AS reopened_cnt,
+      SUM(CASE WHEN [slaViolation] = 1 THEN 1 ELSE 0 END)         AS sla_breach_cnt,
+      SUM(CASE WHEN [escalationLevel] <> 'Yok' THEN 1 ELSE 0 END) AS escalated_cnt,
+      SUM(CASE WHEN [transferCount] > 0 THEN 1 ELSE 0 END)        AS transferred_cnt
+    FROM (
+      SELECT [assignedPersonId], [assignedPersonName], [status], [slaViolation], [escalationLevel], [transferCount],
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(DATEDIFF(SECOND, [createdAt], [resolvedAt]) AS float) / 3600.0)
+          OVER (PARTITION BY [assignedPersonId]) AS median_h,
+        PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY CAST(DATEDIFF(SECOND, [createdAt], [resolvedAt]) AS float) / 3600.0)
+          OVER (PARTITION BY [assignedPersonId]) AS p90_h
+      FROM [Case]
+      WHERE ${baseWhere.sql}
+        AND [resolvedAt] >= @P${p1.idx} AND [resolvedAt] < @P${p2.idx}
+        AND [assignedPersonId] IS NOT NULL
+        AND [resolvedAt] > [createdAt]
+    ) x
+    GROUP BY [assignedPersonId]
+    ORDER BY resolved_cnt DESC;
+  `;
+  const mainRows = await prisma.$queryRawUnsafe(mainSql, ...p2.params);
+
+  // 2) Anlık açık iş (WIP) — dönemden bağımsız. İsim de çekilir çünkü
+  //    Codex #453 P2: dönemde 0 çözen ama açık iş taşıyan (aşırı yüklü) kişi
+  //    sadece burada görünür; ismi mainRows'ta olmayabilir.
+  const w1 = withArrayParam(baseWhere, OPEN_STATUS_DB_VALUES);
+  const wipSql = `
+    SELECT [assignedPersonId] AS id, MAX([assignedPersonName]) AS name, COUNT(*) AS open_cnt
+    FROM [Case]
+    WHERE ${baseWhere.sql}
+      AND [status] IN (${w1.list})
+      AND [assignedPersonId] IS NOT NULL
+    GROUP BY [assignedPersonId];
+  `;
+  const wipRows = await prisma.$queryRawUnsafe(wipSql, ...w1.params);
+  const wip = new Map(wipRows.map((r) => [r.id, { name: r.name, open: Number(r.open_cnt) }]));
+
+  // 3) Per-person QA (kalite puanı) — composite = (empathy+clarity+speed)/3, /5.
+  //    Maket "Kalite puanı"; guardrail qaScore=10 (kişi başına). Az örneklemde null.
+  const q1 = withParam(baseWhere, from);
+  const q2 = withParam(q1, to);
+  const qaSql = `
+    SELECT [assignedPersonId] AS id, COUNT(*) AS qa_cnt,
+      AVG((CAST([qaEmpathyScore] AS FLOAT) + CAST([qaClarityScore] AS FLOAT) + CAST([qaSpeedScore] AS FLOAT)) / 3.0) AS qa_avg
+    FROM [Case]
+    WHERE ${baseWhere.sql}
+      AND [qaScoredAt] >= @P${q1.idx} AND [qaScoredAt] < @P${q2.idx}
+      AND [qaEmpathyScore] IS NOT NULL AND [assignedPersonId] IS NOT NULL
+    GROUP BY [assignedPersonId];
+  `;
+  const qaRows = await prisma.$queryRawUnsafe(qaSql, ...q2.params);
+  const qa = new Map(qaRows.map((r) => [r.id, { count: Number(r.qa_cnt), avg: r.qa_avg == null ? null : Number(r.qa_avg) }]));
+
+  // Kişi kümesi = dönemde çözenler ∪ şu an açık işi olanlar. Codex #453 P2 —
+  // salt-WIP kişiler resolved:0 ile eklenir; oran/medyan metrikleri zaten
+  // örneklem<20 → guardrail null. Yük dengesi sinyali eksik kalmaz.
+  const out = mainRows.map((r) => ({
+    id: r.id,
+    name: r.name ?? r.id,
+    resolved: Number(r.resolved_cnt),
+    medianHours: r.median_h == null ? null : Number(r.median_h),
+    p90Hours: r.p90_h == null ? null : Number(r.p90_h),
+    reopened: Number(r.reopened_cnt),
+    slaBreached: Number(r.sla_breach_cnt),
+    escalated: Number(r.escalated_cnt),
+    transferred: Number(r.transferred_cnt),
+    openWip: wip.get(r.id)?.open ?? 0,
+    qaCount: qa.get(r.id)?.count ?? 0,
+    qaAvg: qa.get(r.id)?.avg ?? null,
+  }));
+  const seen = new Set(out.map((r) => r.id));
+  for (const [id, v] of wip) {
+    if (seen.has(id)) continue;
+    out.push({
+      id, name: v.name ?? id, resolved: 0,
+      medianHours: null, p90Hours: null, reopened: 0, slaBreached: 0,
+      escalated: 0, transferred: 0, openWip: v.open,
+      qaCount: qa.get(id)?.count ?? 0, qaAvg: qa.get(id)?.avg ?? null,
+    });
+  }
+  return out;
+}
+
+// Ham satır → yöneticinin dilinde metrik sözleşmesi. Her metrik birim + hesap
+// (formula) taşır; oran/medyan az örneklemde value=null + insufficient=true.
+function shapePersonMetrics(row) {
+  const n = row.resolved;
+  const enough = !isInsufficientSample(n, AGENT_MIN_KIND);
+  const m = (key, label, value, unit, formula, insufficient = false) => ({
+    key, label, value, unit, formula, sampleSize: n, insufficient,
+  });
+  const ratio = (key, label, value, formula) =>
+    enough ? m(key, label, value, '%', formula) : m(key, label, null, '%', formula, true);
+  return {
+    id: row.id,
+    name: row.name,
+    sampleSize: n,
+    metrics: {
+      resolved: m('resolved', 'Çözülen iş', n, 'vaka', 'dönemde çözüme ulaşan'),
+      medianHours: enough
+        ? m('medianHours', 'Tipik çözüm süresi', roundHours(row.medianHours), 'saat', 'ortadaki vaka · açılış→çözüm')
+        : m('medianHours', 'Tipik çözüm süresi', null, 'saat', 'ortadaki vaka · açılış→çözüm', true),
+      p90Hours: enough
+        ? m('p90Hours', 'Yavaş uç', roundHours(row.p90Hours), 'saat', 'en yavaş %10 eşiği')
+        : m('p90Hours', 'Yavaş uç', null, 'saat', 'en yavaş %10 eşiği', true),
+      reopenRatePct: ratio('reopenRatePct', 'Yeniden açılma oranı', safePct(row.reopened, n), 'yeniden açılan ÷ çözülen'),
+      slaCompliancePct: enough
+        ? m('slaCompliancePct', 'Zamanında çözüm', roundPct(100 - safePct(row.slaBreached, n)), '%', 'söz verilen sürede çözülen')
+        : m('slaCompliancePct', 'Zamanında çözüm', null, '%', 'söz verilen sürede çözülen', true),
+      escalationRatePct: ratio('escalationRatePct', 'Eskalasyon oranı', safePct(row.escalated, n), 'üst kademeye çıkan ÷ çözülen'),
+      transferRatePct: ratio('transferRatePct', 'Devir oranı', safePct(row.transferred, n), 'en az bir kez devredilen ÷ çözülen'),
+      openWip: m('openWip', 'Elindeki açık iş', row.openWip, 'vaka', 'şu an açık durumda taşıdığı'),
+      qaScore: (() => {
+        const qEnough = (row.qaCount ?? 0) >= MIN_SAMPLE.qaScore;
+        return {
+          key: 'qaScore', label: 'Kalite puanı',
+          value: qEnough && row.qaAvg != null ? Math.round(row.qaAvg * 10) / 10 : null,
+          unit: '/5', formula: 'empati+netlik+hız ortalaması (QA)', sampleSize: row.qaCount ?? 0,
+          insufficient: !qEnough,
+        };
+      })(),
+    },
+  };
+}
+
+function medianOf(values) {
+  const a = values.filter((v) => v != null).sort((x, y) => x - y);
+  if (a.length === 0) return null;
+  const mid = Math.floor(a.length / 2);
+  return a.length % 2 ? a[mid] : Math.round(((a[mid - 1] + a[mid]) / 2) * 10) / 10;
+}
+
+// Kural-tabanlı Koçluk sinyali (deterministik, PII YOK). Metriklerden EN BELİRGİN
+// tek deseni seçer (öncelik: risk → gelişim → güçlü). tone: watch|info|good, null=sinyal yok.
+// Kullanıcı kararı 2026-07-07: RUNA/AI değil kural-tabanlı (kredi gerektirmez, tekrarlanabilir).
+function buildCoachingSignal(p, tb) {
+  const v = (k) => p.metrics[k]?.value ?? null;
+  const resolved = v('resolved'), reopen = v('reopenRatePct'), openWip = v('openWip');
+  const esc = v('escalationRatePct'), tr = v('transferRatePct'), qa = v('qaScore'), median = v('medianHours');
+  const tResolved = tb.resolved, tReopen = tb.reopenRatePct, tWip = tb.openWip, tEsc = tb.escalationRatePct, tMedian = tb.medianHours;
+  const oneIn = (pct) => (pct && pct > 0 ? Math.max(2, Math.round(100 / pct)) : null);
+
+  // 1) Hız kaliteyi yiyor — çok + (hızlı) ama yeniden açılma belirgin yüksek
+  if (resolved != null && tResolved != null && resolved >= tResolved
+      && reopen != null && tReopen != null && reopen >= Math.max(tReopen * 1.5, tReopen + 5) && reopen >= 8) {
+    const mine = oneIn(reopen), team = oneIn(tReopen);
+    const fast = median != null && tMedian != null && median <= tMedian ? ' ve hızlı' : '';
+    return { tone: 'watch', text: `Çok iş kapatıyor${fast} ama her ${mine} vakadan 1'i geri dönüyor${team ? ` (ekip: ${team}'de 1)` : ''}. Hız kaliteyi yiyor — sıralamada öne çıkar, gerçekte kalite koçluğu gerekiyor.`, action: 'Kalite koçluğu için birebir planla' };
+  }
+  // 2) Aşırı yük — WIP belirgin yüksek. Ekip medyanı (tWip) 0 ise (çoğu kişide açık
+  //    iş yokken) mutlak eşik kullan: 8+ açık iş tek başına yük sinyalidir; aksi halde
+  //    medyanın 2 katı. (tWip>0 guard'ı tek başına, herkesin-0 olduğu ekipte gerçek
+  //    aşırı-yükü gizliyordu — kalıcı düzeltme 2026-07-08.)
+  if (openWip != null && openWip >= 5
+      && (tWip != null && tWip > 0 ? openWip >= tWip * 2 : openWip >= 8)) {
+    const ref = tWip != null && tWip > 0 ? `ekip ortalamasının (${tWip}) belirgin üstünde` : 'ekip normalinin çok üstünde';
+    return { tone: 'watch', text: `Elinde ${ref} açık iş var (${openWip}). Yük dengelenmezse gecikme riski — önceliklendirme/devir desteği düşünülebilir.`, action: 'İş dağılımını gözden geçir' };
+  }
+  // 3) Yüksek devir — sahiplenme zayıf
+  if (tr != null && tr >= 40) {
+    return { tone: 'watch', text: `İşlerin önemli kısmını (%${tr}) başkasına devrediyor. Sahiplenme ve ilk-temas çözümü koçlukla güçlendirilebilir.`, action: 'Sahiplenme için koçluk yap' };
+  }
+  // 4) Sessiz uzman — düşük hacim ama temiz/kaliteli
+  if (resolved != null && tResolved != null && tResolved > 0 && resolved < tResolved * 0.7
+      && ((reopen != null && tReopen != null && reopen <= tReopen) || (qa != null && qa >= 4))) {
+    return { tone: 'info', text: `Hacmi ekip ortalamasının altında ama işi temiz${qa != null ? ` (kalite ${qa}/5)` : ''}. Sessiz-üretken profil — sayıya bakıp erken yorumlamamalı; daha çok iş üstlenebilir.`, action: 'Kapasite için konuş, daha zorlayıcı iş ver' };
+  }
+  // 5) Sadece kolay iş — çok hacim, zor iş payı düşük
+  if (resolved != null && tResolved != null && resolved >= tResolved
+      && esc != null && tEsc != null && tEsc > 0 && esc < tEsc * 0.4) {
+    return { tone: 'info', text: `Çok iş kapatıyor ama zor iş payı (eskalasyon %${esc}) ekip altında. Zorlayıcı işlerle gelişim alanı açılabilir.`, action: 'Zorlayıcı işlerle geliştir' };
+  }
+  // 6) Dengeli ve güçlü
+  if (resolved != null && tResolved != null && resolved >= tResolved
+      && reopen != null && tReopen != null && reopen <= tReopen) {
+    return { tone: 'good', text: `Dengeli ve sağlam: hacim ekip üstünde, yeniden açılma düşük${qa != null ? `, kalite ${qa}/5` : ''}. Bilgi paylaşımı için iyi bir referans.`, action: 'Bilgi paylaşımı için referans yap' };
+  }
+  return { tone: null, text: null, action: null };
+}
+
+// Regenerasyon Faz A "Kim güçlü?" — kişi başına top KB iş süreci (businessProcessLabel)
+// + konu-içi hız (ekip medyanına göre). Uzman = belirgin çok yaptığı ve/veya ekipten
+// hızlı çözdüğü konu. Kullanıcı direktifi: uzmanlık KB etiketiyle.
+const KB_BIZPROC_OPS = `JSON_VALUE([customFields],'$.smartTicket.businessProcessLabel')`;
+async function queryPeopleExpertise(scope, filters, from, to, baseWhere) {
+  if (scope.companyIds.length === 0) return new Map();
+  const p1 = withParam(baseWhere, from);
+  const p2 = withParam(p1, to);
+  const mine = await prisma.$queryRawUnsafe(`
+    SELECT pid, topic, COUNT(*) AS cnt, MIN(med) AS med FROM (
+      SELECT [assignedPersonId] AS pid, ${KB_BIZPROC_OPS} AS topic,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(DATEDIFF(SECOND,[createdAt],[resolvedAt]) AS float)/3600.0)
+          OVER (PARTITION BY [assignedPersonId], ${KB_BIZPROC_OPS}) AS med
+      FROM [Case]
+      WHERE ${baseWhere.sql} AND [resolvedAt] >= @P${p1.idx} AND [resolvedAt] < @P${p2.idx}
+        AND [assignedPersonId] IS NOT NULL AND [resolvedAt] > [createdAt] AND ${KB_BIZPROC_OPS} IS NOT NULL
+    ) x GROUP BY pid, topic;`, ...p2.params);
+  const team = await prisma.$queryRawUnsafe(`
+    SELECT topic, MIN(med) AS med FROM (
+      SELECT ${KB_BIZPROC_OPS} AS topic,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(DATEDIFF(SECOND,[createdAt],[resolvedAt]) AS float)/3600.0)
+          OVER (PARTITION BY ${KB_BIZPROC_OPS}) AS med
+      FROM [Case]
+      WHERE ${baseWhere.sql} AND [resolvedAt] >= @P${p1.idx} AND [resolvedAt] < @P${p2.idx}
+        AND [resolvedAt] > [createdAt] AND ${KB_BIZPROC_OPS} IS NOT NULL
+    ) x GROUP BY topic;`, ...p2.params);
+  const teamMed = new Map(team.map((r) => [r.topic, r.med == null ? null : Number(r.med)]));
+  const byPerson = new Map();
+  for (const r of mine) {
+    const cnt = Number(r.cnt), med = r.med == null ? null : Number(r.med);
+    const tmed = teamMed.get(r.topic) ?? null;
+    let fasterPct = null;
+    if (med != null && tmed != null && tmed > 0) fasterPct = Math.max(-99, Math.min(99, Math.round(((tmed - med) / tmed) * 100)));
+    if (!byPerson.has(r.pid)) byPerson.set(r.pid, []);
+    byPerson.get(r.pid).push({ topic: r.topic, count: cnt, fasterPct });
+  }
+  for (const [pid, arr] of byPerson) {
+    arr.sort((a, b) => b.count - a.count);
+    byPerson.set(pid, arr.slice(0, 2));
+  }
+  return byPerson;
+}
+
+/**
+ * Performans Panosu FAZ 1a — kişi bazlı performans + ekip benchmark (bağlam).
+ * teamBenchmark = kişiler arası MEDYAN (medianOf). UI'da iş diliyle "ekip
+ * ortalamasına göre" denir (kullanıcı direktifi 2026-07-07: "ortanca" business
+ * kelimesi değil) — hesap medyan kalır, yalnız görünen sözcük "ortalama".
+ * computeOperationsOverview ile aynı
+ * scope/filters/buildWhereSql zincirini kullanır.
+ */
+export async function computePeoplePerformanceOverview({ scope, filters }) {
+  const t0 = Date.now();
+  const meta = {
+    formulaVersion: FORMULA_VERSION,
+    minSampleAgent: MIN_SAMPLE.agentPerformance,
+    unitNote: 'birim ve hesap her metrikte gömülü (value/unit/formula) — UI uydurmaz',
+  };
+  if (scope.companyIds.length === 0) {
+    return { people: [], teamBenchmark: {}, meta: { ...meta, durationMs: Date.now() - t0 } };
+  }
+  const from = new Date(filters.from);
+  const to = new Date(filters.to);
+  const baseWhere = buildWhereSql(scope, filters);
+  const rows = await queryByPerson(scope, filters, from, to, baseWhere);
+  const people = rows.map(shapePersonMetrics);
+  const teamBenchmark = {
+    resolved: medianOf(people.map((p) => p.metrics.resolved.value)),
+    medianHours: medianOf(people.map((p) => p.metrics.medianHours.value)),
+    reopenRatePct: medianOf(people.map((p) => p.metrics.reopenRatePct.value)),
+    slaCompliancePct: medianOf(people.map((p) => p.metrics.slaCompliancePct.value)),
+    escalationRatePct: medianOf(people.map((p) => p.metrics.escalationRatePct.value)),
+    transferRatePct: medianOf(people.map((p) => p.metrics.transferRatePct.value)),
+    qaScore: medianOf(people.map((p) => p.metrics.qaScore.value)),
+    openWip: medianOf(people.map((p) => p.metrics.openWip.value)),
+  };
+
+  // Takım özeti (maket 4 katman ikincil metrikleri). Mevcut tetkik sorguları reuse:
+  // queryPeriodMetrics (created/resolved/sla) + queryOpenSnapshot (backlog=openCount).
+  const [period, snapshot, expertiseByPerson] = await Promise.all([
+    queryPeriodMetrics(scope, filters, from, to, baseWhere),
+    queryOpenSnapshot(scope, filters, baseWhere),
+    queryPeopleExpertise(scope, filters, from, to, baseWhere),
+  ]);
+  const busiest = people.reduce(
+    (a, b) => ((b.metrics.openWip.value ?? 0) > (a?.metrics.openWip.value ?? -1) ? b : a), null);
+  const idleCapacity = people.filter(
+    (p) => (p.metrics.openWip.value ?? 0) === 0 && (p.metrics.resolved.value ?? 0) > 0).length;
+  const teamSummary = {
+    resolvedTotal: period.totalResolved,
+    backlog: snapshot.openCount,
+    // Net eriyen: dönemde çözülen − açılan (pozitif = backlog eriyor).
+    netMelted: period.totalResolved - period.totalCreated,
+    medianHours: teamBenchmark.medianHours,
+    p90Hours: medianOf(people.map((p) => p.metrics.p90Hours.value)),
+    openWip: teamBenchmark.openWip,
+    reopenRatePct: teamBenchmark.reopenRatePct,
+    slaCompliancePct: period.totalResolved > 0
+      ? roundPct(100 - safePct(period.slaResolvedCount, period.totalResolved)) : null,
+    qaScore: teamBenchmark.qaScore,
+    busiest: busiest && (busiest.metrics.openWip.value ?? 0) > 0
+      ? { name: busiest.name, openWip: busiest.metrics.openWip.value } : null,
+    idleCapacity,
+    peopleCount: people.length,
+  };
+
+  // Her kişiye kural-tabanlı koçluk sinyali + KB uzmanlık highlight'ı.
+  const peopleOut = people.map((p) => ({
+    ...p,
+    coaching: buildCoachingSignal(p, teamBenchmark),
+    topExpertise: expertiseByPerson.get(p.id) ?? [],
+  }));
+
+  return { people: peopleOut, teamBenchmark, teamSummary, meta: { ...meta, durationMs: Date.now() - t0 } };
 }
 
 async function queryByCategory(scope, filters, from, to, baseWhere) {

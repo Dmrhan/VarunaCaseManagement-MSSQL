@@ -243,7 +243,7 @@ function ThirdPartyEditModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [form, setForm] = useState<ThirdPartyInput>({ name: '', description: '', isActive: true, companyId: defaultCompanyId, pausesSla: true });
+  const [form, setForm] = useState<ThirdPartyInput>({ name: '', description: '', isActive: true, companyId: defaultCompanyId, pausesSla: true, triggersExtendedSla: false, extendedSlaRequiresDevopsLink: true, requiresNote: false });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
@@ -255,11 +255,11 @@ function ThirdPartyEditModal({
       void (async () => {
         const item = await adminService.thirdParties.get(editingId);
         if (item) {
-          setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive, companyId: item.companyId, pausesSla: item.pausesSla !== false });
+          setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive, companyId: item.companyId, pausesSla: item.pausesSla !== false, triggersExtendedSla: item.triggersExtendedSla === true, extendedSlaRequiresDevopsLink: item.extendedSlaRequiresDevopsLink !== false, requiresNote: item.requiresNote === true });
         }
       })();
     } else {
-      setForm({ name: '', description: '', isActive: true, companyId: defaultCompanyId || undefined, pausesSla: true });
+      setForm({ name: '', description: '', isActive: true, companyId: defaultCompanyId || undefined, pausesSla: true, triggersExtendedSla: false, extendedSlaRequiresDevopsLink: true, requiresNote: false });
     }
   }, [open, mode, editingId, defaultCompanyId]);
 
@@ -272,6 +272,9 @@ function ThirdPartyEditModal({
       isActive: form.isActive,
       companyId: form.companyId || undefined,
       pausesSla: form.pausesSla !== false,
+      triggersExtendedSla: form.triggersExtendedSla === true,
+      extendedSlaRequiresDevopsLink: form.extendedSlaRequiresDevopsLink !== false,
+      requiresNote: form.requiresNote === true,
     };
 
     const r =
@@ -387,6 +390,55 @@ function ThirdPartyEditModal({
             className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
           />
           Beklenirken SLA dursun
+        </label>
+
+        <label className="flex items-start gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={form.requiresNote === true}
+            onChange={(e) => setForm((f) => ({ ...f, requiresNote: e.target.checked }))}
+            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+          />
+          <span>
+            Seçildiğinde açıklama zorunlu
+            <span className="block text-xs text-slate-500">
+              Bu 3. parti seçildiğinde operatör bekleme nedenini yazmadan statü geçişini
+              uygulayamaz. Girilen açıklama vaka raporlarında görüntülenebilir.
+            </span>
+          </span>
+        </label>
+
+        {/* Uzatılmış SLA v1 (U-B) — iki parçalı tetik. İkinci anahtar
+            birinciye bağlı: kapalıyken soluk + devre dışı. */}
+        <label className="flex items-start gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={form.triggersExtendedSla === true}
+            onChange={(e) => setForm((f) => ({ ...f, triggersExtendedSla: e.target.checked }))}
+            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+          />
+          <span>
+            Uzatılmış çözüm süresi uygular
+            <span className="block text-xs text-slate-500">
+              Vaka bu tanıma devredildiğinde, SLA kuralındaki "Uzatılmış Çözüm" süresi devreye girer.
+              Kural satırında uzatılmış süre boşsa hiçbir şey değişmez.
+            </span>
+          </span>
+        </label>
+        <label className={`ml-6 flex items-start gap-2 border-l-2 border-slate-200 pl-3 text-sm text-slate-700 ${form.triggersExtendedSla ? '' : 'opacity-50'}`}>
+          <input
+            type="checkbox"
+            disabled={!form.triggersExtendedSla}
+            checked={form.extendedSlaRequiresDevopsLink !== false}
+            onChange={(e) => setForm((f) => ({ ...f, extendedSlaRequiresDevopsLink: e.target.checked }))}
+            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+          />
+          <span>
+            Ek şart: vakada DevOps kaydı bulunmalı
+            <span className="block text-xs text-slate-500">
+              Açıksa uzatma yalnız DevOps iş kaydı bağlı vakalarda uygulanır; kapalıysa devir tek başına yeterlidir.
+            </span>
+          </span>
         </label>
 
         {error && (

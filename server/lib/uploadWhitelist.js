@@ -9,10 +9,15 @@
  * bazen boş MIME döner, uzantıdan yakalanır.
  *
  * Kabul listesi:
- *   - Belge: PDF, Word, Excel, PowerPoint
+ *   - Belge: PDF, Word (.doc/.docx/.dot), Excel, PowerPoint
  *   - Görsel: PNG, JPEG, GIF, WebP, SVG
  *   - Metin: TXT, CSV, JSON, XML
- *   - Arşiv: ZIP
+ *   - Arşiv: ZIP, RAR
+ *   - Video: .mov (video/quicktime)
+ *   - SQLite: .s3db (UNV-1001065 — gerçek mail eki/manuel upload olarak
+ *     gelirse kabul edilir; application/octet-stream GENEL olarak
+ *     serbest bırakılmaz, sadece .s3db ile birlikte geldiğinde dar bir
+ *     istisnayla kabul edilir — bkz. isAcceptedUpload())
  *
  * Yasaklı (deny-by-default zaten reddeder, explicit liste bilgi amaçlı):
  *   - Executable: .exe, .sh, .bat, .cmd, .ps1, .com, .scr, .msi, .dmg
@@ -54,22 +59,59 @@ export const UPLOAD_ALLOWED_MIME_TYPES = [
   // XML — Business review Madde 6 explicit kabul
   'application/xml',
   'text/xml',
+  // XSLT (.xslt/.xsl) — 2026-07-09 iş talebi (mail eki + case dosyası).
+  // Salt saklama/indirme; sunucu tarafında transform ÇALIŞTIRILMAZ
+  // (docblock'taki XML uyarısı aynen geçerli).
+  'application/xslt+xml',
+  // E-posta (.eml) — 2026-07-09 iş talebi. RFC 822 mesaj dosyası; render
+  // edilmez, ek olarak saklanır/indirilir.
+  'message/rfc822',
+  // SQL script (.sql) — 2026-07-09 iş talebi. Tarayıcılar çoğunlukla
+  // text/plain veya boş MIME yollar (uzantı fallback yakalar); bu ikisi
+  // yaygın explicit eşleme.
+  'application/sql',
+  'text/x-sql',
   // Arşiv
   'application/zip',
   'application/x-zip-compressed',
+  'application/vnd.rar',
+  'application/x-rar-compressed', // eski/yaygın tarayıcı-OS eşlemesi
+  // SQLite (.s3db) — UNV-1001065 karari. application/octet-stream
+  // buraya BILEREK eklenmedi, detay yukaridaki docblock icinde.
+  'application/vnd.sqlite3',
+  'application/x-sqlite3',
+  // Video
+  'video/quicktime',
+  // 2026-07-17 iş talebi (UNV-1000994 sahadan gelen mp4 eki) — boyut
+  // sınırı (25MB, MAIL_ATTACHMENT_MAX_BYTES) BİLEREK yükseltilmedi;
+  // sadece tip kabulü genişletildi.
+  'video/mp4',
 ];
 
 export const UPLOAD_ALLOWED_EXTENSIONS = [
   // Belge
   '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+  '.dot', // eski Word sablonu, application/msword ile ayni MIME
   // Görsel
   '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
   // Metin
   '.txt', '.csv', '.json',
   // XML — Business review Madde 6 explicit kabul
   '.xml',
+  // XSLT — 2026-07-09 iş talebi (.xsl eski/eşdeğer uzantı, aynı içerik)
+  '.xslt', '.xsl',
+  // E-posta — 2026-07-09 iş talebi
+  '.eml',
+  // SQL script — 2026-07-09 iş talebi
+  '.sql',
   // Arşiv
   '.zip',
+  '.rar',
+  // SQLite
+  '.s3db',
+  // Video
+  '.mov',
+  '.mp4',
 ];
 
 /**
@@ -88,6 +130,19 @@ export function isAcceptedUpload(mimeType, fileName) {
   const name = typeof fileName === 'string' ? fileName.toLowerCase() : '';
   const dotIdx = name.lastIndexOf('.');
   const ext = dotIdx >= 0 ? name.slice(dotIdx) : '';
+
+  // application/octet-stream DAR istisna seti — tarayıcı/mail istemcisi
+  // OS'te MIME eşlemesi olmayan tipler için çoğunlukla octet-stream (veya
+  // boş type; FE caseService bunu octet-stream'e çevirir — Codex #506 P2)
+  // döner. octet-stream'i UPLOAD_ALLOWED_MIME_TYPES'a GENEL olarak eklemek
+  // yerine yalnız bu uzantılarla kabul ediyoruz — octet-stream hiçbir zaman
+  // genel "güvenli MIME" sayılmaz (forge guard'ı zayıflamaz). Güvenlik notu:
+  // boş-MIME + izinli-uzantı zaten kabul edildiğinden bu istisna eşdeğerdir.
+  //   .s3db → UNV-1001065 · .sql/.xslt/.xsl/.eml → 2026-07-09 iş talebi
+  const OCTET_STREAM_EXT_EXCEPTIONS = ['.s3db', '.sql', '.xslt', '.xsl', '.eml'];
+  if (mime === 'application/octet-stream' && OCTET_STREAM_EXT_EXCEPTIONS.includes(ext)) {
+    return true;
+  }
 
   const hasMime = mime.length > 0;
   const hasExt = ext.length > 0;

@@ -250,6 +250,7 @@ export interface CallSummaryInput {
 // ---- 7) Vaka aktarımı önerisi (FAZ 2 §20.2) ----
 
 export type TransferReasonCode =
+  | 'followed_case'
   | 'wrong_team'
   | 'expertise'
   | 'workload'

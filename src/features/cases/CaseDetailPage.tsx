@@ -57,6 +57,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
 import { PendingReplyBadge } from './components/PendingReplyBadge';
+import { CustomerMatchSuggestionsPanel } from './components/CustomerMatchSuggestionsPanel';
 import { SmartClassificationCard } from './components/SmartClassificationCard';
 import { externalKbService } from '@/services/externalKbService';
 import { Modal } from '@/components/ui/Modal';
@@ -93,23 +94,29 @@ import { CaseTitleEditable } from './components/CaseTitleEditable';
 import { DevOpsSection } from './components/DevOpsSection';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { useToast } from '@/components/ui/Toast';
+import { ExpandableText } from '@/components/ui/ExpandableText';
 import {
   apiFetch,
   caseService,
   lookupService,
   type CustomerMatchSuggestion,
-  type CustomerMatchSuggestionsResponse,
 } from '@/services/caseService';
 import { aiService, aiErrorMessage, type ChurnConversion } from '@/services/aiService';
-import { accountService, type CaseCustomerContext } from '@/services/accountService';
+import {
+  accountService,
+  canLookupAccountForCaseProject,
+  type CaseCustomerContext,
+  type AccountProjectSummary,
+  type AccountListItem,
+} from '@/services/accountService';
 import {
   authorizationService,
   type AuthorizationFieldState,
 } from '@/services/authorizationService';
-import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
+import { AccountSearchPicker, type PickedProject } from '@/features/accounts/AccountSearchPicker';
 import { useAuth } from '@/services/AuthContext';
 import { featureFlags } from '@/config/featureFlags';
-import { formatDateTime, formatRelative, formatRemaining } from '@/lib/format';
+import { formatDateTime, formatRelative, formatRemaining, formatSlaRemaining } from '@/lib/format';
 import {
   CALL_DISPOSITIONS,
   CALL_OUTCOMES,
@@ -180,13 +187,20 @@ interface CaseDetailPageProps {
   onShowCustomer?: (accountId: string) => void;
   /** "Müşteri Detayı'na git" linki — sadece canReadAccounts olan rollerde aktiftir. */
   onOpenAccount?: (accountId: string) => void;
+  /** true ise bu vaka detayına "dar kapsamlı" (Açık/Kapalı sekmesi satır
+   *  tıklaması, ya da az önce üstlenilen/oluşturulan vakaya otomatik
+   *  yönlendirme) bir navigasyondan girildiği kanıtlanmış demektir.
+   *  Varsayılan false — "Tümü" sekmesi, e-posta/bildirim linki, arama vb.
+   *  her giriş noktası dahil, Backoffice/Supervisor için salt-okunur kabul
+   *  edilir (kendine atanmış vakalar hariç — bkz. isOwnCase). */
+  narrowScopeConfirmedByNav?: boolean;
 }
 
 // R10.3 (2026-07-04) — onShowCustomer yeniden aktif tüketici: CommunicationTab
 // tam-ekran başlık barı müşteri linki App'in CustomerCardModal'ını açar
 // (Detay sekmesindeki kardeş kullanım deseni — accounts sayfası navigasyonu
 // DEĞİL). eslint yorumu ve _prefix kaldırıldı.
-export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }: CaseDetailPageProps) {
+export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount, narrowScopeConfirmedByNav = false }: CaseDetailPageProps) {
   const { user } = useAuth();
   // Phase D + Agent/Backoffice genişletmesi — tüm operasyon rolleri müşteri
   // eşleştirebilir. Öğrenme (learned sender) yalnız Supervisor+ kararından
@@ -204,6 +218,13 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
   const [loading, setLoading] = useState(false);
   const [customerContext, setCustomerContext] = useState<CaseCustomerContext | null>(null);
   const [activeId, setActiveId] = useState(caseId);
+  // DetailTab'daki handleCommitDescription gibi async commit'lerin, yanıt
+  // döndüğünde hâlâ AKTİF vakaya mi ait olduğunu kontrol edebilmesi için —
+  // state değil ref: async closure'lar await sonrası bu ref'i okuyarak
+  // navigasyon sırasında değişmiş olabilecek en güncel activeId'yi görür
+  // (kendi closure'larındaki eski activeId değil).
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
 
   // Breadcrumb stack — geçmiş vaka navigasyonu için (max 3 level)
   // Eski item'lar burada birikir; ana breadcrumb item'ı = activeId
@@ -223,7 +244,18 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
     if (!item) return;
     if (appliedForCaseIdRef.current === item.id) return;
     appliedForCaseIdRef.current = item.id;
-    setTab(item.origin === 'E-posta' ? 'communication' : 'detail');
+
+    // Devredilmiş vakada Devir Notu paneli Detay sekmesinde, Açıklama'nın
+    // hemen altında gösteriliyor — devri alan ekip bunu vaka açılır açılmaz
+    // görsün diye, mail kökenli olsun olmasın varsayılan sekme Detay olur.
+    const initialTab: TabKey =
+      (item.transferCount ?? 0) > 0
+        ? 'detail'
+        : item.origin === 'E-posta'
+          ? 'communication'
+          : 'detail';
+
+    setTab(initialTab);
   }, [item]);
   const [previousCases, setPreviousCases] = useState<Case[]>([]);
   const [callActive, setCallActive] = useState(false);
@@ -235,7 +267,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
   // taslak olarak bekler + onay istenir. "Manuel müşteri ara" (müşterisiz
   // vaka) akışı bundan ayrı — hâlâ anında commit ediyor.
   const [changeAccountMode, setChangeAccountMode] = useState(false);
-  const [pendingAccountChange, setPendingAccountChange] = useState<{ id: string; name: string } | null>(null);
+  const [pendingAccountChange, setPendingAccountChange] = useState<{ id: string; name: string; projectId?: string; projectLabel?: string } | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [unsnoozing, setUnsnoozing] = useState(false);
@@ -265,6 +297,12 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
   // sneak past `noteSubmitting`. The ref flips synchronously.
   const noteSubmittingRef = useRef(false);
 
+  // Müşteri arama modalında proje alt-listesi göstermek tenant'ın "Proje
+  // kullanımı aktif" ayarına bağlı (Smart Ticket'taki kullanım ile aynı).
+  const projectsEnabledForCompany = useMemo(
+    () => lookupService.companies().find((c) => c.id === item?.companyId)?.projectsEnabled ?? false,
+    [item?.companyId],
+  );
   const offeredSolutions = useMemo(() => lookupService.offeredSolutions(), []);
   // Phase C2: account bilgisi artık /api/cases/:id/customer-context'tan; bootstrap kullanılmıyor.
   const accounts = useMemo(() => lookupService.accounts(), []);
@@ -285,6 +323,53 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
   );
   const canSeeTeamPool = myPerson?.isTeamLead === true || ['L2', 'L3'].includes(myPerson?.supportLevel ?? '');
   const claimBlockedByTeamPool = user?.role === 'Agent' && !!myPerson?.teamId && !canSeeTeamPool;
+  // "Tümü" salt-okunur kuralı — Backoffice/Supervisor için VARSAYILAN kısıtlı:
+  // Devret/Üstlen yalnız (a) vaka gerçekten kendisine atanmışsa (isOwnCase —
+  // giriş yoluna bakılmaksızın her zaman kendi işi) VEYA (b) vaka detayına
+  // kanıtlanmış "dar kapsamlı" bir navigasyondan girildiyse (Açık/Kapalı
+  // sekmesi satır tıklaması, ya da az önce üstlendiği/oluşturduğu vakaya
+  // otomatik yönlendirme — narrowScopeConfirmedByNav prop'u, App.tsx) izin
+  // verilir. Takım eşleşmesi TEK BAŞINA yeterli değil — "Tümü" sekmesinden
+  // veya e-posta/bildirim gibi başka bir yoldan açılan, kendi takımının
+  // havuz vakası bile olsa varsayılan olarak salt-okunurdur.
+  const isOwnCase = !!item && item.assignedPersonId === user?.personId;
+  // Agent dahil — L2/L3/takım lideri Agent'lar (canSeeTeamPool=true) sıradan
+  // L1'in aksine claimBlockedByTeamPool'dan etkilenmiyordu, bu yüzden "Tümü"
+  // gibi dar-kapsam-kanıtlanmamış bir yerden kendi takımıyla ilgisiz bir
+  // havuz vakasını üstleyebiliyorlardı. Sıradan L1 için bu satır zaten
+  // aşağıdaki claimBlockedByTeamPool ile örtüşüyor (zararsız).
+  const wideViewReadOnly =
+    !!item &&
+    ['Agent', 'Backoffice', 'Supervisor'].includes(user?.role ?? '') &&
+    !isOwnCase &&
+    !narrowScopeConfirmedByNav;
+
+  // Proje inline-edit — vakanın accountId'sine bağlı, sadece o müşterinin
+  // (vakanın companyId'siyle eşleşen AccountCompany altındaki) projeleri.
+  // SmartTicketNewPage.tsx'teki proje fetch pattern'iyle aynı.
+  // Review fix — canReadAccounts (müşteri modülü kapısı) DEĞİL, dar
+  // kapsamlı canLookupAccountForCaseProject kullanılır; aksi halde Agent'a
+  // yanlışlıkla tüm müşteri modülü açılırdı (bkz. accountService.ts).
+  const [accountProjects, setAccountProjects] = useState<AccountProjectSummary[]>([]);
+  useEffect(() => {
+    let alive = true;
+    if (!item?.accountId || !item?.companyId || !canLookupAccountForCaseProject(user?.role)) {
+      setAccountProjects([]);
+      return;
+    }
+    void accountService.get(item.accountId).then((detail) => {
+      if (!alive) return;
+      const company = detail?.companies.find((c) => c.companyId === item.companyId);
+      // "Aktif proje" tanımı sistem çapında tek: isActive VE status==='Active'
+      // (bkz. server/db/accountRepository.js picker sorgusu, caseRepository.js
+      // hasActiveProjectsForCaseAccount). Yalnız isActive'e bakmak pasif/
+      // tamamlanmış/iptal projeleri de listelerdi.
+      setAccountProjects((company?.projects ?? []).filter((p) => p.isActive && p.status === 'Active'));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [item?.accountId, item?.companyId, user?.role]);
 
   // WR-A7b — Catalog state (Package + Product). Vakanın companyId/accountId'sine bağlı.
   const [catalogPackages, setCatalogPackages] = useState<
@@ -298,6 +383,14 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
       supportLevel: SupportLevel;
       productGroupId: string;
     }>
+  >([]);
+  // Fix — Sınıflandırma kartındaki "Ürün Grubu" seçeneklerine admin
+  // kataloğunda (ProductGroup) tanımlı ama henüz hiçbir vakada kullanılmamış
+  // grupları da eklemek için (bkz. lookupService.productGroups() aşağıda —
+  // yalnız vakalardaki distinct değerleri döner, yeni eklenen katalog kaydı
+  // ilk vakaya seçilene kadar hiç görünmezdi).
+  const [catalogProductGroups, setCatalogProductGroups] = useState<
+    Array<{ id: string; code: string; name: string }>
   >([]);
 
   // Parent caseId değişirse içerideki state ve breadcrumb sıfırlanır
@@ -399,6 +492,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
     if (!item?.companyId) {
       setCatalogPackages([]);
       setCatalogProducts([]);
+      setCatalogProductGroups([]);
       return;
     }
     void lookupService
@@ -407,6 +501,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
         if (!alive) return;
         setCatalogPackages(data.packages);
         setCatalogProducts(data.products);
+        setCatalogProductGroups(data.productGroups);
       });
     return () => {
       alive = false;
@@ -446,6 +541,13 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
   );
 
   async function handleAddNote() {
+    // 2026-07-12 — kullanıcı kararı: not EKLEME artık "Tümü" (wide,
+    // dar-kapsam-kanıtlanmamış) görünümde de serbest — kendi vakası
+    // olmayan bir vakaya da not eklenebilir (silme AYRI kalır, buraya
+    // dokunulmadı — bkz. NotesTab/handleDeleteNote). Amaç: bir vakayı
+    // başka takıma devreden kullanıcı bağlam eklemeyi unutursa, daha
+    // sonra geri dönüp ekleyebilsin; bugüne kadar wideViewReadOnly bunu
+    // sessizce engelliyordu (buton aktif görünüp hiçbir şey yapmıyordu).
     if (!item || !noteText.trim()) return;
     // Ref guard catches the rare double-click that lands before
     // setNoteSubmitting paints; React state guard catches everything
@@ -583,6 +685,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
 
   // Inline edit handlers
   function commitDraft(field: keyof Case, value: unknown) {
+    // Fonksiyon seviyesinde ek güvence — "Tümü" (wide, dar kapsam
+    // kanıtlanmamış) görünümde hiçbir alan düzenlenemez. Tüm InlineEdit
+    // alanları bu tek fonksiyona commit ettiği için tek noktadan korunur.
+    if (wideViewReadOnly) return;
     setDrafts((prev) => {
       let next: Record<string, unknown> = { ...(prev as Record<string, unknown>) };
       // Mevcut değerle aynıysa draft'ı kaldır
@@ -633,8 +739,17 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
     setEditingField(null);
   }
 
+  // "Tümü" (wide) görünümde alan düzenleme moduna hiç girilmesin — InlineEdit
+  // tıklanınca düzenleme kutusu açılmasın (commitDraft zaten korunuyor ama
+  // kullanıcı düzenleme moduna girip sonra hiçbir şeyin kaydedilmediğini
+  // görmesin diye burada da engellenir).
+  function startEdit(field: string) {
+    if (wideViewReadOnly) return;
+    setEditingField(field);
+  }
+
   async function handleSaveDrafts() {
-    if (!item || savingDrafts) return;
+    if (!item || savingDrafts || wideViewReadOnly) return;
     const hasFieldDrafts = Object.keys(drafts).length > 0;
     if (!hasFieldDrafts && !pendingAccountChange) return;
 
@@ -652,10 +767,17 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
     let savedCount = 0;
 
     if (pendingAccountChange) {
-      const updatedAccount = await caseService.linkAccount(item.id, pendingAccountChange.id);
+      let updatedAccount = await caseService.linkAccount(item.id, pendingAccountChange.id);
       if (!updatedAccount) {
         setSavingDrafts(false);
         return;
+      }
+      // Müşteri değişince backend eski proje bağını sıfırlıyor — picker'da
+      // yeni müşteri için proje de seçildiyse (bkz. onSelectWithProject),
+      // linkAccount'un hemen ardından o da uygulanır.
+      if (pendingAccountChange.projectId) {
+        const withProject = await caseService.update(item.id, { accountProjectId: pendingAccountChange.projectId });
+        if (withProject) updatedAccount = withProject;
       }
       currentItem = updatedAccount;
       setItem(updatedAccount);
@@ -842,6 +964,24 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               ))}
               <ChevronRight size={11} className="text-slate-400" />
               <span className="font-mono text-slate-700">{item.caseNumber}</span>
+              {/* Paylaşılabilir vaka bağlantısı (2026-07-10) — mevcut ?case=<id>
+                  deep-link'ini (App.tsx, customer_replied maili ile aynı) kopyalar.
+                  Link login + vaka-görünürlük korumalı: yalnız yetkili kullanıcı açar. */}
+              <button
+                type="button"
+                onClick={() => {
+                  const url = `${window.location.origin}/?case=${item.id}`;
+                  navigator.clipboard
+                    .writeText(url)
+                    .then(() => toast({ type: 'success', message: 'Vaka bağlantısı kopyalandı — yapıştırıp paylaşabilirsiniz.', duration: 2500 }))
+                    .catch(() => toast({ type: 'error', message: 'Bağlantı kopyalanamadı.', duration: 2500 }));
+                }}
+                className="text-slate-400 transition hover:text-brand-700"
+                title="Vaka bağlantısını kopyala (yalnız giriş yapabilen yetkili kullanıcılar açabilir)"
+                aria-label="Vaka bağlantısını kopyala"
+              >
+                <LinkIcon size={12} />
+              </button>
               <span className="text-slate-400">—</span>
               <span className="truncate text-slate-600">{item.accountName}</span>
               {/* M6.3b Faz 1 — "Yanıt bekliyor" rozeti (detay header).
@@ -862,6 +1002,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
           <div className="flex shrink-0 items-center gap-2">
             {(() => {
               const pendingCount = Object.keys(drafts).length + (pendingAccountChange ? 1 : 0);
+              // "Tümü" (wide) görünümde Kaydet/Taslakları sil hiç gösterilmez —
+              // zaten commitDraft/handleSaveDrafts bu modda no-op, ama tıklanır
+              // görünen bir buton kafa karıştırmasın diye gizlenir.
+              if (wideViewReadOnly) return null;
               return (
                 <>
                   {pendingCount > 0 && (
@@ -889,8 +1033,11 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
                 </>
               );
             })()}
-            {/* WR-C1 — "Üstlen" butonu Kaydet'in yanına taşındı (LeftPanel'den). */}
-            {!!user?.personId && !item.assignedPersonId && item.status !== 'Çözüldü' && item.status !== 'İptalEdildi' && !claimBlockedByTeamPool && (
+            {/* WR-C1 — "Üstlen" butonu Kaydet'in yanına taşındı (LeftPanel'den).
+                wideViewReadOnly — "Tümü" (wide) sekmesinden açılan vakalarda
+                Agent/Backoffice/Supervisor için gizlenir; o sekme arama/danışma
+                amaçlıdır, işlem amaçlı değil. CSM/Admin/SystemAdmin etkilenmez. */}
+            {!wideViewReadOnly && !!user?.personId && !item.assignedPersonId && item.status !== 'Çözüldü' && item.status !== 'İptalEdildi' && !claimBlockedByTeamPool && (
               <button
                 type="button"
                 onClick={handleClaim}
@@ -918,14 +1065,20 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               <Sparkles size={12} />
               Durum Raporu
             </button>
-            <Button
-              variant="outline"
-              size="sm"
-              leftIcon={<UserPlus size={12} />}
-              onClick={() => setTransferOpen(true)}
-            >
-              Devret
-            </Button>
+            {/* F3 — L1 Agent salt-okunur aksiyon kuralı: Agent rolü sadece
+                kendine atanmış vakayı devredebilir. wideViewReadOnly ise
+                "Tümü" sekmesinden açılan vakada Agent/Backoffice/Supervisor
+                için Devret hiç gösterilmez; CSM/Admin/SystemAdmin etkilenmez. */}
+            {!wideViewReadOnly && (user?.role !== 'Agent' || item.assignedPersonId === user?.personId) && (
+              <Button
+                variant="outline"
+                size="sm"
+                leftIcon={<UserPlus size={12} />}
+                onClick={() => setTransferOpen(true)}
+              >
+                Devret
+              </Button>
+            )}
             {!isSnoozeActive && (
               <Button
                 variant="outline"
@@ -1137,12 +1290,23 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
           customerContext={customerContext}
           onOpenAccount={onOpenAccount}
           canLinkAccount={canLinkAccount}
-          onLinkAccount={canLinkAccount ? () => { setChangeAccountMode(false); setLinkAccountOpen(true); } : undefined}
-          onChangeAccount={canLinkAccount ? () => { setChangeAccountMode(true); setLinkAccountOpen(true); } : undefined}
+          onLinkAccount={canLinkAccount && !wideViewReadOnly ? () => { setChangeAccountMode(false); setLinkAccountOpen(true); } : undefined}
+          onChangeAccount={canLinkAccount && !wideViewReadOnly ? () => { setChangeAccountMode(true); setLinkAccountOpen(true); } : undefined}
           pendingAccountChange={pendingAccountChange}
           onCancelAccountChange={() => setPendingAccountChange(null)}
+          accountProjects={accountProjects}
+          drafts={drafts}
+          editingField={editingField}
+          onStartEdit={startEdit}
+          onCommitDraft={commitDraft}
+          onCancelEdit={cancelEdit}
           onConfirmLinkSuggestion={
-            canLinkAccount
+            // P2 review fix — onLinkAccount/onChangeAccount ile aynı gate:
+            // wideViewReadOnly iken bu handler undefined olmalı, aksi halde
+            // CustomerMatchSuggestionsPanel aktif kalıp linkAccount
+            // mutasyonuna izin veriyordu (sayfanın geri kalanı salt-okunur
+            // olsa bile).
+            canLinkAccount && !wideViewReadOnly
               ? async (suggestion) => {
                   // Manuel onay: confirm popup spec gereği zorunlu.
                   const ok = window.confirm(
@@ -1161,7 +1325,6 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
           }
           drawerOpen={leftDrawerOpen}
           onCloseDrawer={() => setLeftDrawerOpen(false)}
-          userRole={user?.role}
         />
 
         {/* Main */}
@@ -1170,7 +1333,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               SLA göstergesi aşağıdaki KPI/SLA şeridine taşındı (tek yerde olsun). */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-200 bg-slate-50/60 px-4 py-2 dark:border-ndark-border dark:bg-ndark-bg/40">
             {/* [Statü] progress bar (wideConnectors=true ile banda yayılır) */}
-            <CompactStatusStepper item={item} onApplied={setItem} wideConnectors />
+            <CompactStatusStepper item={item} onApplied={setItem} wideConnectors readOnly={wideViewReadOnly} />
 
             {/* Sağ: yalnız kimlik metadata — SLA / Watcher KPI şeridinde */}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-ndark-muted">
@@ -1186,10 +1349,14 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
           <KpiSummaryStrip item={item} caseId={item.id} />
 
           <nav className="sticky top-0 z-10 flex shrink-0 gap-1 border-b border-slate-200 bg-white px-4 dark:border-ndark-border dark:bg-ndark-card">
+            {/* Renk-kimlikli sekmeler (2026-07-10) — her sekme kendi rengini
+                taşır; aktifken çizgi+metin o renk olur (kullanıcı feedback'i:
+                sekmeler gözden kaçıyordu). Palet kullanıcı onaylı (V4). */}
             <TabButton
               active={tab === 'detail'}
               icon={<FileText size={14} />}
               label="Detay"
+              color="#0284c7"
               onClick={() => setTab('detail')}
             />
             <TabButton
@@ -1197,6 +1364,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               icon={<HistoryIcon size={14} />}
               label="Aktivite"
               count={item.history.length}
+              color="#d97706"
               onClick={() => setTab('activity')}
             />
             <TabButton
@@ -1204,6 +1372,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               icon={<MessageSquare size={14} />}
               label="Notlar"
               count={item.notes.length}
+              color="#7c3aed"
               onClick={() => setTab('notes')}
             />
             <TabButton
@@ -1211,18 +1380,21 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               icon={<Paperclip size={14} />}
               label="Dosyalar"
               count={item.files.length}
+              color="#059669"
               onClick={() => setTab('files')}
             />
             <TabButton
               active={tab === 'links'}
               icon={<LinkIcon size={14} />}
               label="Bağlantılar"
+              color="#db2777"
               onClick={() => setTab('links')}
             />
             <TabButton
               active={tab === 'communication'}
               icon={<AtSign size={14} />}
               label="İletişim"
+              color="#2563eb"
               onClick={() => setTab('communication')}
             />
             {(item.caseType === 'ProactiveTracking' || item.caseType === 'Churn') && (
@@ -1231,6 +1403,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
                 icon={<Mic size={14} />}
                 label="Çağrı Logları"
                 count={item.callLogs.length}
+                color="#4f46e5"
                 onClick={() => setTab('callLogs')}
               />
             )}
@@ -1240,6 +1413,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               active={tab === 'solution-steps'}
               icon={<ListChecks size={14} />}
               label="Çözüm Adımları"
+              color="#0d9488"
               onClick={() => setTab('solution-steps')}
             />
           </nav>
@@ -1256,17 +1430,20 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
                 thirdParties={thirdParties}
                 catalogPackages={catalogPackages}
                 catalogProducts={catalogProducts}
+                catalogProductGroups={catalogProductGroups}
                 previousCases={previousCases}
                 onSelectPrevious={navigateToCase}
                 drafts={drafts}
                 editingField={editingField}
                 fieldStates={fieldStates}
-                onStartEdit={(f) => setEditingField(f)}
+                onStartEdit={startEdit}
                 onCancelEdit={cancelEdit}
                 onCommitDraft={commitDraft}
                 onTransitionApplied={(updated) => setItem(updated)}
                 kbEnabled={kbEnabled}
                 onCaseUpdated={(updated) => setItem(updated)}
+                activeIdRef={activeIdRef}
+                wideViewReadOnly={wideViewReadOnly}
               />
             )}
             {tab === 'activity' && <ActivityTab item={item} />}
@@ -1289,8 +1466,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
                 inputRef={noteRef}
               />
             )}
+            {/* 2026-07-12 — dosya EKLEME artık wideViewReadOnly'den bağımsız
+                (serbest); SİLME hâlâ canDelete={!wideViewReadOnly} ile korunuyor. */}
             {tab === 'files' && (
-              <FilesTab item={item} onItemUpdated={(c) => setItem(c)} />
+              <FilesTab item={item} onItemUpdated={(c) => setItem(c)} canDelete={!wideViewReadOnly} />
             )}
             {tab === 'links' && (
               <LinksTab item={item} onShowCase={navigateToCase} />
@@ -1391,6 +1570,38 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               });
             }
           }}
+          projectsEnabled={projectsEnabledForCompany}
+          projectsRequired
+          onSelectWithProject={async (account: AccountListItem, project: PickedProject | null) => {
+            if (linkSubmitting) return;
+            if (changeAccountMode) {
+              // Değiştir akışı taslak/onay mekanizması kullanıyor — seçilen
+              // proje de taslağa eklenir, Kaydet'e basınca handleSaveDrafts
+              // içinde müşteri linki ile birlikte uygulanır.
+              setPendingAccountChange({
+                id: account.id,
+                name: account.name,
+                projectId: project?.id,
+                projectLabel: project ? `${project.name} (${project.code})` : undefined,
+              });
+              setLinkAccountOpen(false);
+              return;
+            }
+            setLinkSubmitting(true);
+            let updated = await caseService.linkAccount(item.id, account.id);
+            if (updated && project) {
+              const withProject = await caseService.update(item.id, { accountProjectId: project.id });
+              if (withProject) updated = withProject;
+            }
+            setLinkSubmitting(false);
+            if (updated) {
+              setItem(updated);
+              setLinkAccountOpen(false);
+              void accountService.getCaseCustomerContext(item.id).then((out) => {
+                setCustomerContext(out?.context ?? null);
+              });
+            }
+          }}
         />
       )}
 
@@ -1460,28 +1671,42 @@ function TabButton({
   icon,
   label,
   count,
+  color,
   onClick,
 }: {
   active: boolean;
   icon: React.ReactNode;
   label: string;
   count?: number;
+  /** Renk-kimlikli sekme (2026-07-10): aktif çizgi+metin bu rengi alır,
+   *  ikon her zaman bu renkte (idle dahil). Sekmelerin fark edilmesi için. */
+  color: string;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      style={{
+        borderBottomColor: active ? color : 'transparent',
+        color: active ? color : undefined,
+      }}
       className={`flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm transition-colors ${
         active
-          ? 'border-brand-600 text-brand-700'
-          : 'border-transparent text-slate-600 hover:text-slate-800'
+          ? 'font-semibold'
+          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-800 dark:text-ndark-muted dark:hover:bg-ndark-bg/40 dark:hover:text-ndark-text'
       }`}
     >
-      {icon}
+      {/* İkon her zaman kendi renginde (idle dahil) — "renklendirelim" (A). */}
+      <span className="inline-flex" style={{ color }}>{icon}</span>
       {label}
       {count != null && count > 0 && (
-        <span className="rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-600">{count}</span>
+        <span
+          className={active ? 'rounded-full px-1.5 text-[10px]' : 'rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-600 dark:bg-ndark-bg dark:text-ndark-muted'}
+          style={active ? { backgroundColor: `color-mix(in srgb, ${color} 16%, transparent)`, color } : undefined}
+        >
+          {count}
+        </span>
       )}
     </button>
   );
@@ -1502,7 +1727,12 @@ function LeftPanel({
   onConfirmLinkSuggestion,
   drawerOpen,
   onCloseDrawer,
-  userRole,
+  accountProjects,
+  drafts,
+  editingField,
+  onStartEdit,
+  onCommitDraft,
+  onCancelEdit,
 }: {
   item: Case;
   accountPhone?: string;
@@ -1514,14 +1744,19 @@ function LeftPanel({
   onLinkAccount?: () => void;
   /** Değiştir akışı — mevcut müşteriyi başka bir müşteriyle değiştirmek için. */
   onChangeAccount?: () => void;
-  /** Değiştir akışında seçilen ama henüz Kaydet ile commit edilmemiş müşteri. */
-  pendingAccountChange?: { id: string; name: string } | null;
+  /** Değiştir akışında seçilen ama henüz Kaydet ile commit edilmemiş müşteri (+ varsa proje). */
+  pendingAccountChange?: { id: string; name: string; projectId?: string; projectLabel?: string } | null;
   onCancelAccountChange?: () => void;
   onConfirmLinkSuggestion?: (suggestion: CustomerMatchSuggestion) => Promise<void>;
   drawerOpen: boolean;
   onCloseDrawer: () => void;
-  /** LBD A6 — Agent rolünde WatchersPanel gizlenir; diğer tüm rollerde görünür. */
-  userRole?: string;
+  /** Proje inline edit — Müşteri kartında. */
+  accountProjects: AccountProjectSummary[];
+  drafts: Partial<Case>;
+  editingField: string | null;
+  onStartEdit: (field: string) => void;
+  onCommitDraft: (field: keyof Case, value: unknown) => void;
+  onCancelEdit: () => void;
 }) {
   const ctxCompany = customerContext?.company ?? null;
   const content = (
@@ -1583,7 +1818,11 @@ function LeftPanel({
               {pendingAccountChange && (
                 <div className="mt-1.5 flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800 ring-1 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:ring-amber-900/40">
                   <span className="min-w-0 truncate">
-                    Yeni müşteri: <strong>{pendingAccountChange.name}</strong> — Kaydet'e basınca uygulanır.
+                    Yeni müşteri: <strong>{pendingAccountChange.name}</strong>
+                    {pendingAccountChange.projectLabel && (
+                      <> — Proje: <strong>{pendingAccountChange.projectLabel}</strong></>
+                    )}
+                    {' '}— Kaydet'e basınca uygulanır.
                   </span>
                   {onCancelAccountChange && (
                     <button
@@ -1606,7 +1845,6 @@ function LeftPanel({
                   parts.push(item.companyName);
                   if (ctxCompany?.externalCustomerCode) parts.push(`Kod ${ctxCompany.externalCustomerCode}`);
                   if (ctxCompany?.packageName) parts.push(ctxCompany.packageName);
-                  if (item.accountProjectName) parts.push(`Proje: ${item.accountProjectName}`);
                   if (item.packageName) parts.push(`Paket: ${item.packageName}`);
                   if (item.productName) parts.push(`Ürün: ${item.productName}`);
                   if (item.supportLevel) parts.push(SUPPORT_LEVEL_LABELS[item.supportLevel] ?? item.supportLevel);
@@ -1623,6 +1861,42 @@ function LeftPanel({
                   </span>
                 )}
               </div>
+              {/* Proje — Sınıflandırma kartından buraya taşındı; müşteriyle
+                  birlikte tek yerde görünüp düzenlensin diye. accountId
+                  yoksa disabled (müşterisiz vakada proje seçilemez). */}
+              {(() => {
+                const projectDisplayId =
+                  (drafts.accountProjectId as string | null | undefined) ?? item.accountProjectId ?? null;
+                return (
+                  <div className="flex items-center gap-1 text-xs text-slate-500 dark:text-ndark-muted">
+                    <span className="shrink-0">Proje:</span>
+                    <InlineEdit
+                      fieldKey="accountProjectId"
+                      type="select"
+                      value={projectDisplayId ?? ''}
+                      editing={editingField === 'accountProjectId'}
+                      isDraft={drafts.accountProjectId !== undefined}
+                      onStart={() => onStartEdit('accountProjectId')}
+                      onCommit={(val) => onCommitDraft('accountProjectId', val || null)}
+                      onCancel={onCancelEdit}
+                      disabled={!item.accountId}
+                      options={[
+                        { value: '', label: '— Proje Yok —' },
+                        ...accountProjects.map((p) => ({ value: p.id, label: `${p.name} (${p.code})` })),
+                      ]}
+                      renderDisplay={() => (
+                        <span className="text-slate-700 dark:text-ndark-text">
+                          {(() => {
+                            if (!projectDisplayId) return item.accountProjectName ?? '—';
+                            const found = accountProjects.find((p) => p.id === projectDisplayId);
+                            return found ? `${found.name} (${found.code})` : item.accountProjectName ?? projectDisplayId;
+                          })()}
+                        </span>
+                      )}
+                    />
+                  </div>
+                );
+              })()}
               {ctxCompany?.activeProducts && ctxCompany.activeProducts.length > 0 && (
                 <div className="pt-1">
                   <div className="text-[10px] font-medium text-slate-400 dark:text-ndark-dim">
@@ -1765,7 +2039,8 @@ function LeftPanel({
                 </div>
               ) : (
                 <div className="rounded-md bg-sky-50 px-2 py-1 text-[11px] text-sky-800 ring-1 ring-sky-200">
-                  Yanıta {formatRemaining(item.slaResponseDueAt)}
+                  Yanıta {formatSlaRemaining(item.slaResponseRemainingMin, item.slaBusinessTime, item.slaDayMinutes)
+                    ?? formatRemaining(item.slaResponseDueAt)}
                 </div>
               )
             )}
@@ -1773,6 +2048,14 @@ function LeftPanel({
 
           {/* Çözüm SLA */}
           <div className="space-y-1">
+            {/* Uzatılmış SLA v1 — kaynak rozeti + uygulanan hedef (ajan,
+                hedefin neden değiştiğini yardım almadan görür) */}
+            {item.slaTargetSource === 'extended' && (
+              <div className="rounded-md bg-violet-50 px-2 py-1 text-[11px] font-medium text-violet-800 ring-1 ring-violet-200">
+                ⏱ Uzatılmış SLA — Yazılım Geliştirme devri
+                {item.slaResolutionTargetMin ? ` · hedef ${item.slaResolutionTargetMin} dk` : ''}
+              </div>
+            )}
             <SlaRow label="Çözüm SLA" value={item.slaResolutionDueAt ? formatDateTime(item.slaResolutionDueAt) : '—'} />
             {item.slaResolutionDueAt && (
               item.slaViolation ? (
@@ -1782,14 +2065,15 @@ function LeftPanel({
                 </div>
               ) : item.status !== 'Çözüldü' && item.status !== 'İptalEdildi' && !item.slaPausedAt ? (
                 <div className="rounded-md bg-sky-50 px-2 py-1 text-[11px] text-sky-800 ring-1 ring-sky-200">
-                  Çözüme {formatRemaining(item.slaResolutionDueAt)}
+                  Çözüme {formatSlaRemaining(item.slaResolutionRemainingMin, item.slaBusinessTime, item.slaDayMinutes)
+                    ?? formatRemaining(item.slaResolutionDueAt)}
                 </div>
               ) : null
             )}
           </div>
 
-          {/* Duraklatma */}
-          {(item.slaPausedAt || item.slaPausedDurationMin > 0) && (
+          {/* Duraklatma — 3. parti (slaPausedAt) + müşteri-bekleme (Faz 3b) */}
+          {(item.slaPausedAt || item.slaCustomerWaitStartedAt || item.slaPausedDurationMin > 0) && (
             <div className="space-y-1">
               {item.slaPausedDurationMin > 0 && (
                 <SlaRow label="Duraklatma" value={`${item.slaPausedDurationMin} dk`} />
@@ -1797,6 +2081,11 @@ function LeftPanel({
               {item.slaPausedAt && (
                 <div className="rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800 ring-1 ring-amber-200">
                   Şu an duraklıyor — {formatRelative(item.slaPausedAt)}
+                </div>
+              )}
+              {!item.slaPausedAt && item.slaCustomerWaitStartedAt && (
+                <div className="rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800 ring-1 ring-amber-200">
+                  Müşteri yanıtı bekleniyor — sayaç durdu ({formatRelative(item.slaCustomerWaitStartedAt)})
                 </div>
               )}
             </div>
@@ -1808,12 +2097,11 @@ function LeftPanel({
           arayüzden kaldırıldı. "Üstlen" butonu (WR-C1) header'a, Kaydet'in
           yanına taşındı — artık burada render edilmiyor. */}
 
-      {/* FAZ 2 Collab — izleyiciler. LBD A6: Agent rolünde gizli, diğer
-          tüm rollerde (Supervisor/Backoffice/CSM/Admin/SystemAdmin) görünür.
-          Self-watch + Supervisor başkasını ekleyebilir. */}
-      {userRole !== 'Agent' && (
-        <WatchersPanel caseId={item.id} assignedPersonId={item.assignedPersonId ?? null} />
-      )}
+      {/* FAZ 2 Collab — izleyiciler. Tüm rollerde (Agent dahil) görünür.
+          Self-watch + Supervisor/atanmış sahip başkasını ekleyebilir
+          (WatchersPanel içindeki canAddOthers/canRemove ve backend
+          /:id/watchers route guard'ları bu ayrımı zaten yapıyor). */}
+      <WatchersPanel caseId={item.id} assignedPersonId={item.assignedPersonId ?? null} />
 
       {/* LBD A7: "Hızlı Aksiyonlar" PanelSection kaldırıldı.
           Aksiyonların erişim noktası:
@@ -2951,6 +3239,8 @@ function StatusReportModal({
   const [loading, setLoading] = useState(false);
   const [errored, setErrored] = useState(false);
   const [copied, setCopied] = useState(false);
+  // Durum Raporu v2 — muhatap modu. İç yönetici (varsayılan) veya müşteri.
+  const [reportMode, setReportMode] = useState<'internal' | 'customer'>('internal');
 
   // Modal açılınca AI çağrısı yap. Kapanınca state'i sıfırla.
   useEffect(() => {
@@ -2959,13 +3249,14 @@ function StatusReportModal({
       setLoading(false);
       setErrored(false);
       setCopied(false);
+      setReportMode('internal');
       return;
     }
     let alive = true;
     setLoading(true);
     setErrored(false);
     setReport(null);
-    void caseService.getActionSummary(caseId).then((r) => {
+    void caseService.getActionSummary(caseId, reportMode).then((r) => {
       if (!alive) return;
       setLoading(false);
       if (r) setReport(r);
@@ -2974,13 +3265,14 @@ function StatusReportModal({
     return () => {
       alive = false;
     };
-  }, [open, caseId]);
+    // reportMode değişince yeniden üret (muhatap değişti → dil/PII değişir).
+  }, [open, caseId, reportMode]);
 
   async function regenerate() {
     if (loading) return;
     setLoading(true);
     setErrored(false);
-    const r = await caseService.getActionSummary(caseId);
+    const r = await caseService.getActionSummary(caseId, reportMode);
     setLoading(false);
     if (r) setReport(r);
     else setErrored(true);
@@ -3041,6 +3333,41 @@ function StatusReportModal({
         </div>
       }
     >
+      {/* Durum Raporu v2 — muhatap seçimi. Rapor kimin için üretiliyor:
+          İç Yönetici (risk/jargon serbest) veya Müşteri (jargonsuz, taahhüt
+          odaklı, kurumsal imza). Seçim değişince rapor otomatik yeniden üretilir. */}
+      <div className="mb-3">
+        <div className="mb-1 text-[11px] font-medium text-slate-500 dark:text-ndark-muted">
+          Rapor kimin için?
+        </div>
+        <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-ndark-border dark:bg-ndark-bg">
+          {([
+            { key: 'internal', label: 'İç Yönetici' },
+            { key: 'customer', label: 'Müşteri' },
+          ] as const).map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              disabled={loading}
+              onClick={() => setReportMode(opt.key)}
+              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+                reportMode === opt.key
+                  ? 'bg-white text-violet-700 shadow-sm dark:bg-ndark-card dark:text-violet-300'
+                  : 'text-slate-500 hover:text-slate-700 dark:text-ndark-muted dark:hover:text-ndark-text'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        {reportMode === 'customer' && (
+          <p className="mt-1 text-[11px] leading-snug text-slate-500 dark:text-ndark-muted">
+            Müşteriye gönderilebilir dil: iç notlar ve teknik ifadeler gizlenir, kurumsal imza eklenir.
+            Göndermeden önce içeriği kontrol edin.
+          </p>
+        )}
+      </div>
+
       {loading && (
         <div className="flex items-center gap-2 rounded-md bg-violet-50 px-3 py-3 text-sm text-violet-900 ring-1 ring-violet-200 dark:bg-violet-950/30 dark:text-violet-200 dark:ring-violet-900/40">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-violet-400 border-t-transparent" />
@@ -3080,148 +3407,6 @@ function StatusReportModal({
  * yapılır. Deterministic skor — AI YOK. Bağlama tıklanınca parent'a confirm +
  * linkAccount akışını delege eder. Auto-link asla yok.
  */
-function CustomerMatchSuggestionsPanel({
-  caseId,
-  onConfirmLink,
-}: {
-  caseId: string;
-  onConfirmLink: (suggestion: CustomerMatchSuggestion) => Promise<void>;
-}) {
-  const [data, setData] = useState<CustomerMatchSuggestionsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [submittingId, setSubmittingId] = useState<string | null>(null);
-
-  const load = async () => {
-    setLoading(true);
-    setError(null);
-    const out = await caseService.getCustomerMatchSuggestions(caseId);
-    setLoading(false);
-    if (!out) {
-      setError('Öneriler yüklenemedi.');
-      return;
-    }
-    setData(out);
-  };
-
-  useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [caseId]);
-
-  if (loading) {
-    return (
-      <div className="rounded-md border border-slate-200 px-3 py-2 dark:border-ndark-border">
-        <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-ndark-muted">
-          <Sparkles size={11} /> Önerilen müşteriler
-        </div>
-        <div className="space-y-1.5">
-          <Skeleton height={42} />
-          <Skeleton height={42} />
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="rounded-md border border-slate-200 px-3 py-2 text-[11px] text-slate-600 dark:border-ndark-border dark:text-ndark-muted">
-        <div className="flex items-center justify-between gap-2">
-          <span>{error}</span>
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="rounded px-2 py-0.5 text-[11px] font-medium text-brand-700 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-900/30"
-          >
-            Tekrar dene
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const suggestions = data?.suggestions ?? [];
-  if (suggestions.length === 0) {
-    return (
-      <div className="rounded-md border border-slate-200 px-3 py-2 text-[11px] text-slate-600 dark:border-ndark-border dark:text-ndark-muted">
-        <div className="mb-1 flex items-center gap-1.5 font-medium text-slate-500">
-          <Sparkles size={11} /> Önerilen müşteriler
-        </div>
-        <div>Bu vaka için otomatik öneri bulunamadı. Manuel arama ile devam edebilirsin.</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-md border border-slate-200 px-3 py-2 dark:border-ndark-border">
-      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-ndark-muted">
-        <Sparkles size={11} /> Önerilen müşteriler
-      </div>
-      <ul className="space-y-1.5">
-        {suggestions.map((s) => {
-          const tint = s.confidence === 'high' ? 'emerald' : s.confidence === 'medium' ? 'amber' : 'slate';
-          const isSubmitting = submittingId === s.accountId;
-          return (
-            <li
-              key={s.accountId}
-              className="rounded border border-slate-200 px-2 py-1.5 dark:border-ndark-border"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="truncate text-xs font-medium text-slate-900 dark:text-ndark-text">
-                    {s.accountName}
-                  </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                    <Badge tint={tint}>
-                      {s.confidence === 'high' ? 'Yüksek sinyal' : s.confidence === 'medium' ? 'Orta sinyal' : 'Düşük sinyal'}
-                      <span className="ml-1 opacity-70">{s.score}</span>
-                    </Badge>
-                    {s.openCaseCount > 0 && (
-                      <span className="text-[10px] text-slate-500 dark:text-ndark-muted">
-                        {s.openCaseCount} açık
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {s.reasons.map((r, i) => (
-                      <span
-                        key={`${r.type}-${i}`}
-                        className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted"
-                        title={r.valueMasked ?? undefined}
-                      >
-                        {r.label}
-                        {r.valueMasked && (
-                          <span className="font-mono opacity-75">{r.valueMasked}</span>
-                        )}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={isSubmitting}
-                onClick={async () => {
-                  setSubmittingId(s.accountId);
-                  await onConfirmLink(s);
-                  setSubmittingId(null);
-                }}
-                className="mt-2 w-full justify-center"
-              >
-                {isSubmitting ? 'Bağlanıyor…' : 'Bu müşteriye bağla'}
-              </Button>
-            </li>
-          );
-        })}
-      </ul>
-      <p className="mt-2 text-[10px] text-slate-400 dark:text-ndark-dim">
-        Öneriler deterministic sinyallere dayanır; AI değildir. Manuel onay zorunludur.
-      </p>
-    </div>
-  );
-}
-
 function PanelSection({
   title,
   icon,
@@ -3398,61 +3583,9 @@ function PriorityStrip({
   );
 }
 
-// Açıklama alanı — uzun metinlerde "Devamını oku" göster; kısa metinlerde
-// buton hiç render edilmez (CaseSolutionStepsPanel'deki overflow-ölçüm
-// pattern'iyle aynı: scrollHeight > clientHeight ise kırpılmış demektir).
-function ExpandableDescription({ text }: { text: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const [isOverflowing, setIsOverflowing] = useState(false);
-  const ref = useRef<HTMLParagraphElement>(null);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) {
-      setIsOverflowing(false);
-      return;
-    }
-    const measure = () => {
-      if (!expanded) {
-        setIsOverflowing(el.scrollHeight > el.clientHeight + 1);
-      }
-    };
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [text, expanded]);
-
-  useEffect(() => {
-    setExpanded(false);
-  }, [text]);
-
-  return (
-    <div>
-      <p
-        ref={ref}
-        className={`whitespace-pre-wrap text-sm text-slate-700 ${!expanded ? 'line-clamp-6' : ''}`}
-      >
-        {text}
-      </p>
-      {isOverflowing && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setExpanded((current) => !current);
-          }}
-          aria-expanded={expanded}
-          className="mt-1 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
-        >
-          {expanded ? 'Daralt' : 'Devamını oku'}
-        </button>
-      )}
-    </div>
-  );
-}
+// Açıklama alanı — uzun metinlerde "Devamını oku" göster. Paylaşılan
+// ExpandableText bileşenine taşındı (CaseListDrawer'daki uzun başlıklar
+// için de aynı ihtiyaç çıktı) — davranış/className birebir korunur.
 
 // ----------------------------------------------------------------
 // Tab Components
@@ -3467,6 +3600,7 @@ function DetailTab({
   thirdParties,
   catalogPackages,
   catalogProducts,
+  catalogProductGroups,
   previousCases,
   onSelectPrevious,
   drafts,
@@ -3478,6 +3612,8 @@ function DetailTab({
   onTransitionApplied,
   kbEnabled,
   onCaseUpdated,
+  activeIdRef,
+  wideViewReadOnly,
 }: {
   item: Case;
   offeredSolutions: { id: string; name: string }[];
@@ -3493,6 +3629,7 @@ function DetailTab({
     supportLevel: SupportLevel;
     productGroupId: string;
   }>;
+  catalogProductGroups: Array<{ id: string; code: string; name: string }>;
   previousCases: Case[];
   onSelectPrevious: (id: string) => void;
   drafts: Partial<Case>;
@@ -3506,14 +3643,43 @@ function DetailTab({
   kbEnabled: boolean | null;
   /** Akıllı Tanımlar kaydı sonrası güncel Case'i üst state'e yaz. */
   onCaseUpdated: (updated: Case) => void;
+  /** Üstteki en güncel activeId — async commit yanıtlarının hâlâ aktif
+   *  vakaya ait olup olmadığını kontrol etmek için (bkz. handleCommitDescription). */
+  activeIdRef: { current: string };
+  /** "Tümü" (wide, dar kapsam kanıtlanmamış) görünümde true — checklist,
+   *  DevOps bağlantısı, dosya ekleme gibi mutasyonlar devre dışı bırakılır. */
+  wideViewReadOnly: boolean;
 }) {
   // PR-D3 — case-write yetkili rol set'i. DevOps section'da Bağla/Kaldır
   // gating'i için kullanılır. Backend'de PATCH /:id ile aynı kapı
   // (allowedCompanyIds scope; explicit requireRole yok), UI sadece
-  // görünürlüğü düşürür — sızıntı yok.
+  // görünürlüğü düşürür — sızıntı yok. wideViewReadOnly — "Tümü" gibi dar
+  // kapsam kanıtlanmamış görünümde bu da devre dışı.
   const { user } = useAuth();
   const canWriteCase =
-    !!user && ['Agent', 'Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'].includes(user.role);
+    !!user && ['Agent', 'Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) &&
+    !wideViewReadOnly;
+
+  // Açıklama alanı — diğer InlineEdit alanlarının aksine taslağa yazıp üstteki
+  // toplu "Kaydet"i beklemez; ✓'a basınca DOĞRUDAN backend'e kaydedilir.
+  // Kasıtlı istisna (kullanıcı talebi) — diğer alanlar mevcut taslak+toplu
+  // Kaydet akışında kalmaya devam ediyor.
+  async function handleCommitDescription(val: unknown) {
+    const caseIdAtCommit = item.id;
+    const updated = await caseService.update(caseIdAtCommit, { description: (val as string) ?? '' });
+    // updated undefined ise: apiFetch zaten hata toast'unu gösterdi — edit
+    // modunda kal, kullanıcı yazdığını kaybetmesin (handleSaveDrafts'taki
+    // aynı davranış).
+    if (!updated) return;
+    // Await sırasında breadcrumb/önceki-vaka ile başka bir vakaya geçilmiş
+    // olabilir (activeId değişir). Bu durumda yanıt artık ESKİ vakaya ait —
+    // üst state'e (setItem) uygulanırsa yeni açılan vakanın üzerine yazar.
+    // Kayıt backend'de zaten kalıcı oldu; sadece burada UYGULANMIYOR — vaka
+    // tekrar açıldığında sunucudan güncel haliyle gelecek.
+    if (activeIdRef.current !== caseIdAtCommit) return;
+    onCaseUpdated(updated);
+    onCancelEdit();
+  }
 
   // Kategori cascade — taslakta seçili kategoriye göre alt-kategori opsiyonları
   const activeCategory = (drafts.category ?? item.category) as string;
@@ -3616,10 +3782,10 @@ function DetailTab({
                 editing={editingField === 'description'}
                 isDraft={drafts.description !== undefined}
                 onStart={() => onStartEdit('description')}
-                onCommit={(val) => onCommitDraft('description', val)}
+                onCommit={(val) => void handleCommitDescription(val)}
                 onCancel={onCancelEdit}
                 disabled={!canEditField('description') || !canReadField('description') || isMaskedField('description')}
-                renderDisplay={(val) => displayValue('description', <ExpandableDescription text={String(val ?? '—')} />)}
+                renderDisplay={(val) => displayValue('description', <ExpandableText text={String(val ?? '—')} className="whitespace-pre-wrap text-sm text-slate-700" />)}
               />
             </Section>
           )}
@@ -3661,6 +3827,13 @@ function DetailTab({
           kbEnabled={kbEnabled}
           canEdit={canWriteCase && canEditField('smartTicketMeta')}
           onUpdated={onCaseUpdated}
+          // caseRepository.js transitionStatus kapanış kapısıyla aynı koşul
+          // (COMP-UNIVERA + KB tenant açık; müşteri/proje eşleşmesinden
+          // bağımsız) — ajan Çözüldü'ye geçmeden ÖNCE bu alanların zorunlu
+          // olduğunu görsün. Backend'deki "yalnız o şirkette tanımlı
+          // taksonomi tipi için zorunlu" inceliği burada uygulanmaz (basit
+          // görsel ipucu); nihai kapı backend'de.
+          requiredForClosure={item.companyId === 'COMP-UNIVERA' && kbEnabled === true}
         />
       )}
 
@@ -3780,8 +3953,16 @@ function DetailTab({
         const isBlankValue = (val: unknown) =>
           val === null || val === undefined || String(val).trim() === '' || String(val).trim() === '—';
 
-        const secondaryClassificationItems = [
-          { label: 'Ürün Grubu', icon: Boxes, isEmpty: isBlankValue(v('productGroup')), node: (
+        // Ürün Grubu — kapanışta zorunlu (bkz. transitionStatus
+        // product_group_required_for_closure guard'ı). Bu yüzden ne
+        // "Diğer sınıflandırma bilgileri" katlanabilir bölümüne (boşsa
+        // saklanır) ne de secondaryClassificationItems'ın dolu/boş
+        // ayrımına tabi — ayrı, her zaman görünen bir satır olarak
+        // render edilir (aşağıda, primaryClassificationItems'ın hemen
+        // altında). Diğer alanlarla aynı standart click-to-edit davranışı
+        // korunur — sürekli açık bir select DEĞİL, sadece hep GÖRÜNÜR.
+        const productGroupItem = {
+          label: 'Ürün Grubu', icon: Boxes, node: (
             <InlineEdit
               fieldKey="productGroup"
               type="select"
@@ -3791,9 +3972,31 @@ function DetailTab({
               onStart={() => onStartEdit('productGroup')}
               onCommit={(val) => onCommitDraft('productGroup', val)}
               onCancel={onCancelEdit}
-              options={[{ value: '', label: '— Seçin —' }, ...lookupService.productGroups().map((p) => ({ value: p, label: p }))]}
+              options={[
+                { value: '', label: '— Seçin —' },
+                ...(() => {
+                  const names = new Set<string>();
+                  const merged: string[] = [];
+                  for (const g of catalogProductGroups) {
+                    if (!names.has(g.name)) {
+                      names.add(g.name);
+                      merged.push(g.name);
+                    }
+                  }
+                  for (const p of lookupService.productGroups()) {
+                    if (!names.has(p)) {
+                      names.add(p);
+                      merged.push(p);
+                    }
+                  }
+                  return merged.map((name) => ({ value: name, label: name }));
+                })(),
+              ]}
             />
-          )},
+          ),
+        };
+
+        const secondaryClassificationItems = [
           // WR-A7b — Catalog Paket inline edit. BFF DI.3/4/5 enforce eder; role gate
           // (Supervisor/Admin/SystemAdmin) BFF tarafında, UI 403 ise toast gösterir.
           { label: 'Paket', icon: Package, isEmpty: !packageDisplayId && !item.packageName, node: (
@@ -3910,6 +4113,11 @@ function DetailTab({
                   <div className="min-w-0 flex-1 text-sm">{i.node}</div>
                 </div>
               ))}
+              <div key={productGroupItem.label} className="flex items-center gap-1 px-1.5 py-0.5">
+                <productGroupItem.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
+                <span className="shrink-0 text-[11px] font-medium text-slate-500">{productGroupItem.label}:</span>
+                <div className="min-w-0 flex-1 text-sm">{productGroupItem.node}</div>
+              </div>
               {filledSecondary.map((i) => (
                 <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
                   <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
@@ -4083,7 +4291,7 @@ function DetailTab({
 
       {/* FAZ 4 — Kontrol Listesi (3-tuple template'inden snapshot, vaka açılırken yüklenir) */}
       {item.checklistItems && item.checklistItems.length > 0 && (
-        <ChecklistSection item={item} onCaseUpdated={onTransitionApplied} />
+        <ChecklistSection item={item} onCaseUpdated={onTransitionApplied} readOnly={wideViewReadOnly} />
       )}
 
       {item.caseType === 'ProactiveTracking' && (
@@ -4532,9 +4740,12 @@ function OfferedSolutionsPickerModal({
 function ChecklistSection({
   item,
   onCaseUpdated,
+  readOnly = false,
 }: {
   item: Case;
   onCaseUpdated: (updated: Case) => void;
+  /** "Tümü" (wide, dar kapsam kanıtlanmamış) görünümde true — işaretleme devre dışı. */
+  readOnly?: boolean;
 }) {
   const items = item.checklistItems ?? [];
   const total = items.length;
@@ -4545,6 +4756,7 @@ function ChecklistSection({
   const pct = total > 0 ? Math.round((checkedCount / total) * 100) : 0;
 
   async function handleToggle(itemId: string, currentlyChecked: boolean) {
+    if (readOnly) return;
     const updated = await caseService.toggleChecklistItem(item.id, itemId, !currentlyChecked);
     if (updated) onCaseUpdated(updated);
   }
@@ -4593,7 +4805,8 @@ function ChecklistSection({
               role="checkbox"
               aria-checked={it.checked}
               onClick={() => void handleToggle(it.id, it.checked)}
-              className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+              disabled={readOnly}
+              className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border disabled:cursor-not-allowed disabled:opacity-60 ${
                 it.checked
                   ? 'border-emerald-500 bg-emerald-500 text-white'
                   : 'border-slate-300 bg-white hover:border-slate-400 dark:border-ndark-border dark:bg-ndark-card dark:hover:border-ndark-muted'
@@ -4666,14 +4879,17 @@ function KpiSummaryStrip({ item, caseId }: { item: Case; caseId: string }) {
   });
   if (reopened) parts.push({ key: 'reopen', node: <>Y.açılma Var</> });
   if (item.slaResponseDueAt) {
-    parts.push({ key: 'slaResp', node: <>Yanıt SLA {formatRelative(item.slaResponseDueAt)}</> });
+    parts.push({ key: 'slaResp', node: <>Yanıt SLA {formatSlaRemaining(item.slaResponseRemainingMin, item.slaBusinessTime, item.slaDayMinutes) ?? formatRelative(item.slaResponseDueAt)}</> });
   }
   if (item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt) {
-    parts.push({ key: 'slaRes', node: <>Çözüm SLA {formatRelative(item.slaResolutionDueAt)}</> });
+    parts.push({ key: 'slaRes', node: <>Çözüm SLA {formatSlaRemaining(item.slaResolutionRemainingMin, item.slaBusinessTime, item.slaDayMinutes) ?? formatRelative(item.slaResolutionDueAt)}</> });
   }
   parts.push({ key: 'updated', node: <>Son güncelleme {formatDateTime(item.updatedAt)}</> });
   if (item.resolvedAt) {
     parts.push({ key: 'resolved', node: <>Çözüm {formatDateTime(item.resolvedAt)}</> });
+  }
+  if (item.assignedPersonName) {
+    parts.push({ key: 'assignedPerson', node: <>Atanan {item.assignedPersonName}</> });
   }
 
   return (
@@ -4839,7 +5055,10 @@ function InlineEdit({
           value={String(draft ?? '')}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={(e) => {
-            // Click outside iptal — eğer relatedTarget Kaydet/Voice butonuna gitmiyorsa
+            // Dışarı tıklama = iptal (edit modundan çık, draft atılır).
+            // Kaydetmenin TEK yolu ✓ butonu/Enter — relatedTarget o buton
+            // ise zaten kendi onMouseDown'ında commit ediyor ve blur bile
+            // tetiklenmiyor (preventDefault); burası yalnız güvenlik ağı.
             const next = e.relatedTarget as HTMLElement | null;
             if (next?.dataset?.role === 'commit-draft' || next?.dataset?.role === 'voice-input') {
               onCommit(draft);
@@ -4928,6 +5147,8 @@ function InlineEdit({
         value={String(draft ?? '')}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={(e) => {
+          // Dışarı tıklama = iptal (edit modundan çık, draft atılır).
+          // Kaydetmenin TEK yolu ✓ butonu/Enter.
           const next = e.relatedTarget as HTMLElement | null;
           if (next?.dataset?.role === 'commit-draft') {
             onCommit(draft);
@@ -4984,7 +5205,9 @@ const ACTIVITY_FILTERS: FilterDef[] = [
     match: (h) =>
       h.actionType === 'Transfer' ||
       (h.actionType === 'FieldUpdate' && ASSIGNMENT_FIELDS.has(h.fieldName ?? '')) },
-  { key: 'files',     label: 'Dosya',   types: ['FileUploaded', 'FileRemoved'],
+  // Evidence Preservation (2026-07-09) — FileUploadSkipped: e-posta ekinin
+  // NEDEN alınamadığı kaydı; "ek nerede?" arayan agent Dosya filtresinde görür.
+  { key: 'files',     label: 'Dosya',   types: ['FileUploaded', 'FileUploadSkipped', 'FileRemoved'],
     active:   'bg-blue-600 text-white shadow-sm',
     inactive: 'bg-blue-50 text-blue-700 hover:bg-blue-100',
     dot:      'bg-blue-500' },

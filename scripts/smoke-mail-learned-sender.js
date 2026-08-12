@@ -69,10 +69,17 @@ async function cleanupExisting(emails) {
 
 async function setup() {
   console.log('[setup] tenant A + B + accounts oluşturuluyor...');
+  // 2026-07-16 fix — intake artık şirket başına Vaka No Öneki ŞART koşuyor
+  // (case_number_prefix_required); test tenant'ları öneksiz kurulunca tüm
+  // senaryolar ilk intake'te düşüyordu. Test önekleri gerçek şirketlerle
+  // çakışmaz (@unique); upsert UPDATE kolu da yazar — eski koşumlardan
+  // kalan öneksiz tenant kayıtları onarılsın.
+  const TEST_PREFIX = { [TENANT_A]: 'ZZA', [TENANT_B]: 'ZZB' };
   for (const [id, name] of [[TENANT_A, TENANT_A_NAME], [TENANT_B, TENANT_B_NAME]]) {
     await prisma.company.upsert({
-      where: { id }, update: {},
-      create: { id, name, isActive: true },
+      where: { id },
+      update: { caseNumberPrefix: TEST_PREFIX[id] },
+      create: { id, name, isActive: true, caseNumberPrefix: TEST_PREFIX[id] },
     });
   }
   await cleanupExisting([
@@ -158,6 +165,9 @@ async function cleanup(ctx) {
     await prisma.account.delete({ where: { id: aid } }).catch(() => {});
   }
   for (const tenant of [TENANT_A, TENANT_B]) {
+    // 2026-07-16 — vaka-no sayacı FK'sı tenant silinmesini engelliyordu
+    // (CaseNumberCounter_companyId_fkey); önce sayaç, sonra şirket.
+    await prisma.caseNumberCounter.deleteMany({ where: { companyId: tenant } }).catch(() => {});
     await prisma.company.delete({ where: { id: tenant } }).catch(() => {});
   }
   console.log('  → cleanup OK');

@@ -28,6 +28,7 @@ import {
   RotateCw,
   Search,
   SearchX,
+  Send,
   ShieldAlert,
   Sparkles,
   Tag,
@@ -35,6 +36,7 @@ import {
   Users2,
   User,
   X,
+  XCircle,
   Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -64,14 +66,14 @@ import {
   type CasePriority,
   type CaseStatus,
 } from './types';
-import { formatDateTime, formatRelative } from '@/lib/format';
+import { formatDateTime, formatOpeningDateTime, formatRelative, formatSlaRemaining } from '@/lib/format';
 import { Modal } from '@/components/ui/Modal';
 import { NewCaseForm } from './NewCaseForm';
 import { QuickCaseModal } from './QuickCaseModal';
 
 // Bulk action — kullanıcının açabileceği alan tipi.
 // 'assign' = 2 adımlı atama modalı (takım → kişi).
-type BulkField = 'priority' | 'status' | 'assign' | 'archive';
+type BulkField = 'priority' | 'status' | 'assign' | 'archive' | 'cancel';
 
 // Frontline = kişisel KPI'lar; Supervisor+ = global KPI'lar.
 const FRONTLINE_ROLES: UserRole[] = ['Agent', 'Backoffice', 'CSM'];
@@ -105,7 +107,12 @@ const PRIORITY_STRIPE: Record<CasePriority, string> = {
 const BULK_STATUSES: CaseStatus[] = ['Açık', 'İncelemede', '3rdPartyBekleniyor', 'Eskalasyon', 'YenidenAcildi'];
 
 interface CasesListPageProps {
-  onSelectCase: (caseId: string) => void;
+  /** narrowScopeConfirmed: true ise CaseDetailPage'e "dar kapsamlı" bir
+   *  navigasyondan geldiği bildirilir (Backoffice/Supervisor Devret/Üstlen
+   *  görünürlüğü için). Açık/Kapalı sekmesi satır tıklaması ve az önce
+   *  üstlenilen/oluşturulan vakaya yönlendirme bunu true gönderir; Tümü
+   *  sekmesi ve diğer her yol varsayılan (false/undefined) bırakır. */
+  onSelectCase: (caseId: string, narrowScopeConfirmed?: boolean) => void;
   onShowCustomer?: (accountId: string) => void;
   onOpenCustomerSearch?: () => void;
   /** App seviyesinden gelen account ID — varsa QuickCaseModal pre-fill ile açılır */
@@ -145,7 +152,9 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 // Kapalı: status IN (Çözüldü, İptalEdildi).
 // Genel #45 — "Tümü" tab'ı eklendi. Default opt-in; ilk sırada görünür ama
 // açılışta hâlâ 'open' (mevcut davranış korunur).
-type InboxTab = 'all' | 'open' | 'later' | 'closed';
+// 'transferredByMe' — Agent KPI "Yönlendirdiklerim" kartı; sekme çubuğunda
+// GÖRÜNMEZ (buton yok), sadece KPI tıklamasıyla set edilir (bkz. load()).
+type InboxTab = 'all' | 'open' | 'later' | 'closed' | 'transferredByMe';
 const OPEN_STATUSES: CaseStatus[] = ['Açık', 'İncelemede', '3rdPartyBekleniyor', 'Eskalasyon', 'YenidenAcildi'];
 const CLOSED_STATUSES: CaseStatus[] = ['Çözüldü', 'İptalEdildi'];
 
@@ -409,6 +418,30 @@ export function CasesListPage({
     // aynı anda tazelensin diye bu tetikleyiciyi paylaşıyor.
   }, [caseStats, poolVisiblePersonal, myTeamId, sameLevelTeamIds]);
 
+  // Supervisor "Bana Atananlar" kartı — team-mode stats response'unda
+  // assignedToMe alanı yok (o sadece personal mode'da var), bu yüzden
+  // poolCount ile aynı teknik: mevcut liste endpoint'i limit=1 ile çağrılıp
+  // gerçek '@odata.count' okunuyor. caseStats'a bağımlı olduğu için
+  // refreshStats() her çağrıldığında (Üstlen/Kaydet/Yenile sonrası) diğer
+  // KPI'larla birlikte anlık tazelenir.
+  const [mySupervisorAssignedCount, setMySupervisorAssignedCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadMySupervisorAssignedCount() {
+      if (caseStats?.mode === 'team' && user?.personId) {
+        const { total } = await caseService.list(
+          { personId: user.personId, statuses: OPEN_STATUSES },
+          { page: 1, pageSize: 1 },
+        );
+        if (!cancelled) setMySupervisorAssignedCount(total);
+      } else {
+        setMySupervisorAssignedCount(null);
+      }
+    }
+    void loadMySupervisorAssignedCount();
+    return () => { cancelled = true; };
+  }, [caseStats, user?.personId]);
+
   // targetPage: undefined = mevcut page state'i kullan; sayı = o sayfayı yükle.
   const load = async (targetPage?: number, queueFilter?: QuickQueueFilter) => {
     const p = targetPage ?? page;
@@ -420,6 +453,15 @@ export function CasesListPage({
         '/api/cases/snoozed',
         undefined,
         'Ertelenmiş vakalar yüklenemedi',
+      );
+      const items = data?.value ?? [];
+      setAllFiltered(items);
+      setServerTotal(data?.['@odata.count'] ?? items.length);
+    } else if (inboxTab === 'transferredByMe') {
+      const data = await apiFetch<{ value: Case[]; '@odata.count': number }>(
+        '/api/cases/transferred-by-me',
+        undefined,
+        'Yönlendirdiğim vakalar yüklenemedi',
       );
       const items = data?.value ?? [];
       setAllFiltered(items);
@@ -439,6 +481,9 @@ export function CasesListPage({
           unassigned: effectiveQueueFilter === 'unassigned' ? true : undefined,
           priorities: effectiveQueueFilter === 'critical' ? ['Critical'] : filters.priorities,
           roleDefaultView: roleDefaultViewOff ? 'off' : undefined,
+          // F1/F2 — "later" sekmesi ayrı endpoint kullandığı için buraya hiç
+          // düşmüyor; sadece all/open/closed backend'e bildirilir.
+          inboxTab: inboxTab === 'all' || inboxTab === 'open' || inboxTab === 'closed' ? inboxTab : undefined,
         },
         { page: p, pageSize, sortBy: sortKey, sortDir },
       );
@@ -734,6 +779,25 @@ export function CasesListPage({
     void refreshStats();
   }
 
+  // Toplu iptal (2026-07-10) — Agent HARİÇ roller (BE requireRole otorite).
+  // İptal terminal statü geçişi: her vaka "İptal Edildi"ye çekilir, neden
+  // geçmişe yazılır, SLA durur. Arşivden ayrı bir yetkili yol.
+  async function applyBulkCancel(reason: string) {
+    const ids = Array.from(selected);
+    if (ids.length === 0 || reason.trim().length < 3) return;
+    setBulkSubmitting(true);
+    const result = await caseService.bulkCancel(ids, reason.trim());
+    setBulkSubmitting(false);
+    setBulkField(null);
+    if (!result) return; // apiFetch toast gösterdi (kısmi-abort hatası dahil)
+    const parts = [`${result.cancelled} vaka iptal edildi`];
+    if (result.skipped > 0) parts.push(`${result.skipped} atlandı (çözülmüş/arşivli/zaten iptal)`);
+    toast({ type: 'success', message: parts.join(' · ') + '.' });
+    clearSelection();
+    void load();
+    void refreshStats();
+  }
+
   async function applyBulk(field: BulkField, value: string) {
     const ids = Array.from(selected);
     if (ids.length === 0 || !value) return;
@@ -781,7 +845,7 @@ export function CasesListPage({
       // detaya gitmek zorundaydı. Toast + arka plan refresh aynen
       // korunuyor; load()/refreshStats() arka planda çalışır, ekran
       // doğrudan Case Detail olarak açılır.
-      onSelectCase(updated.id);
+      onSelectCase(updated.id, true);
       void load();
       void refreshStats();
     } else {
@@ -794,12 +858,21 @@ export function CasesListPage({
    * oluşturduğu kayıt dahil hiçbir havuz vakasını claim edemez (backend
    * caseRepository.js claim() aynı kuralı uygular — "atama takım liderinizde"
    * hatası). Buton burada gizlenmezse kullanıcı her tıklamada 403 alır;
-   * görünürlük backend kuralıyla birebir eşleşmeli. */
+   * görünürlük backend kuralıyla birebir eşleşmeli.
+   * Tümü sekmesi salt-okunur kuralı — Backoffice/Supervisor "Tümü" sekmesinde
+   * (inboxTab==='all') hiçbir kaydı üstleyemez; bu sekme geniş arama/danışma
+   * amaçlı, işlem amaçlı değil (CaseDetailPage'deki aynı kuralla tutarlı). */
   const canClaimCase = (c: { status: CaseStatus; assignedPersonId?: string | null }) =>
     !!user?.personId &&
     !c.assignedPersonId &&
     !CLOSED_STATUSES.includes(c.status) &&
-    !(user?.role === 'Agent' && !!myTeamId && !canSeeTeamPool);
+    !(user?.role === 'Agent' && !!myTeamId && !canSeeTeamPool) &&
+    // Tümü sekmesi — Agent (seviyesi fark etmez, L2/L3/takım lideri dahil)
+    // ve Supervisor/Backoffice için salt-okunur. Sıradan L1 zaten yukarıdaki
+    // koşulla her sekmede engelli; bu satır L2/L3/takım lideri Agent'ların
+    // "Tümü"de kendi takımıyla ilgisi olmayan bir havuzu üstlenmesini önler
+    // (Açık sekmesinde kendi takımının havuzunu üstlenebilmeye devam ederler).
+    !(['Agent', 'Supervisor', 'Backoffice'].includes(user?.role ?? '') && inboxTab === 'all');
 
   // Role-aware KPI cards — backend tek truth source (GET /api/cases/stats).
   // Mode rol bazlı: personal (Agent/Backoffice/CSM), team (Supervisor),
@@ -843,7 +916,7 @@ export function CasesListPage({
       return [0, 1, 2, 3].map((i) => (
         <div
           key={`skel-${i}`}
-          className="h-[64px] animate-pulse rounded-xl bg-slate-100 dark:bg-ndark-card"
+          className="h-[56px] animate-pulse rounded-xl bg-slate-100 dark:bg-ndark-card"
         />
       ));
     }
@@ -889,12 +962,22 @@ export function CasesListPage({
           setQuickFilter(null);
           setQuickQueueFilter('all');
         }),
-        tile('personal.snoozed', 'Ertelenenlerim', s.snoozedMine, 'amber', <Clock size={16} />, () => {
-          setFilters(initialFilters);
-          setQuickQueueFilter('all');
-          setInboxTab('later');
-          setQuickFilter(null);
-        }),
+        // Agent için "Ertelenenlerim" yerine "Yönlendirdiklerim" — Agent
+        // kendi devrettiği vakaları takip edebilsin. Backoffice/CSM'de
+        // slot değişmez (bu roller devir yapmaz/takip ihtiyacı farklı).
+        user?.role === 'Agent'
+          ? tile('personal.transferredByMe', 'Yönlendirdiklerim', s.transferredByMeCount, 'amber', <Send size={16} />, () => {
+              setFilters(initialFilters);
+              setQuickQueueFilter('all');
+              setInboxTab('transferredByMe');
+              setQuickFilter(null);
+            })
+          : tile('personal.snoozed', 'Ertelenenlerim', s.snoozedMine, 'amber', <Clock size={16} />, () => {
+              setFilters(initialFilters);
+              setQuickQueueFilter('all');
+              setInboxTab('later');
+              setQuickFilter(null);
+            }),
       );
       return tiles;
     }
@@ -930,8 +1013,8 @@ export function CasesListPage({
           setInboxTab('open');
           setQuickFilter(null);
         }),
-        tile('team.escalation', 'Eskale Edildi', s.teamEscalation, 'amber', <AlertCircle size={16} />, () => {
-          setFilters({ ...initialFilters, teamScope: true, statuses: ['Eskalasyon'] });
+        tile('team.assignedToMe', 'Bana Atananlar', mySupervisorAssignedCount ?? 0, 'blue', <User size={16} />, () => {
+          setFilters({ ...initialFilters, personId: user?.personId ?? undefined });
           setQuickQueueFilter('all');
           setInboxTab('open');
           setQuickFilter(null);
@@ -941,6 +1024,15 @@ export function CasesListPage({
           setInboxTab('closed');
           setQuickFilter(null);
           setQuickQueueFilter('all');
+        }),
+        // Supervisor "Yönlendirdiklerim" — Agent'taki aynı kartın rol karşılığı
+        // (bkz. personal.transferredByMe). Aynı /transferred-by-me endpoint'i
+        // ve inboxTab kullanılır; backend rol bağımsız çalışıyor.
+        tile('team.transferredByMe', 'Yönlendirdiklerim', s.transferredByMeCount, 'amber', <Send size={16} />, () => {
+          setFilters(initialFilters);
+          setQuickQueueFilter('all');
+          setInboxTab('transferredByMe');
+          setQuickFilter(null);
         }),
       ];
     }
@@ -980,7 +1072,7 @@ export function CasesListPage({
     return [0, 1, 2, 3].map((i) => (
       <div
         key={`empty-${i}`}
-        className="flex h-[64px] items-center justify-center rounded-xl bg-white text-sm text-slate-400 ring-1 ring-slate-200 dark:bg-ndark-card dark:text-ndark-muted dark:ring-ndark-border"
+        className="flex h-[56px] items-center justify-center rounded-xl bg-white text-sm text-slate-400 ring-1 ring-slate-200 dark:bg-ndark-card dark:text-ndark-muted dark:ring-ndark-border"
       >
         —
       </div>
@@ -1071,11 +1163,17 @@ export function CasesListPage({
 
       {/*
         Role-aware KPI cards — backend tek truth source (GET /api/cases/stats).
-        Havuz kartı dahilse (personal L2/L3 veya team/Supervisor) 5 kart olur;
-        grid kolon sayısı buna göre genişler (kpiTiles component'in üstünde
-        hesaplanır, bkz. yukarı).
+        Havuz kartı dahilse (personal L2/L3 veya team/Supervisor) 5-6 kart
+        olur; grid kolon sayısı buna göre genişler (kpiTiles component'in
+        üstünde hesaplanır, bkz. yukarı). Kart boyutu (KpiTile) küçültüldü
+        ki 6 kart da tek satırda yan yana sığsın.
       */}
-      <div className={cn('grid grid-cols-2 gap-3', kpiTiles.length >= 5 ? 'sm:grid-cols-5' : 'sm:grid-cols-4')}>
+      <div
+        className={cn(
+          'grid grid-cols-2 gap-2',
+          kpiTiles.length >= 6 ? 'sm:grid-cols-6' : kpiTiles.length === 5 ? 'sm:grid-cols-5' : 'sm:grid-cols-4',
+        )}
+      >
         {kpiTiles}
       </div>
 
@@ -1567,6 +1665,17 @@ export function CasesListPage({
                     ? (c as Case & { expired?: boolean })
                     : null;
                   const expired = Boolean(snoozeMeta?.expired);
+                  // "Yönlendirdiklerim" modu — BE'den bindirilen extra alanlar
+                  // (bkz. caseRepository.listTransferredByMe).
+                  const transferMeta = inboxTab === 'transferredByMe'
+                    ? (c as Case & {
+                        transferCount?: number;
+                        myLastTransferAt?: string;
+                        myLastTransferReason?: string;
+                        myLastTransferToTeamName?: string | null;
+                        myLastTransferToPersonName?: string | null;
+                      })
+                    : null;
                   const isSelected = selected.has(c.id);
                   const isUnassignedOpen = !c.assignedPersonId && !CLOSED_STATUSES.includes(c.status);
                   // Öncelik: expired (amber) > selected (brand) > atanmamış (slate) > default hover
@@ -1580,7 +1689,7 @@ export function CasesListPage({
                   return (
                   <tr
                     key={c.id}
-                    onClick={() => onSelectCase(c.id)}
+                    onClick={() => onSelectCase(c.id, inboxTab === 'open' || inboxTab === 'closed')}
                     className={`cursor-pointer text-sm ${rowBg}`}
                   >
                     <Td className={cn('w-10 border-l-[3px]', PRIORITY_STRIPE[c.priority as CasePriority] ?? 'border-l-slate-200 dark:border-l-slate-600')}>
@@ -1642,12 +1751,28 @@ export function CasesListPage({
                           Codex review fix — duration kaynağı lastEmailInboundAt
                           (müşterinin bekleyen mail'i), outbound DEĞİL. */}
                       {c.pendingCustomerReply && (
-                        <div className="mt-1">
+                        <div className="mt-1 space-y-0.5">
                           <PendingReplyBadge
                             pending={c.pendingCustomerReply}
                             lastEmailInboundAt={c.lastEmailInboundAt}
                             size="sm"
                           />
+                          {/* Kullanıcı feedback (2026-07-10) — yanıt bekleyen
+                              vakada "kimden" görünsün: ajanlar gün içinde çok
+                              vakayla yazışıyor. customerContactName = vakanın
+                              muhatabı (açan/yazışan kişi); e-posta hover'da.
+                              Özellikle "Müşteri yok" satırlarında tek tanımlayıcı. */}
+                          {(c.customerContactName || c.customerContactEmail) && (
+                            <div
+                              className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-ndark-muted"
+                              title={c.customerContactEmail ?? undefined}
+                            >
+                              <User size={10} className="shrink-0 text-slate-400" />
+                              <span className="max-w-[190px] truncate">
+                                {c.customerContactName || c.customerContactEmail}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       )}
                       {snoozeMeta?.snoozeUntil && (
@@ -1659,6 +1784,21 @@ export function CasesListPage({
                           {expired
                             ? `⏰ ${formatSnoozeAgo(snoozeMeta.snoozeUntil)}`
                             : `🕐 ${formatSnoozeIn(snoozeMeta.snoozeUntil)}`}
+                        </div>
+                      )}
+                      {transferMeta?.myLastTransferAt && (
+                        <div
+                          className="mt-0.5 truncate text-xs text-amber-700 dark:text-amber-300"
+                          title={[
+                            `Yönlendirme tarihi: ${formatDateTime(transferMeta.myLastTransferAt)}`,
+                            transferMeta.myLastTransferReason ? `Sebep: ${transferMeta.myLastTransferReason}` : null,
+                            transferMeta.myLastTransferToTeamName ? `Hedef takım: ${transferMeta.myLastTransferToTeamName}` : null,
+                            transferMeta.myLastTransferToPersonName ? `Hedef kişi: ${transferMeta.myLastTransferToPersonName}` : null,
+                          ].filter(Boolean).join('\n')}
+                        >
+                          <Send size={10} className="mr-1 inline-block align-[-1px]" />
+                          {formatRelative(transferMeta.myLastTransferAt)}
+                          {(transferMeta.transferCount ?? 1) > 1 && ` · ${transferMeta.transferCount}× devir`}
                         </div>
                       )}
                     </Td>
@@ -1720,13 +1860,17 @@ export function CasesListPage({
                       {c.assignedTeamName ?? <span className="text-slate-400 dark:text-ndark-muted">—</span>}
                     </Td>
                     <Td className="text-xs text-slate-500 dark:text-ndark-muted">
-                      <span title={formatDateTime(c.createdAt)}>{formatRelative(c.createdAt)}</span>
+                      <span title={formatRelative(c.createdAt)}>{formatOpeningDateTime(c.createdAt)}</span>
                     </Td>
                     <Td>
                       <SlaPill
                         slaViolation={c.slaViolation}
                         slaPausedAt={c.slaPausedAt}
+                        slaCustomerWaitStartedAt={c.slaCustomerWaitStartedAt}
                         slaResolutionDueAt={c.slaResolutionDueAt}
+                        slaResolutionRemainingMin={c.slaResolutionRemainingMin}
+                        slaBusinessTime={c.slaBusinessTime}
+                        slaDayMinutes={c.slaDayMinutes}
                       />
                     </Td>
                     <Td className="text-xs text-slate-500 dark:text-ndark-muted">
@@ -1800,7 +1944,7 @@ export function CasesListPage({
           setNewOpen(false);
           setNewPrefill(null);
           void load();
-          onSelectCase(c.id);
+          onSelectCase(c.id, true);
           toast({
             type: 'success',
             title: 'Vaka oluşturuldu',
@@ -1821,7 +1965,7 @@ export function CasesListPage({
         prefillAccountId={quickPrefillAccount}
         onCreated={(c) => {
           void load();
-          onSelectCase(c.id);
+          onSelectCase(c.id, true);
         }}
       />
 
@@ -1833,6 +1977,7 @@ export function CasesListPage({
           onAction={(field) => setBulkField(field)}
           submitting={bulkSubmitting}
           canArchive={user?.role === 'SystemAdmin'}
+          canCancel={!!user && user.role !== 'Agent'}
         />
       )}
 
@@ -1855,7 +2000,15 @@ export function CasesListPage({
           onApply={(reason) => void applyBulkArchive(reason)}
         />
       )}
-      {bulkField && bulkField !== 'assign' && bulkField !== 'archive' && (
+      {bulkField === 'cancel' && (
+        <BulkCancelModal
+          count={selected.size}
+          submitting={bulkSubmitting}
+          onClose={() => setBulkField(null)}
+          onApply={(reason) => void applyBulkCancel(reason)}
+        />
+      )}
+      {bulkField && bulkField !== 'assign' && bulkField !== 'archive' && bulkField !== 'cancel' && (
         <BulkActionModal
           field={bulkField}
           count={selected.size}
@@ -1941,6 +2094,7 @@ function BulkActionBar({
   onAction,
   submitting,
   canArchive,
+  canCancel,
 }: {
   count: number;
   onClear: () => void;
@@ -1948,6 +2102,8 @@ function BulkActionBar({
   submitting: boolean;
   /** SystemAdmin-only: toplu "Arşivle" butonu (tekil arşiv yetki paritesi). */
   canArchive: boolean;
+  /** Agent HARİÇ tüm roller: toplu "İptal Et" butonu (BE requireRole otorite). */
+  canCancel: boolean;
 }) {
   return (
     <div
@@ -1986,6 +2142,18 @@ function BulkActionBar({
       >
         Durum Değiştir
       </Button>
+      {canCancel && (
+        <Button
+          size="sm"
+          variant="outline"
+          leftIcon={<XCircle size={12} />}
+          disabled={submitting}
+          onClick={() => onAction('cancel')}
+          className="border-rose-300 text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-400 dark:hover:bg-rose-950/40"
+        >
+          İptal Et
+        </Button>
+      )}
       {canArchive && (
         <Button
           size="sm"
@@ -2020,7 +2188,7 @@ function BulkActionModal({
   onClose,
   onApply,
 }: {
-  field: Exclude<BulkField, 'assign' | 'archive'>;
+  field: Exclude<BulkField, 'assign' | 'archive' | 'cancel'>;
   count: number;
   submitting: boolean;
   onClose: () => void;
@@ -2030,7 +2198,7 @@ function BulkActionModal({
   const [confirmed, setConfirmed] = useState<boolean>(count <= 10);
   const needsConfirm = count > 10 && !confirmed;
 
-  const config: Record<Exclude<BulkField, 'assign' | 'archive'>, { title: string; label: string; options: { value: string; label: string }[] }> = {
+  const config: Record<Exclude<BulkField, 'assign' | 'archive' | 'cancel'>, { title: string; label: string; options: { value: string; label: string }[] }> = {
     priority: {
       title: 'Toplu — Öncelik Değiştir',
       label: 'Yeni öncelik',
@@ -2157,6 +2325,80 @@ function BulkArchiveModal({
             autoFocus
             rows={2}
             placeholder="Örn: Otomatik yanıt seli temizliği / mükerrer kayıtlar"
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
+          />
+          {!reasonOk && reason.length > 0 && (
+            <p className="mt-1 text-xs text-rose-600">En az 3 karakter gerekli.</p>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// Toplu iptal modalı (2026-07-10) — BulkArchiveModal ikizi. İptal TERMİNAL
+// bir statü geçişi (arşiv değil): vakalar "İptal Edildi"ye geçer, neden
+// geçmişe yazılır, SLA durur. Neden zorunlu (tekil iptal paritesi, min 3).
+// ">10 vaka" ek onay adımı — kitlesel iptalin geri dönüşü yok.
+function BulkCancelModal({
+  count,
+  submitting,
+  onClose,
+  onApply,
+}: {
+  count: number;
+  submitting: boolean;
+  onClose: () => void;
+  onApply: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState<string>('');
+  const [confirmed, setConfirmed] = useState<boolean>(count <= 10);
+  const reasonOk = reason.trim().length >= 3;
+  const needsConfirm = count > 10 && !confirmed;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Toplu — İptal Et"
+      size="lg"
+      centered
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} disabled={submitting}>
+            Vazgeç
+          </Button>
+          {needsConfirm ? (
+            <Button onClick={() => setConfirmed(true)}>Anladım, devam et</Button>
+          ) : (
+            <Button onClick={() => onApply(reason)} disabled={!reasonOk || submitting}>
+              {submitting ? 'İptal ediliyor…' : `${count} Vakayı İptal Et`}
+            </Button>
+          )}
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <div className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2.5 text-sm text-rose-900 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-200">
+          <div className="flex items-center gap-2 font-medium">
+            <XCircle size={14} />
+            <span><strong>{count}</strong> vaka "İptal Edildi"ye taşınacak</span>
+          </div>
+          <p className="mt-1 text-xs">
+            İptal edilen vakalar <strong>terminal</strong> statüye geçer (kapanır); SLA sayacı
+            durur, her vakanın geçmişine iptal nedeni yazılır. Gerekirse vaka tek tek yeniden açılabilir.
+          </p>
+        </div>
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-ndark-text">
+            İptal nedeni <span className="text-rose-600">*</span>
+          </label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            autoFocus
+            rows={2}
+            placeholder="Örn: Mükerrer kayıt / test vakası / müşteri talebi geri çekildi"
             className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
           />
           {!reasonOk && reason.length > 0 && (
@@ -2339,7 +2581,7 @@ function KpiTile({
 }) {
   const t = KPI_TONE[tone];
   const baseClass = cn(
-    'flex items-center gap-3 rounded-xl bg-white p-3 text-left ring-1 ring-slate-200 shadow-card',
+    'flex items-center gap-2 rounded-xl bg-white p-2.5 text-left ring-1 ring-slate-200 shadow-card',
     'dark:bg-ndark-card dark:ring-ndark-border',
     extraClassName,
   );
@@ -2351,17 +2593,17 @@ function KpiTile({
     : '';
   const inner = (
     <>
-      <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', t.iconBg)}>
+      <div className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-lg', t.iconBg)}>
         {icon}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+        <div className="truncate text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
           {label}
         </div>
         <div className="flex items-baseline gap-1.5">
           <span
             className={cn(
-              'text-xl font-semibold tabular-nums',
+              'text-lg font-semibold tabular-nums',
               value === 0 ? 'text-slate-400 dark:text-ndark-muted' : t.valueColor,
             )}
           >
@@ -2395,11 +2637,19 @@ function KpiTile({
 function SlaPill({
   slaViolation,
   slaPausedAt,
+  slaCustomerWaitStartedAt,
   slaResolutionDueAt,
+  slaResolutionRemainingMin,
+  slaBusinessTime,
+  slaDayMinutes,
 }: {
   slaViolation: boolean;
   slaPausedAt?: string;
+  slaCustomerWaitStartedAt?: string | null;
   slaResolutionDueAt?: string;
+  slaResolutionRemainingMin?: number | null;
+  slaBusinessTime?: boolean;
+  slaDayMinutes?: number;
 }) {
   if (slaViolation) {
     return <Badge tint="rose"><span className="font-bold">İhlal</span></Badge>;
@@ -2407,12 +2657,22 @@ function SlaPill({
   if (slaPausedAt) {
     return <Badge tint="slate">Duraklatıldı</Badge>;
   }
+  if (slaCustomerWaitStartedAt) {
+    // Faz 3b — müşteri-bekleme duraklaması (toggle açık şirketlerde)
+    return <Badge tint="slate">Duraklatıldı · müşteri</Badge>;
+  }
   if (!slaResolutionDueAt) {
     return <span className="text-xs text-slate-400 dark:text-ndark-muted">—</span>;
   }
-  const remainingMs = new Date(slaResolutionDueAt).getTime() - Date.now();
-  if (remainingMs > 0 && remainingMs <= 2 * 60 * 60 * 1000) {
-    return <Badge tint="amber">{formatRelative(slaResolutionDueAt)}</Badge>;
+  // Faz 4 — kalan süre BE-hesaplı (takvimli şirkette İŞ-dk); eski payload'da duvar fallback
+  const remainingMin = slaResolutionRemainingMin
+    ?? Math.round((new Date(slaResolutionDueAt).getTime() - Date.now()) / 60000);
+  if (remainingMin > 0 && remainingMin <= 120) {
+    return (
+      <Badge tint="amber">
+        {formatSlaRemaining(remainingMin, slaBusinessTime, slaDayMinutes) ?? formatRelative(slaResolutionDueAt)}
+      </Badge>
+    );
   }
   // Normal aralık — sade dash, pill yok. Sortable kaldı: BE remaining hesaplıyor.
   return <span className="text-xs text-slate-400 dark:text-ndark-muted">—</span>;
