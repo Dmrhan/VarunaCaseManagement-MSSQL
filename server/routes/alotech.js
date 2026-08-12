@@ -4,6 +4,7 @@ import { getSessionKey, getCachedSession } from '../integrations/alotech/session
 import { click2Call } from '../integrations/alotech/click2.js';
 import { v1Fetch } from '../integrations/alotech/v1.js';
 import { isAlotechConfigured, logAlotechConfigOnce } from '../integrations/alotech/config.js';
+import { report as callLogReport } from '../db/callLogRepository.js';
 
 // Boot anında BİR KEZ log (eksik env varsa); route handler'ı tarafından
 // (lazy) ilk istekte tetiklenir → server.js'ye dokunmadan tek yerde durur.
@@ -226,6 +227,27 @@ router.post('/hangup', async (req, res) => {
   } catch (err) {
     console.error('[alotech:hangup]', err);
     res.status(502).json({ error: 'hangup_failed', message: err?.message ?? 'Çağrı sonlandırılamadı.' });
+  }
+});
+
+/**
+ * GET /call-report — çağrı-merkezi raporu (müşteri × ticket × agent × süre).
+ * Kaynak: CallLog (webhook'tan). companyId = ALOTECH_COMPANY_ID (tek tenant);
+ * kullanıcı o şirkette olmalı (allowedCompanyIds guard).
+ * Query: from, to (ISO), accountId?, agentEmail?, direction?
+ */
+router.get('/call-report', async (req, res) => {
+  try {
+    const cid = process.env.ALOTECH_COMPANY_ID || null;
+    if (!cid) return res.status(503).json({ error: 'company_not_configured', message: 'ALOTECH_COMPANY_ID tanımlı değil.' });
+    const allowed = req.user?.allowedCompanyIds;
+    if (Array.isArray(allowed) && !allowed.includes(cid)) return res.status(403).json({ error: 'forbidden' });
+    const { from, to, accountId, agentEmail, direction } = req.query || {};
+    const result = await callLogReport({ companyId: cid, from, to, accountId, agentEmail, direction });
+    res.json(result);
+  } catch (err) {
+    console.error('[alotech:call-report]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Rapor alınamadı.' });
   }
 });
 

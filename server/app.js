@@ -19,6 +19,7 @@ import kbV1Router from './routes/kbV1.js';
 import reportsRouter from './routes/reports.js';
 import reportViewsRouter from './routes/reportViews.js';
 import alotechRouter from './routes/alotech.js';
+import alotechWebhookRouter from './routes/alotechWebhook.js';
 import { prisma } from './db/client.js';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -111,6 +112,9 @@ app.use('/api/v1', kbV1Router);
 app.use('/api/reports/views', reportViewsRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/integrations/alotech', alotechRouter);
+// AloTech GELEN ÇAĞRI webhook'ları — PUBLIC (server-to-server), shared-secret ile
+// korunur; JWT'li /api/integrations/alotech'ten AYRIDIR. Çağrıyı yakalar → CallLog.
+app.use('/api/alotech', alotechWebhookRouter);
 
 // API 404 — bilinmeyen /api/* yolları JSON döner (SPA fallback'ine düşmesin).
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
