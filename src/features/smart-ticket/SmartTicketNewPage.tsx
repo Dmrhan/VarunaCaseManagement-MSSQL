@@ -392,11 +392,18 @@ export function SmartTicketNewPage({
         .filter((p) => p.isActive && p.status === 'Active')
         .map((p) => ({ id: p.id, name: p.name, code: p.code }));
       setProjects(list);
-      setForm((f) =>
-        f.accountProjectId && !list.some((p) => p.id === f.accountProjectId)
-          ? { ...f, accountProjectId: '', accountProjectName: '' }
-          : f,
-      );
+      setForm((f) => {
+        // Seçili proje artık listede yoksa temizle.
+        if (f.accountProjectId && !list.some((p) => p.id === f.accountProjectId)) {
+          return { ...f, accountProjectId: '', accountProjectName: '' };
+        }
+        // Faz 2 — müşterinin TEK aktif projesi varsa oto-seç: gelen çağrıda
+        // (şifreden müşteri çözülünce) proje de hazır gelir. Çok-projelide boş.
+        if (!f.accountProjectId && projectsEnabled && list.length === 1) {
+          return { ...f, accountProjectId: list[0].id, accountProjectName: list[0].name };
+        }
+        return f;
+      });
     });
     return () => {
       alive = false;

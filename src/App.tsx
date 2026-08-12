@@ -92,6 +92,7 @@ import { canReadAccounts } from './services/accountService';
 import { authorizationService } from './services/authorizationService';
 import type { EffectiveMenuAccess } from './services/authorizationService';
 import { SmartTicketNewPage } from './features/smart-ticket/SmartTicketNewPage';
+import { linkCall as alotechLinkCall } from './services/softphoneService';
 import { accountService } from './services/accountService';
 import { SOFTPHONE_ANSWERED_EVENT, SOFTPHONE_INCOMING_EVENT, useSoftphone } from './contexts/SoftphoneContext';
 import { CaseTaggingReviewPage } from './features/analytics/CaseTaggingReviewPage';
@@ -126,6 +127,9 @@ export default function App() {
   const [accountDetailOrigin, setAccountDetailOrigin] = useState<View>('accounts');
   // Gelen çağrı screen pop'u: yanıtlanınca müşteri ön-seçili Akıllı Ticket için.
   const [smartTicketAccount, setSmartTicketAccount] = useState<{ id: string; name: string } | null>(null);
+  // Faz 2 — oto-pop'u tetikleyen çağrının CallLog anahtarı; ticket oluşturulunca
+  // linkCall ile CallLog.caseId'ye bağlanır (hangi çağrı → hangi ticket).
+  const [smartTicketCallId, setSmartTicketCallId] = useState<string | null>(null);
   const [customerCardId, setCustomerCardId] = useState<string | null>(null);
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const [pendingQuickPrefill, setPendingQuickPrefill] = useState<string | null>(null);
@@ -161,26 +165,38 @@ export default function App() {
   // banner'daki "Vaka Aç" ile de tetikler. Aynı çağrı için tek sefer (dedup).
   const lastPoppedCallerRef = useRef<string | null>(null);
   useEffect(() => {
-    const popTicket = (callerId?: string) => {
-      if (!callerId || callerId === 'Bilinmeyen') return;
-      if (lastPoppedCallerRef.current === callerId) return;
-      lastPoppedCallerRef.current = callerId;
+    type PopDetail = { number?: string; matchedAccountId?: string | null; matchedAccountName?: string | null; callLogKey?: string | null };
+    const popTicket = (detail?: PopDetail) => {
+      const callerId = detail?.number;
+      // Dedup anahtarı: callLogKey (çağrı bazlı) varsa o, yoksa callerId.
+      const dedupKey = detail?.callLogKey || callerId || null;
+      // callerId yoksa BİLE, webhook şifresinden çözülen müşteri varsa aç.
+      if ((!callerId || callerId === 'Bilinmeyen') && !detail?.matchedAccountId) return;
+      if (dedupKey && lastPoppedCallerRef.current === dedupKey) return;
+      lastPoppedCallerRef.current = dedupKey;
       void (async () => {
         let acc: { id: string; name: string } | null = null;
-        try {
-          const res = await accountService.list({ search: callerId, limit: 1 });
-          const a = res?.accounts?.[0];
-          if (a) acc = { id: a.id, name: a.name };
-        } catch { /* eşleşme yoksa müşterisiz aç */ }
+        if (detail?.matchedAccountId) {
+          // 1) Webhook şifresinden çözülen müşteri (kesin) — doğrudan kullan.
+          acc = { id: detail.matchedAccountId, name: detail.matchedAccountName || '' };
+        } else if (callerId && callerId !== 'Bilinmeyen') {
+          // 2) Fallback: callerId ile arama (mevcut davranış).
+          try {
+            const res = await accountService.list({ search: callerId, limit: 1 });
+            const a = res?.accounts?.[0];
+            if (a) acc = { id: a.id, name: a.name };
+          } catch { /* eşleşme yoksa müşterisiz aç */ }
+        }
         setSmartTicketAccount(acc);
+        setSmartTicketCallId(detail?.callLogKey ?? null); // ticket açılınca linkCall için
         setView('smart-ticket-new');
       })();
     };
     const onIncoming = (e: Event) => {
-      const d = (e as CustomEvent).detail;
-      if (d?.inbound) popTicket(d?.number as string | undefined); // yalnız gelen (inbound) çağrı
+      const d = (e as CustomEvent).detail as PopDetail & { inbound?: boolean };
+      if (d?.inbound) popTicket(d); // yalnız gelen (inbound) çağrı
     };
-    const onAnswered = (e: Event) => popTicket((e as CustomEvent).detail?.number as string | undefined);
+    const onAnswered = (e: Event) => popTicket((e as CustomEvent).detail as PopDetail);
     window.addEventListener(SOFTPHONE_INCOMING_EVENT, onIncoming);
     window.addEventListener(SOFTPHONE_ANSWERED_EVENT, onAnswered);
     return () => {
@@ -1096,8 +1112,12 @@ export default function App() {
             <SmartTicketNewPage
               initialAccountId={smartTicketAccount?.id ?? null}
               initialAccountName={smartTicketAccount?.name ?? null}
-              onCancel={() => { setView('cases'); setSmartTicketAccount(null); }}
-              onCreated={(caseId) => { setSmartTicketAccount(null); openCase(caseId); }}
+              onCancel={() => { setView('cases'); setSmartTicketAccount(null); setSmartTicketCallId(null); }}
+              onCreated={(caseId) => {
+                // Faz 2 — oto-pop çağrısı varsa çağrı↔ticket bağını kur (best-effort).
+                if (smartTicketCallId) void alotechLinkCall(smartTicketCallId, caseId);
+                setSmartTicketAccount(null); setSmartTicketCallId(null); openCase(caseId);
+              }}
               onOpenExistingCase={(caseId) => openCase(caseId)}
             />
           )}

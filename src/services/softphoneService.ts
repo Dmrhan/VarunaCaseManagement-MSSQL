@@ -154,6 +154,12 @@ export interface ActiveCallInfo {
   status: string; // ringing | talking | ...
   callDate: string;
   key: string;
+  // Faz 2 — backend /active-call enrichment (CallLog join): gelen çağrı webhook'unun
+  // yakaladığı müşteri şifresi + çözülen müşteri + link-call anahtarı.
+  customerPassword?: string | null;
+  matchedAccountId?: string | null;
+  matchedAccountName?: string | null;
+  callLogKey?: string | null;
 }
 
 /** Agent'ın o anki aktif/çalan çağrıları + gerçek müsaitlik durumu (polling). */
@@ -170,6 +176,19 @@ export async function hangupCall(): Promise<{ ok: boolean } | undefined> {
     headers: { 'Content-Type': 'application/json', ...alotechHeaders() },
     body: '{}',
   }, 'Çağrıyı kapatma');
+}
+
+/**
+ * Faz 2 — çağrı ↔ ticket bağı (CallLog.caseId = caseId). Oto-pop'tan gelen callId
+ * ile ticket oluşturulunca çağrılır; "hangi çağrı hangi ticket" raporu için.
+ */
+export async function linkCall(callId: string, caseId: string): Promise<{ ok: boolean } | undefined> {
+  if (!callId || !caseId) return undefined;
+  return apiFetch('/api/integrations/alotech/link-call', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...alotechHeaders() },
+    body: JSON.stringify({ callId, caseId }),
+  }, 'Çağrı-ticket bağlama');
 }
 
 /** Backend'den giriş yapan kullanıcının AloTech session key'ini alır. */

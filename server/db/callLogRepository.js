@@ -83,6 +83,25 @@ export async function findByCallIds(companyId, callIds) {
 }
 
 /**
+ * Faz 2 — /active-call pop zenginleştirme: callId → {customerPassword,
+ * matchedAccountId, matchedAccountName}. Müşteri adı app-level join (izole tasarım).
+ * Best-effort: hata olsa /active-call callerId ile yine çalışır.
+ */
+export async function resolveActiveCallContext(companyId, callIds) {
+  const base = await findByCallIds(companyId, callIds);
+  const accIds = [...new Set([...base.values()].map((v) => v.matchedAccountId).filter(Boolean))];
+  const accs = accIds.length
+    ? await prisma.account.findMany({ where: { id: { in: accIds } }, select: { id: true, name: true } })
+    : [];
+  const accMap = new Map(accs.map((a) => [a.id, a.name]));
+  const out = new Map();
+  for (const [callId, v] of base) {
+    out.set(callId, { ...v, matchedAccountName: v.matchedAccountId ? (accMap.get(v.matchedAccountId) ?? null) : null });
+  }
+  return out;
+}
+
+/**
  * Çağrı-merkezi raporu — müşteri × ticket × agent × süre.
  * Ham satırlar + özet döner; Account/Case adları app-level join ile eklenir.
  */
