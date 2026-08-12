@@ -1572,6 +1572,11 @@ model Case {
   packageId   String? @db.NVarChar(450)
   packageName String? @db.NVarChar(Max)
 
+  /// Serbest metin sürüm bilgisi. Açılışta zorunlu değil; yalnız
+  /// COMP-UNIVERA'da Çözüldü'ye geçişten önce zorunlu (bkz. transitionStatus
+  /// kapanış kapısı). Diğer tenant'ları etkilemez.
+  productVersion String? @db.NVarChar(50)
+
   // Atama (FK + denormalized name)
   assignedTeamId     String? @db.NVarChar(450)
   assignedTeamName   String? @db.NVarChar(Max)

@@ -290,6 +290,7 @@ export const CASE_FIELD_LABELS: Record<string, string> = {
   subCategory:          'Alt Kategori',
   requestType:          'Talep Türü',
   productGroup:         'Ürün Grubu',
+  productVersion:       'Versiyon No',
 
   // FK / atama
   companyId:            'Şirket',
@@ -385,6 +386,7 @@ export type EditableCaseField =
   | 'description'
   | 'requestType'
   | 'productGroup'
+  | 'productVersion'
   | 'origin'
   | 'originDescription'
   | 'category'
@@ -458,6 +460,13 @@ export interface Case {
   productName?: string;
   packageId?: string;
   packageName?: string;
+
+  /**
+   * Serbest metin sürüm bilgisi. Açılışta zorunlu değil; yalnız
+   * COMP-UNIVERA'da Çözüldü'ye geçişten önce backend zorunlu kılar
+   * (product_version_required_for_closure).
+   */
+  productVersion?: string | null;
 
   assignedTeamId?: string;
   assignedTeamName?: string;

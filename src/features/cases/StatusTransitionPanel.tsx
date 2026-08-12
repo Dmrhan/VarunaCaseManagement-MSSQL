@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Field, Select } from '@/components/ui/Field';
+import { Field, Select, TextInput } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { RunaAiCard } from '@/components/ui/RunaAiCard';
@@ -342,6 +342,30 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
       if (updated) setProductGroupSet(productGroupDraft);
     } finally {
       setProductGroupSaving(false);
+    }
+  }
+  // Versiyon No kapısı — ürün grubu kapısıyla aynı desen, ama YALNIZ
+  // COMP-UNIVERA (backend transitionStatus guard'ı da yalnız bu tenant'ta
+  // çalışır — bkz. product_version_required_for_closure). Serbest metin,
+  // catalog fetch gerekmiyor.
+  const [productVersionSet, setProductVersionSet] = useState<string | null>(null);
+  const [productVersionDraft, setProductVersionDraft] = useState('');
+  const [productVersionSaving, setProductVersionSaving] = useState(false);
+  const productVersionGateActive =
+    pending === 'Çözüldü' &&
+    item.companyId === 'COMP-UNIVERA' &&
+    !item.productVersion &&
+    !productVersionSet &&
+    user?.role !== 'SystemAdmin';
+  async function handleSaveProductVersion() {
+    const trimmed = productVersionDraft.trim();
+    if (!trimmed) return;
+    setProductVersionSaving(true);
+    try {
+      const updated = await caseService.update(item.id, { productVersion: trimmed });
+      if (updated) setProductVersionSet(trimmed);
+    } finally {
+      setProductVersionSaving(false);
     }
   }
   const [thirdPartyId, setThirdPartyId] = useState('');
@@ -692,6 +716,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     if (!pending) return true;
     if (customerGateActive) return true; // müşterisiz Çözüldü engeli (SystemAdmin muaf)
     if (productGroupGateActive) return true; // ürün grubu boşken Çözüldü engeli (SystemAdmin muaf)
+    if (productVersionGateActive) return true; // Versiyon No boşken Çözüldü engeli — yalnız COMP-UNIVERA (SystemAdmin muaf)
     if (projectGateActive) return true; // aktif proje varken projesiz Çözüldü engeli (SystemAdmin muaf)
     if (pending === 'Çözüldü' && !resolutionNote.trim()) return true;
     if (pending === 'Çözüldü' && requiredChecklistPending.length > 0) return true;
@@ -1004,6 +1029,38 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
               {productGroupSet && (
                 <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200">
                   ✓ Ürün grubu kaydedildi: <strong>{productGroupSet}</strong> — artık çözebilirsin.
+                </div>
+              )}
+              {/* Versiyon No kapısı — yalnız COMP-UNIVERA. Serbest metin,
+                  ürün grubu kapısıyla aynı uyarı + inline kaydet deseni. */}
+              {productVersionGateActive && (
+                <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/40">
+                  <div className="flex items-start gap-2 text-sm font-medium text-amber-900 dark:text-amber-200">
+                    <span>⚠️</span>
+                    <span>Versiyon No girilmedi — bu vaka Versiyon No belirtilmeden çözülemez.</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <TextInput
+                      value={productVersionDraft}
+                      onChange={(e) => setProductVersionDraft(e.target.value)}
+                      placeholder="örn. 3.2.1"
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleSaveProductVersion()}
+                      disabled={!productVersionDraft.trim() || productVersionSaving}
+                      leftIcon={productVersionSaving ? <Loader2 size={12} className="animate-spin" /> : undefined}
+                    >
+                      Kaydet
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {productVersionSet && (
+                <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200">
+                  ✓ Versiyon No kaydedildi: <strong>{productVersionSet}</strong> — artık çözebilirsin.
                 </div>
               )}
               {/* Proje kapısı — WR-Proje-Kapanış. Ürün grubu kapısıyla aynı
