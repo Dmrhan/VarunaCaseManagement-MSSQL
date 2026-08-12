@@ -73,6 +73,7 @@ export const REPORT_COLUMNS = [
   { id: 'requestType',  label: 'Talep Türü',   category: 'classification', type: 'string', source: 'scalar', prismaField: 'requestType', format: 'caseRequestType' },
   { id: 'productName',  label: 'Ürün',         category: 'classification', type: 'string', source: 'scalar', prismaField: 'productName' },
   { id: 'packageName',  label: 'Paket',        category: 'classification', type: 'string', source: 'scalar', prismaField: 'packageName' },
+  { id: 'productVersion', label: 'Versiyon No', category: 'classification', type: 'string', source: 'scalar', prismaField: 'productVersion' },
 
   // ── Atama ────────────────────────────────────────────────────────
   { id: 'assignedTeamName',   label: 'Atanan Takım', category: 'assignment', type: 'string', source: 'scalar', prismaField: 'assignedTeamName' },

@@ -4613,6 +4613,22 @@ export const caseRepository = {
       );
     }
 
+    // Versiyon No zorunluluğu (kapanış kapısı) — yalnız COMP-UNIVERA.
+    // Karar: yalnız Cozuldu (IptalEdildi muaf — diğer kapanış kapılarıyla
+    // aynı gerekçe); SystemAdmin istisna. Diğer tenant'ları etkilemez.
+    if (
+      dbNext === 'Cozuldu' &&
+      prev.status !== 'Cozuldu' &&
+      prev.companyId === 'COMP-UNIVERA' &&
+      !prev.productVersion &&
+      actorObject?.role !== 'SystemAdmin'
+    ) {
+      throw new CaseValidationError(
+        'Vaka Versiyon No belirtilmeden çözülemez. Lütfen önce versiyon numarasını girin.',
+        { status: 400, code: 'product_version_required_for_closure' },
+      );
+    }
+
     // Açılış etiketleri zorunluluğu (kapanış kapısı) — TÜM Univera vakalarında
     // (müşteri/proje eşleşmiş olsun olmasın): platform/businessProcess/
     // operationType/affectedObject/impact taksonomi alanlarının kaydın
