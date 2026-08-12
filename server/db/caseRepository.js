@@ -5600,14 +5600,23 @@ export const caseRepository = {
    * Mutation idempotent: zaten snoozeUntil null olanlar where'de eşleşmez.
    * Bildirim tetikleme şu aşamada uygulama-içi log; Faz 2 §6 bildirim sistemi
    * canlı olunca CaseNotification kaydı buradan üretilir.
+   *
+   * Perf — üst sınırsız fetch riski: aynı saate çok sayıda vaka snooze
+   * edilirse (örn. "Pazartesi 09:00" toplu deseni), bu cron turu vaka
+   * başına sıralı update+history yazdığı için uzayabilir. SNOOZE_WAKEUP_BATCH_CAP
+   * ile bir turda işlenecek kayıt sınırlanır; kalan kayıtlar bir sonraki
+   * 5 dk'lık turda işlenir — veri kaybı yok, sadece uyanma gecikmesi.
    */
   async processSnoozeWakeups() {
+    const SNOOZE_WAKEUP_BATCH_CAP = 200;
     const due = await prisma.case.findMany({
       where: {
         snoozeUntil: { lte: new Date() },
         NOT: { snoozeUntil: null },
       },
       select: { id: true, companyId: true, status: true, snoozeReason: true, snoozePreviousStatus: true },
+      orderBy: { snoozeUntil: 'asc' },
+      take: SNOOZE_WAKEUP_BATCH_CAP,
     });
     if (due.length === 0) return { woken: 0, ids: [] };
 
