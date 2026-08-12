@@ -5649,7 +5649,19 @@ export const caseRepository = {
     if (options.statusNotIn) {
       where.status = { ...(where.status ?? {}), notIn: mapStatuses(options.statusNotIn) };
     }
-    const items = await prisma.case.findMany({ where: mergeSecurityWhere(where, securityWhere), include: CASE_INCLUDE });
+    // Perf — üst sınırsız fetch riski: bazı ana firmalarda yüzlerce vaka var;
+    // CASE_INCLUDE (notlar/dosyalar/geçmiş/aramalar dahil) hepsini tek
+    // seferde çekmek tek sorguda ağır payload/latency yaratabilir. En yeni
+    // FIND_BY_ACCOUNT_CAP kayıt ile sınırlanır — tüketiciler (Müşterinin
+    // Diğer Vakaları paneli, Customer 360 kartı vb.) zaten "son N vaka"
+    // beklentisiyle çalışıyor, eksiksiz arşiv taraması değil.
+    const FIND_BY_ACCOUNT_CAP = 300;
+    const items = await prisma.case.findMany({
+      where: mergeSecurityWhere(where, securityWhere),
+      include: CASE_INCLUDE,
+      orderBy: { createdAt: 'desc' },
+      take: FIND_BY_ACCOUNT_CAP,
+    });
     return items.map(shape);
   },
 
