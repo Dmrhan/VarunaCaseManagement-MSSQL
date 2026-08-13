@@ -31,13 +31,18 @@ function safeSecretEq(a, b) {
   return timingSafeEqual(ha, hb);
 }
 
-// Header (x-alotech-secret / authorization: Bearer) VEYA param (secret/token) kabul et.
+// Secret'ı ÖNCE query/body param'dan (secret/token) al — bu integration'a özel.
+// AloTech'in "Yetkilendirme" sekmesi bir Bearer token eklese bile (dinamik token
+// vb.) query'deki secret'ı EZMESİN; aksi halde header/Bearer varken query hiç
+// okunmuyordu (401'in kaynağı buydu). Sonra header, en son Authorization: Bearer.
 function extractSecret(req) {
+  const q = pick(req, ['secret', 'token', 'Secret', 'Token']);
+  if (q) return q.trim();
   const h = req.get('x-alotech-secret') || req.get('x-webhook-secret');
   if (h) return h.trim();
   const auth = req.get('authorization');
   if (auth && /^bearer\s+/i.test(auth)) return auth.replace(/^bearer\s+/i, '').trim();
-  return (pick(req, ['secret', 'token', 'Secret', 'Token']) || '').trim();
+  return '';
 }
 
 // Body VEYA query'den ilk dolu alias'ı seç (AloTech param'ı query ya da body'de olabilir).
