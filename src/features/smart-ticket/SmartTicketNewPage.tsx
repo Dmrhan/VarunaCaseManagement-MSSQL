@@ -173,6 +173,9 @@ interface ClosureFormState {
   resolutionType: string;
   permanentPrevention: string;
   resolutionNote: string;
+  /** COMP-UNIVERA'da Çözüldü'ye geçmeden önce zorunlu (backend transitionStatus
+   * guard'ı, product_version_required_for_closure). */
+  productVersion: string;
 }
 
 const emptyForm = (companyId: string): SmartTicketFormState => ({
@@ -202,6 +205,7 @@ const emptyClosure = (): ClosureFormState => ({
   resolutionType: '',
   permanentPrevention: '',
   resolutionNote: '',
+  productVersion: '',
 });
 
 export function SmartTicketNewPage({
@@ -1519,6 +1523,14 @@ export function SmartTicketNewPage({
       );
       return;
     }
+    // Versiyon No — yalnız COMP-UNIVERA, backend transitionStatus guard'ının
+    // (product_version_required_for_closure) aynası. SystemAdmin muaf.
+    const requiresProductVersion =
+      createdCase.companyId === 'COMP-UNIVERA' && user?.role !== 'SystemAdmin';
+    if (requiresProductVersion && !closure.productVersion.trim()) {
+      setClosureError('Versiyon No zorunlu.');
+      return;
+    }
     setClosing(true);
     setClosureError(null);
 
@@ -1573,6 +1585,13 @@ export function SmartTicketNewPage({
     }
 
     try {
+      // Versiyon No — transitionStatus'un genel payload'ında productVersion
+      // yok; StatusTransitionPanel'deki handleSaveProductVersion ile aynı
+      // desen: ayrı bir update(), transitionStatus'tan ÖNCE, ki guard
+      // prev.productVersion'ı dolu bulsun.
+      if (requiresProductVersion && closure.productVersion.trim()) {
+        await caseService.update(createdCase.id, { productVersion: closure.productVersion.trim() });
+      }
       const updated = await caseService.transitionStatus(createdCase.id, 'Çözüldü', {
         resolutionNote: closure.resolutionNote.trim(),
         smartTicketClosure: closurePayload,
@@ -2082,6 +2101,7 @@ export function SmartTicketNewPage({
           {stage === 'closure' && createdCase && (
             <Stage3Closure
               createdCase={createdCase}
+              isSystemAdmin={user?.role === 'SystemAdmin'}
               closure={closure}
               setClosure={setClosure}
               closureLists={closureLists}
@@ -2360,6 +2380,7 @@ interface ClosureListsRef {
 
 function Stage3Closure({
   createdCase,
+  isSystemAdmin,
   closure,
   setClosure,
   closureLists,
@@ -2381,6 +2402,7 @@ function Stage3Closure({
   onItemUpdated,
 }: {
   createdCase: Case;
+  isSystemAdmin: boolean;
   closure: ClosureFormState;
   setClosure: (fn: (c: ClosureFormState) => ClosureFormState) => void;
   closureLists: ClosureListsRef;
@@ -2482,6 +2504,15 @@ function Stage3Closure({
             placeholder="Sorun nasıl çözüldü? Müşteriye ne anlatıldı?"
           />
         </Field>
+        {createdCase.companyId === 'COMP-UNIVERA' && !isSystemAdmin && (
+          <Field label="Versiyon No" required hint="Bu vaka Versiyon No girilmeden çözülemez.">
+            <TextInput
+              value={closure.productVersion}
+              onChange={(e) => setClosure((c) => ({ ...c, productVersion: e.target.value }))}
+              placeholder="örn. 3.2.1"
+            />
+          </Field>
+        )}
         {closureSuggesting && !closureSuggestion && (
           <div className="flex items-center gap-2 rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 text-xs text-violet-800 dark:border-violet-900/40 dark:bg-violet-950/30 dark:text-violet-200">
             <Loader2 size={12} className="animate-spin" />
