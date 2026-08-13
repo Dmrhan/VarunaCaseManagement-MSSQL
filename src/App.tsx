@@ -1347,6 +1347,7 @@ export default function App() {
               initialAccountId={smartTicketAccount?.id ?? null}
               initialAccountName={smartTicketAccount?.name ?? null}
               autoPickSingleProject={smartTicketFromCall}
+              fromCall={smartTicketFromCall}
               onCancel={() => { setView('cases'); setSmartTicketAccount(null); setSmartTicketCallId(null); setSmartTicketFromCall(false); }}
               onCreated={(caseId) => {
                 // Faz 2 — oto-pop çağrısı varsa çağrı↔ticket bağını kur (best-effort).
