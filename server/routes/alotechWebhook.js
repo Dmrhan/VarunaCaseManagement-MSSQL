@@ -1,8 +1,11 @@
 /**
  * AloTech GELEN ÇAĞRI WEBHOOK'ları — /api/alotech (PUBLIC, server-to-server).
  *
- * AloTech "Web-URL" webhook'u çağrı olayında buraya POST atar (next4biz'in
- * santralapicanli.univera.com.tr/IncomingCallStart karşılığı). Kullanıcı JWT'si
+ * AloTech "Web-URL" webhook'u çağrı olayında buraya istek atar (next4biz'in
+ * CustomerEntry.aspx karşılığı) — GET ve POST birlikte kabul edilir. AloTech'in
+ * auto-fire'ı gövdesiz olabildiğinden GET, IIS reverse-proxy'nin gövdesiz-POST
+ * 411'ini atlar; secret query param (secret/token) ile de verilebilir → özel
+ * header gerekmez (next4biz gibi). Kullanıcı JWT'si
  * TAŞIMAZ → verifyJwt YOK; bunun yerine SHARED-SECRET ile doğrulanır
  * (ALOTECH_WEBHOOK_SECRET). Bu router /api/integrations/alotech'ten (JWT'li)
  * AYRIDIR ve app.js'de ONDAN ÖNCE, auth'suz mount edilir.
@@ -28,13 +31,18 @@ function safeSecretEq(a, b) {
   return timingSafeEqual(ha, hb);
 }
 
-// Header (x-alotech-secret / authorization: Bearer) VEYA param (secret/token) kabul et.
+// Secret'ı ÖNCE query/body param'dan (secret/token) al — bu integration'a özel.
+// AloTech'in "Yetkilendirme" sekmesi bir Bearer token eklese bile (dinamik token
+// vb.) query'deki secret'ı EZMESİN; aksi halde header/Bearer varken query hiç
+// okunmuyordu (401'in kaynağı buydu). Sonra header, en son Authorization: Bearer.
 function extractSecret(req) {
+  const q = pick(req, ['secret', 'token', 'Secret', 'Token']);
+  if (q) return q.trim();
   const h = req.get('x-alotech-secret') || req.get('x-webhook-secret');
   if (h) return h.trim();
   const auth = req.get('authorization');
   if (auth && /^bearer\s+/i.test(auth)) return auth.replace(/^bearer\s+/i, '').trim();
-  return (pick(req, ['secret', 'token', 'Secret', 'Token']) || '').trim();
+  return '';
 }
 
 // Body VEYA query'den ilk dolu alias'ı seç (AloTech param'ı query ya da body'de olabilir).
@@ -56,14 +64,21 @@ router.use((req, res, next) => {
 });
 
 function companyId() { return process.env.ALOTECH_COMPANY_ID || null; }
-const maskRaw = (req) => { try { return JSON.stringify({ q: req.query, b: req.body }).slice(0, 4000); } catch { return null; } };
+// Secret query'den de gelebildiği için raw log'da maskele (CallLog.raw'a sızmasın).
+const SECRET_KEYS = new Set(['secret', 'token', 'Secret', 'Token']);
+const maskRaw = (req) => {
+  try {
+    const strip = (o) => { const c = { ...(o || {}) }; for (const k of Object.keys(c)) if (SECRET_KEYS.has(k)) c[k] = '***'; return c; };
+    return JSON.stringify({ q: strip(req.query), b: strip(req.body) }).slice(0, 4000);
+  } catch { return null; }
+};
 
 /**
  * POST /api/alotech/incoming-call-start
  * AloTech makroları (alias'lı): CustomerPassword, call_callerid|MobilePhoneNumber,
  * call_activecallkey|CallID, call_agent_email|AgentID, queue.
  */
-router.post('/incoming-call-start', async (req, res) => {
+async function handleCallStart(req, res) {
   try {
     const cid = companyId();
     if (!cid) return res.status(503).json({ ok: false, error: 'company_not_configured' });
@@ -87,13 +102,18 @@ router.post('/incoming-call-start', async (req, res) => {
     console.error('[alotech:webhook:start]', err?.message || err);
     return res.status(500).json({ ok: false, error: 'internal' });
   }
-});
+}
+// GET + POST birlikte kayıtlı. AloTech Web-URL auto-fire'ı gövdesiz olabildiğinden
+// GET, IIS'in gövdesiz-POST 411'ini atlar; secret query'den de kabul edilir (özel
+// header yok → LocalProtocolError yok). next4biz CustomerEntry.aspx tarzı drop-in.
+router.get('/incoming-call-start', handleCallStart);
+router.post('/incoming-call-start', handleCallStart);
 
 /**
  * POST /api/alotech/incoming-call-end
  * call_activecallkey|CallID + call_duration|call_talkduration (saniye) + answeredAt?.
  */
-router.post('/incoming-call-end', async (req, res) => {
+async function handleCallEnd(req, res) {
   try {
     const cid = companyId();
     if (!cid) return res.status(503).json({ ok: false, error: 'company_not_configured' });
@@ -115,6 +135,8 @@ router.post('/incoming-call-end', async (req, res) => {
     console.error('[alotech:webhook:end]', err?.message || err);
     return res.status(500).json({ ok: false, error: 'internal' });
   }
-});
+}
+router.get('/incoming-call-end', handleCallEnd);
+router.post('/incoming-call-end', handleCallEnd);
 
 export default router;
