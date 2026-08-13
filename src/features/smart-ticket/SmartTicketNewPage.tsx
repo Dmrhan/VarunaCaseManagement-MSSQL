@@ -211,6 +211,7 @@ export function SmartTicketNewPage({
   initialAccountId,
   initialAccountName,
   autoPickSingleProject = false,
+  fromCall = false,
 }: {
   /**
    * Kullanıcı bilinçli olarak Case Detail'e gitmek isterse caller bunu
@@ -235,6 +236,11 @@ export function SmartTicketNewPage({
    * (proje elle seçilir) hiç değişmez.
    */
   autoPickSingleProject?: boolean;
+  /**
+   * Gelen çağrıdan açıldıysa oluşan vakanın origin'i 'Telefon' olur (aksi 'Web').
+   * Çağrı-merkezi raporlamasında kanal doğru görünsün diye. YALNIZ çağrıda true.
+   */
+  fromCall?: boolean;
 }) {
   const companies = useMemo(() => lookupService.companies(), []);
   const defaultCompanyId = companies[0]?.id ?? '';
@@ -936,7 +942,7 @@ export function SmartTicketNewPage({
         description: form.description.trim(),
         caseType: 'GeneralSupport',
         priority: finalPriority,
-        origin: 'Web',
+        origin: fromCall ? 'Telefon' : 'Web',
         companyId: form.companyId,
         companyName: selectedCompanyName(),
         accountId: form.accountId,
