@@ -155,9 +155,13 @@ export default function App() {
   const [accountDetailOrigin, setAccountDetailOrigin] = useState<View>('accounts');
   // Gelen çağrı screen pop'u: yanıtlanınca müşteri ön-seçili Akıllı Ticket için.
   const [smartTicketAccount, setSmartTicketAccount] = useState<{ id: string; name: string } | null>(null);
+  // Faz 2 — çağrı şifresinden çözülen proje (AccountCompany tek aktif proje) → pop ön-seçer.
+  const [smartTicketProject, setSmartTicketProject] = useState<{ id: string; name: string } | null>(null);
   // Faz 2 — oto-pop'u tetikleyen çağrının CallLog anahtarı; ticket oluşturulunca
   // linkCall ile CallLog.caseId'ye bağlanır (hangi çağrı → hangi ticket).
   const [smartTicketCallId, setSmartTicketCallId] = useState<string | null>(null);
+  // callLogKey pop anında (enrichment'tan önce) null kalabilir → callerId ile de bağla (fallback).
+  const [smartTicketCallerId, setSmartTicketCallerId] = useState<string | null>(null);
   // Akıllı Ticket YALNIZ gelen çağrıdan mı açıldı — tek-proje oto-seçimi sadece
   // bu durumda; manuel açılışta oto-doldurma yapılmaz.
   const [smartTicketFromCall, setSmartTicketFromCall] = useState(false);
@@ -196,7 +200,7 @@ export default function App() {
   // banner'daki "Vaka Aç" ile de tetikler. Aynı çağrı için tek sefer (dedup).
   const lastPoppedCallKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    type PopDetail = { key?: string; number?: string; matchedAccountId?: string | null; matchedAccountName?: string | null; callLogKey?: string | null };
+    type PopDetail = { key?: string; number?: string; matchedAccountId?: string | null; matchedAccountName?: string | null; matchedProjectId?: string | null; matchedProjectName?: string | null; callLogKey?: string | null };
     // Screen-pop dedup'u STABİL çağrı KEY'i ile (dev fix): her çağrının benzersiz key'i
     // olduğundan çağrı başına TAM BİR KEZ; poll'ler arası titreme (inbound flicker /
     // callerId değişimi) yeni-vaka ekranını TEKRAR açmaz. Faz 2: key yoksa callLogKey/callerId.
@@ -221,7 +225,10 @@ export default function App() {
           } catch { /* eşleşme yoksa müşterisiz aç */ }
         }
         setSmartTicketAccount(acc);
+        // Şifreden çözülen proje (kesin) → pop ön-seçer; yoksa null (tek-proje heuristiği devrede).
+        setSmartTicketProject(detail?.matchedProjectId ? { id: detail.matchedProjectId, name: detail.matchedProjectName || '' } : null);
         setSmartTicketCallId(detail?.callLogKey ?? null); // ticket açılınca linkCall için
+        setSmartTicketCallerId(detail?.number ?? null); // callLogKey null kalsa da callerId ile bağla
         setSmartTicketFromCall(true); // çağrıdan açıldı → tek-proje oto-seç
         setView('smart-ticket-new');
       })();
@@ -441,6 +448,7 @@ export default function App() {
     // Nav ile ayrılırken çağrı-context'i temizle (stale çağrı bilgisi sızmasın).
     setSmartTicketFromCall(false);
     setSmartTicketCallId(null);
+    setSmartTicketCallerId(null);
   }
 
   function canShowView(key: View | string, fallback: boolean): boolean {
@@ -1346,13 +1354,15 @@ export default function App() {
             <SmartTicketNewPage
               initialAccountId={smartTicketAccount?.id ?? null}
               initialAccountName={smartTicketAccount?.name ?? null}
+              initialProjectId={smartTicketProject?.id ?? null}
+              initialProjectName={smartTicketProject?.name ?? null}
               autoPickSingleProject={smartTicketFromCall}
               fromCall={smartTicketFromCall}
-              onCancel={() => { setView('cases'); setSmartTicketAccount(null); setSmartTicketCallId(null); setSmartTicketFromCall(false); }}
+              onCancel={() => { setView('cases'); setSmartTicketAccount(null); setSmartTicketProject(null); setSmartTicketCallId(null); setSmartTicketCallerId(null); setSmartTicketFromCall(false); }}
               onCreated={(caseId) => {
                 // Faz 2 — oto-pop çağrısı varsa çağrı↔ticket bağını kur (best-effort).
-                if (smartTicketCallId) void alotechLinkCall(smartTicketCallId, caseId);
-                setSmartTicketAccount(null); setSmartTicketCallId(null); setSmartTicketFromCall(false); openCase(caseId);
+                if (smartTicketCallId || smartTicketCallerId) void alotechLinkCall(smartTicketCallId, caseId, smartTicketCallerId);
+                setSmartTicketAccount(null); setSmartTicketProject(null); setSmartTicketCallId(null); setSmartTicketCallerId(null); setSmartTicketFromCall(false); openCase(caseId);
               }}
               onOpenExistingCase={(caseId) => openCase(caseId)}
             />

@@ -215,6 +215,9 @@ router.get('/active-call', async (req, res) => {
           // pop matchedAccountId ile açar.
           c.matchedAccountId = e?.matchedAccountId ?? null;
           c.matchedAccountName = e?.matchedAccountName ?? null;
+          // Şifreden çözülen proje (AccountCompany tek aktif proje) — pop ön-seçer.
+          c.matchedProjectId = e?.matchedProjectId ?? null;
+          c.matchedProjectName = e?.matchedProjectName ?? null;
           // link-call'ın kullanacağı CallLog anahtarı (hangisi eşleştiyse).
           c.callLogKey = e ? (ctx.has(c.callId) ? c.callId : c.key) : null;
         });
@@ -261,13 +264,13 @@ router.post('/hangup', async (req, res) => {
  */
 router.post('/link-call', async (req, res) => {
   try {
-    const { callId, caseId } = req.body || {};
-    if (!callId || !caseId) return res.status(400).json({ error: 'callId_caseId_required' });
+    const { callId, caseId, callerId } = req.body || {};
+    if (!caseId || (!callId && !callerId)) return res.status(400).json({ error: 'caseId_and_callId_or_callerId_required' });
     const c = await prisma.case.findUnique({ where: { id: String(caseId) }, select: { companyId: true } });
     if (!c) return res.status(404).json({ error: 'case_not_found' });
     const allowed = req.user?.allowedCompanyIds;
     if (Array.isArray(allowed) && !allowed.includes(c.companyId)) return res.status(403).json({ error: 'forbidden' });
-    await callLogLinkCase({ companyId: c.companyId, callId: String(callId), caseId: String(caseId) });
+    await callLogLinkCase({ companyId: c.companyId, callId: callId ? String(callId) : null, callerId: callerId ? String(callerId) : null, caseId: String(caseId) });
     res.json({ ok: true });
   } catch (err) {
     console.error('[alotech:link-call]', err);
