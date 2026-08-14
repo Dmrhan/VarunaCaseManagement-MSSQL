@@ -214,6 +214,8 @@ export function SmartTicketNewPage({
   onOpenExistingCase,
   initialAccountId,
   initialAccountName,
+  initialProjectId,
+  initialProjectName,
   autoPickSingleProject = false,
   fromCall = false,
 }: {
@@ -234,6 +236,12 @@ export function SmartTicketNewPage({
   /** Gelen çağrı screen pop'u: müşteri ön-seçili açılır (callerId eşleşmesi). */
   initialAccountId?: string | null;
   initialAccountName?: string | null;
+  /**
+   * Gelen çağrı pop'u — şifreden çözülen PROJE (AccountCompany tek aktif proje).
+   * Verilirse proje KESİN ön-seçilir (autoPickSingleProject heuristiğinden bağımsız).
+   */
+  initialProjectId?: string | null;
+  initialProjectName?: string | null;
   /**
    * Gelen çağrı pop'u — müşterinin TEK aktif projesi varsa BİR KEZ oto-seç.
    * YALNIZ çağrıda true; manuel akıllı-ticket açılışında false → mevcut davranış
@@ -262,6 +270,15 @@ export function SmartTicketNewPage({
       setForm((f) => (f.accountId ? f : { ...f, accountId: initialAccountId, accountName: initialAccountName ?? '' }));
     }
   }, [initialAccountId, initialAccountName]);
+
+  // Şifreden çözülen proje (kesin) — form'a uygula (boşsa). Proje-load useEffect'i, aynı
+  // isActive/status filtresini kullandığından bu projeyi listede bulup KORUR; böylece
+  // AccountCompany'nin birden çok projesi olsa bile doğru proje ön-seçili kalır.
+  useEffect(() => {
+    if (initialProjectId) {
+      setForm((f) => (f.accountProjectId ? f : { ...f, accountProjectId: initialProjectId, accountProjectName: initialProjectName ?? '' }));
+    }
+  }, [initialProjectId, initialProjectName]);
 
   const selectedCompany = useMemo(
     () => companies.find((c) => c.id === form.companyId) ?? null,

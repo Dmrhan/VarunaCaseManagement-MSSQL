@@ -49,6 +49,8 @@ export interface IncomingCall {
   // müşteri (screen-pop'u callerId yerine buradan kesin açar) + link-call anahtarı.
   matchedAccountId?: string | null;
   matchedAccountName?: string | null;
+  matchedProjectId?: string | null;
+  matchedProjectName?: string | null;
   callLogKey?: string | null;
 }
 
@@ -110,7 +112,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const startedRef = useRef(false);
   const lastIncomingKey = useRef<string | null>(null);
   const dismissedKey = useRef<string | null>(null);
-  const lastInbound = useRef<{ callerId: string; queue: string; key: string; matchedAccountId?: string | null; matchedAccountName?: string | null; callLogKey?: string | null } | null>(null);
+  const lastInbound = useRef<{ callerId: string; queue: string; key: string; matchedAccountId?: string | null; matchedAccountName?: string | null; matchedProjectId?: string | null; matchedProjectName?: string | null; callLogKey?: string | null } | null>(null);
   const lastAnsweredKey = useRef<string | null>(null);
 
   const refreshStatus = useCallback(async () => {
@@ -210,14 +212,14 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         // Detail'e Faz 2 enrichment (şifreden çözülen müşteri + link anahtarı) eklenir.
         if (r.agentStatus === 'talking' && lastInbound.current && lastAnsweredKey.current !== lastInbound.current.key) {
           lastAnsweredKey.current = lastInbound.current.key;
-          window.dispatchEvent(new CustomEvent(SOFTPHONE_ANSWERED_EVENT, { detail: { number: lastInbound.current.callerId, key: lastInbound.current.key, matchedAccountId: lastInbound.current.matchedAccountId, matchedAccountName: lastInbound.current.matchedAccountName, callLogKey: lastInbound.current.callLogKey } }));
+          window.dispatchEvent(new CustomEvent(SOFTPHONE_ANSWERED_EVENT, { detail: { number: lastInbound.current.callerId, key: lastInbound.current.key, matchedAccountId: lastInbound.current.matchedAccountId, matchedAccountName: lastInbound.current.matchedAccountName, matchedProjectId: lastInbound.current.matchedProjectId, matchedProjectName: lastInbound.current.matchedProjectName, callLogKey: lastInbound.current.callLogKey } }));
         } else if (r.agentStatus !== 'talking' && r.agentStatus !== 'ringing' && r.agentStatus !== 'dialing') {
           lastAnsweredKey.current = null;
         }
         setAgentStatus(r.agentStatus);
       }
       const inbound = (r?.calls || []).find((c) => c.inbound);
-      if (inbound) lastInbound.current = { callerId: inbound.callerId, queue: inbound.queue, key: inbound.key, matchedAccountId: inbound.matchedAccountId ?? null, matchedAccountName: inbound.matchedAccountName ?? null, callLogKey: inbound.callLogKey ?? null };
+      if (inbound) lastInbound.current = { callerId: inbound.callerId, queue: inbound.queue, key: inbound.key, matchedAccountId: inbound.matchedAccountId ?? null, matchedAccountName: inbound.matchedAccountName ?? null, matchedProjectId: inbound.matchedProjectId ?? null, matchedProjectName: inbound.matchedProjectName ?? null, callLogKey: inbound.callLogKey ?? null };
       // Çağrı CEVAPLANDIYSA (talking) artık "gelen çağrı" DEĞİL → banner düşsün, ticket
       // bir daha açılmasın (dev fix: aktif çağrı MyActiveCalls'ta hâlâ inbound göründüğünden
       // eski `|| !!inbound` koşulu banner'ı asılı bırakıp screen-pop'u tekrar tetikliyordu).
@@ -228,12 +230,12 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         setIncomingCall(null);
       } else if (ringing) {
         const src = inbound
-          ? { callerId: inbound.callerId, queue: inbound.queue, key: inbound.key, matchedAccountId: inbound.matchedAccountId ?? null, matchedAccountName: inbound.matchedAccountName ?? null, callLogKey: inbound.callLogKey ?? null }
+          ? { callerId: inbound.callerId, queue: inbound.queue, key: inbound.key, matchedAccountId: inbound.matchedAccountId ?? null, matchedAccountName: inbound.matchedAccountName ?? null, matchedProjectId: inbound.matchedProjectId ?? null, matchedProjectName: inbound.matchedProjectName ?? null, callLogKey: inbound.callLogKey ?? null }
           : lastInbound.current;
         const key = src?.key || 'ringing';
         if (key !== dismissedKey.current && key !== lastIncomingKey.current) {
           lastIncomingKey.current = key;
-          const call: IncomingCall = { number: src?.callerId || 'Bilinmeyen', queue: src?.queue, key, status: 'ringing', inbound: !!inbound, matchedAccountId: src?.matchedAccountId ?? null, matchedAccountName: src?.matchedAccountName ?? null, callLogKey: src?.callLogKey ?? null, matchedName: src?.matchedAccountName ?? undefined };
+          const call: IncomingCall = { number: src?.callerId || 'Bilinmeyen', queue: src?.queue, key, status: 'ringing', inbound: !!inbound, matchedAccountId: src?.matchedAccountId ?? null, matchedAccountName: src?.matchedAccountName ?? null, matchedProjectId: src?.matchedProjectId ?? null, matchedProjectName: src?.matchedProjectName ?? null, callLogKey: src?.callLogKey ?? null, matchedName: src?.matchedAccountName ?? undefined };
           setIncomingCall(call);
           window.dispatchEvent(new CustomEvent(SOFTPHONE_INCOMING_EVENT, { detail: call }));
         }
