@@ -183,12 +183,12 @@ export async function hangupCall(): Promise<{ ok: boolean } | undefined> {
  * Faz 2 — çağrı ↔ ticket bağı (CallLog.caseId = caseId). Oto-pop'tan gelen callId
  * ile ticket oluşturulunca çağrılır; "hangi çağrı hangi ticket" raporu için.
  */
-export async function linkCall(callId: string, caseId: string): Promise<{ ok: boolean } | undefined> {
-  if (!callId || !caseId) return undefined;
+export async function linkCall(callId: string | null, caseId: string, callerId?: string | null): Promise<{ ok: boolean } | undefined> {
+  if (!caseId || (!callId && !callerId)) return undefined;
   return apiFetch('/api/integrations/alotech/link-call', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...alotechHeaders() },
-    body: JSON.stringify({ callId, caseId }),
+    body: JSON.stringify({ callId, caseId, callerId }),
   }, 'Çağrı-ticket bağlama');
 }
 

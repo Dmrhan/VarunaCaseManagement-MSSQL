@@ -64,11 +64,25 @@ export async function updateOnEnd({ companyId, callId, answeredAt, endedAt, dura
 }
 
 /** Ticket açılınca/bağlanınca çağrı↔ticket bağı (callId → caseId). */
-export async function linkCase({ companyId, callId, caseId }) {
-  if (!companyId || !callId || !caseId) return null;
-  const existing = await prisma.callLog.findUnique({ where: { companyId_callId: { companyId, callId } }, select: { id: true } });
-  if (!existing) return null;
-  return prisma.callLog.update({ where: { companyId_callId: { companyId, callId } }, data: { caseId } });
+export async function linkCase({ companyId, callId, callerId, caseId }) {
+  if (!companyId || !caseId || (!callId && !callerId)) return null;
+  // 1) callId (kesin) — CallLog anahtarıyla birebir.
+  if (callId) {
+    const existing = await prisma.callLog.findUnique({ where: { companyId_callId: { companyId, callId } }, select: { id: true } });
+    if (existing) return prisma.callLog.update({ where: { id: existing.id }, data: { caseId } });
+  }
+  // 2) callerId fallback — pop çağrı çalarken (enrichment'tan ÖNCE) açıldıysa callLogKey
+  // null kalır; ticket create anında CallLog kesin vardır → arayan numaranın EN SON
+  // bağlanmamış gelen çağrısını bağla (son 2 saat, yanlış-çağrıyı bağlama riski düşük).
+  if (callerId) {
+    const since = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const cl = await prisma.callLog.findFirst({
+      where: { companyId, callerId: String(callerId), caseId: null, direction: 'inbound', startedAt: { gte: since } },
+      orderBy: { startedAt: 'desc' }, select: { id: true },
+    });
+    if (cl) return prisma.callLog.update({ where: { id: cl.id }, data: { caseId } });
+  }
+  return null;
 }
 
 /** /active-call zenginleştirme için: callId → {customerPassword, matchedAccountId}. */
