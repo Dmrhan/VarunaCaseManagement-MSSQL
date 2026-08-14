@@ -83,8 +83,27 @@ export async function findByCallIds(companyId, callIds) {
 }
 
 /**
- * Faz 2 — /active-call pop zenginleştirme: callId → {customerPassword,
- * matchedAccountId, matchedAccountName}. Müşteri adı app-level join (izole tasarım).
+ * Şifreden (externalCustomerCode) müşterinin PROJESİNİ çöz. Şifre AccountCompany'ye
+ * denk gelir; o AccountCompany'nin TEK aktif projesi varsa proje KESİNDİR → onu döner.
+ * Sıfır ya da birden fazla aktif proje → null (şifre projeyi tek başına ayırt edemez;
+ * frontend kullanıcıya bırakır). Proje-seviyesinde şifre YOK (schema: externalCustomerCode
+ * yalnız AccountCompany'de).
+ */
+export async function resolveProjectByPassword(companyId, password) {
+  const code = (password ?? '').toString().trim();
+  if (!companyId || !code) return null;
+  const ac = await prisma.accountCompany.findUnique({
+    where: { companyId_externalCustomerCode: { companyId, externalCustomerCode: code } },
+    select: { projects: { where: { isActive: true, status: 'Active' }, select: { id: true, name: true } } },
+  });
+  const ps = ac?.projects ?? [];
+  return ps.length === 1 ? { id: ps[0].id, name: ps[0].name } : null;
+}
+
+/**
+ * Faz 2 — /active-call pop zenginleştirme: callId → {matchedAccountId,
+ * matchedAccountName, matchedProjectId, matchedProjectName}. Müşteri + proje app-level
+ * join (izole tasarım). Proje şifreden çözülür (AccountCompany tek aktif proje).
  * Best-effort: hata olsa /active-call callerId ile yine çalışır.
  */
 export async function resolveActiveCallContext(companyId, callIds) {
@@ -94,10 +113,20 @@ export async function resolveActiveCallContext(companyId, callIds) {
     ? await prisma.account.findMany({ where: { id: { in: accIds } }, select: { id: true, name: true } })
     : [];
   const accMap = new Map(accs.map((a) => [a.id, a.name]));
+  // Şifreden proje — distinct şifre başına 1 sorgu (genelde tek çağrı).
+  const passwords = [...new Set([...base.values()].map((v) => v.customerPassword).filter(Boolean))];
+  const projByPw = new Map();
+  for (const pw of passwords) projByPw.set(pw, await resolveProjectByPassword(companyId, pw));
   const out = new Map();
   for (const [callId, v] of base) {
-    // customerPassword'ü DIŞARI verme (frontend kullanmıyor; gereksiz ifşa).
-    out.set(callId, { matchedAccountId: v.matchedAccountId, matchedAccountName: v.matchedAccountId ? (accMap.get(v.matchedAccountId) ?? null) : null });
+    // customerPassword'ü DIŞARI verme (gereksiz ifşa); yalnız çözülen müşteri + proje.
+    const proj = v.customerPassword ? projByPw.get(v.customerPassword) : null;
+    out.set(callId, {
+      matchedAccountId: v.matchedAccountId,
+      matchedAccountName: v.matchedAccountId ? (accMap.get(v.matchedAccountId) ?? null) : null,
+      matchedProjectId: proj?.id ?? null,
+      matchedProjectName: proj?.name ?? null,
+    });
   }
   return out;
 }

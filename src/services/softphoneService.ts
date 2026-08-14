@@ -158,6 +158,8 @@ export interface ActiveCallInfo {
   // + link-call anahtarı. (customerPassword bilinçli olarak GÖNDERİLMEZ.)
   matchedAccountId?: string | null;
   matchedAccountName?: string | null;
+  matchedProjectId?: string | null;
+  matchedProjectName?: string | null;
   callLogKey?: string | null;
 }
 

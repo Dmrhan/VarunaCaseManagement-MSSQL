@@ -215,6 +215,9 @@ router.get('/active-call', async (req, res) => {
           // pop matchedAccountId ile açar.
           c.matchedAccountId = e?.matchedAccountId ?? null;
           c.matchedAccountName = e?.matchedAccountName ?? null;
+          // Şifreden çözülen proje (AccountCompany tek aktif proje) — pop ön-seçer.
+          c.matchedProjectId = e?.matchedProjectId ?? null;
+          c.matchedProjectName = e?.matchedProjectName ?? null;
           // link-call'ın kullanacağı CallLog anahtarı (hangisi eşleştiyse).
           c.callLogKey = e ? (ctx.has(c.callId) ? c.callId : c.key) : null;
         });
