@@ -1438,7 +1438,7 @@ export function CasesListPage({
                     </div>
                   </FilterPanelSection>
 
-                  <FilterPanelSection label="Takım">
+                  <FilterPanelSection label="Atanan Takım">
                     <Select
                       value={filters.teamId ?? ''}
                       onChange={(e) =>
@@ -1459,7 +1459,7 @@ export function CasesListPage({
                     </Select>
                   </FilterPanelSection>
 
-                  <FilterPanelSection label="Kişi">
+                  <FilterPanelSection label="Atanan Kişi">
                     <Select
                       value={filters.personId ?? ''}
                       onChange={(e) => setFilters((f) => ({ ...f, personId: e.target.value }))}
