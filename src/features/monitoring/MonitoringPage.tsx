@@ -30,7 +30,7 @@ const GRAINS: { key: Grain; label: string }[] = [
   { key: 'month', label: 'Ay' }, { key: 'year', label: 'Yıl' },
 ];
 const CHIP_LABEL: Partial<Record<keyof MonitoringFilters, string>> = {
-  proje: 'Proje', dist: 'Dist', tipi: 'Tipi', kaynak: 'Kaynak',
+  proje: 'Proje', dist: 'Dist', tipi: 'Tipi', kaynak: 'Kaynak', takim: 'Takım',
 };
 const nf = (n: number | null | undefined) => (n == null ? '—' : n.toLocaleString('tr-TR'));
 
@@ -234,6 +234,17 @@ export function MonitoringPage() {
             <option value="">Tüm projeler</option>
             {opts?.projeler.map((p) => (
               <option key={p.key} value={p.key}>{p.key} ({p.c})</option>
+            ))}
+          </select>
+          <select
+            value={filters.takim ?? ''}
+            onChange={(e) => patch({ takim: e.target.value || undefined })}
+            className="max-w-[180px] rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+            title="Takım"
+          >
+            <option value="">Tüm takımlar</option>
+            {opts?.takimlar.map((t) => (
+              <option key={t.key} value={t.key}>{t.key} ({t.c})</option>
             ))}
           </select>
           <div className="ml-auto flex items-center gap-1 text-xs">
