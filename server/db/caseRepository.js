@@ -7044,6 +7044,9 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null, roleDefaultScope
   // gönderir), ama gelirse teamIds öncelikli (daha spesifik/son eklenen).
   if (f.teamIds?.length) where.assignedTeamId = { in: f.teamIds };
   if (f.personId) where.assignedPersonId = f.personId;
+  // Vaka Sahibi — vakayı açan kullanıcı (Case.createdByUserId), atamadan
+  // bağımsız. "Kişi" filtresinden (assignedPersonId) AYRI kavram.
+  if (f.createdByUserId) where.createdByUserId = f.createdByUserId;
   if (f.dateFrom) where.createdAt = { ...(where.createdAt ?? {}), gte: new Date(f.dateFrom) };
   if (f.dateTo) {
     const to = new Date(f.dateTo);

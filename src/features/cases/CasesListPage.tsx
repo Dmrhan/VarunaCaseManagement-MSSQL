@@ -206,6 +206,7 @@ const initialFilters: CaseFilters = {
   priorities: [],
   teamId: '',
   personId: '',
+  createdByUserId: '',
   dateFrom: '',
   dateTo: '',
   // Phase D + KPI intent flag'leri — reset durumunda false/undefined kalmalı
@@ -350,6 +351,14 @@ export function CasesListPage({
     () => (filters.teamId ? personsAll.filter((p) => p.teamId === filters.teamId) : personsAll),
     [filters.teamId, personsAll],
   );
+
+  // "Vaka Sahibi" filtre paneli — bootstrap'a dahil değil, on-demand çekilir.
+  const [caseCreators, setCaseCreators] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void lookupService.caseCreators().then((rows) => { if (alive) setCaseCreators(rows); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   // Havuz kartı — kullanıcının kendi takımı + KİŞİNİN kendi destek seviyesi/
   // takım liderliği. Backend guard'ıyla (routes/cases.js roleDefaultScope +
@@ -684,6 +693,7 @@ export function CasesListPage({
     (filters.caseType && filters.caseType !== 'Tümü' ? 1 : 0) +
     (filters.teamId ? 1 : 0) +
     (filters.personId ? 1 : 0) +
+    (filters.createdByUserId ? 1 : 0) +
     (filters.dateFrom ? 1 : 0) +
     (filters.dateTo ? 1 : 0) +
     (filters.customerMatchPending ? 1 : 0) +
@@ -1459,6 +1469,21 @@ export function CasesListPage({
                       {personsForFilter.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </FilterPanelSection>
+
+                  <FilterPanelSection label="Vaka Sahibi">
+                    <Select
+                      value={filters.createdByUserId ?? ''}
+                      onChange={(e) => setFilters((f) => ({ ...f, createdByUserId: e.target.value || undefined }))}
+                      className="h-8 w-full py-1"
+                    >
+                      <option value="">Tümü</option>
+                      {caseCreators.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
                         </option>
                       ))}
                     </Select>
