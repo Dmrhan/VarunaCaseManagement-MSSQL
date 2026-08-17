@@ -33,7 +33,16 @@ const METRICS = `
   SUM(CAST(YazilimaAcildi AS int)) AS yazilima,
   SUM(CAST(Kodlandi AS int)) AS kodlandi,
   SUM(CAST(KodlanmadanDondu AS int)) AS geriDondu,
-  SUM(CASE WHEN Tipi = N'Hata' AND UlastiL2 = 1 THEN 1 ELSE 0 END) AS hataL2`;
+  SUM(CASE WHEN Tipi = N'Hata' AND UlastiL2 = 1 THEN 1 ELSE 0 END) AS hataL2,
+  -- "Çözüldü" iki kaynağın farklı Durum sözlüğünü birleştirir: canlı
+  -- (Varuna) Case.status enum'ı 'Cozuldu' yazar, geçmiş (next4biz) ise
+  -- kendi kapanış durumunu 'Kapatıldı' olarak taşır — aynı iş anlamı
+  -- (bilet nihai/çözümlü durumda), farklı ham etiket.
+  SUM(CASE
+        WHEN Kaynak = N'Canlı (Varuna)'    AND Durum = N'Cozuldu'    THEN 1
+        WHEN Kaynak = N'Geçmiş (next4biz)' AND Durum = N'Kapatıldı'  THEN 1
+        ELSE 0
+      END) AS cozuldu`;
 
 const TIPI = new Set(['Hata', 'Talep', 'Bilgi', 'Soru', 'Öneri', 'Şikayet', 'Diğer']);
 const KAYNAK = new Set(['Canlı (Varuna)', 'Geçmiş (next4biz)']);

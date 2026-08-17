@@ -7,6 +7,7 @@ export interface FunnelMetrics {
   kodlandi: number;
   geriDondu: number;
   hataL2: number;
+  cozuldu: number;
 }
 
 export interface Summary extends FunnelMetrics {
