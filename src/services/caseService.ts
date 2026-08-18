@@ -287,6 +287,7 @@ function applyFilters(items: Case[], f?: CaseFilters): Case[] {
   }
   if (f.teamId)   out = out.filter((c) => c.assignedTeamId === f.teamId);
   if (f.personId) out = out.filter((c) => c.assignedPersonId === f.personId);
+  if (f.createdByUserId) out = out.filter((c) => c.createdByUserId === f.createdByUserId);
   if (f.dateFrom) {
     const fromMs = new Date(f.dateFrom).getTime();
     out = out.filter((c) => new Date(c.createdAt).getTime() >= fromMs);
@@ -408,6 +409,7 @@ export const caseService = {
     if (filters?.teamId)   params.set('teamId', filters.teamId);
     if (filters?.teamIds?.length) params.set('teamIds', filters.teamIds.join(','));
     if (filters?.personId) params.set('personId', filters.personId);
+    if (filters?.createdByUserId) params.set('createdByUserId', filters.createdByUserId);
     if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
     if (filters?.dateTo)   params.set('dateTo', filters.dateTo);
     if (filters?.customerMatchPending !== undefined) {
@@ -2651,6 +2653,20 @@ export const lookupService = {
         },
       }
     );
+  },
+
+  /**
+   * "Vaka Sahibi" filtresi (CasesListPage) için — vaka açan kullanıcıların
+   * distinct listesi. Bootstrap'a dahil değil (yalnız CasesListPage filtre
+   * paneli kullanır); on-demand çekilir.
+   */
+  async caseCreators(): Promise<{ id: string; name: string }[]> {
+    const data = await apiFetch<{ id: string; name: string }[]>(
+      '/api/lookups/case-creators',
+      undefined,
+      'Vaka sahibi listesi yüklenemedi',
+    );
+    return data ?? [];
   },
 
   /**

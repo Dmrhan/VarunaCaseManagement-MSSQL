@@ -717,6 +717,9 @@ router.get(
       teamId,
       teamIds: teamIds && teamIds.length > 0 ? teamIds : undefined,
       personId,
+      // Vaka Sahibi — vakayı açan kullanıcı (Case.createdByUserId). "Kişi"
+      // (assignedPersonId) filtresinden ayrı, atamadan bağımsız.
+      createdByUserId: typeof f.createdByUserId === 'string' ? f.createdByUserId : undefined,
       dateFrom: f.dateFrom,
       dateTo: f.dateTo,
       customerMatchPending,
