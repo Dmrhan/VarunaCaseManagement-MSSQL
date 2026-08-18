@@ -1611,24 +1611,21 @@ export const caseRepository = {
         // security filter (securityWhere) altında GİZLİ olan Case'ler de
         // sayıma dahil olur (kart sayısı ≠ tıklayınca görünen liste sayısı,
         // ve gizli vakaların VARLIĞI sızdırılmış olur). listTransferredByMe
-        // ile AYNI görünürlük kontratı: önce distinct caseId'leri topla,
-        // sonra securityWhere ile görünür Case sayısını say (Case.isArchived
-        // filtresi YOK — listTransferredByMe de filtrelemiyor).
-        (async () => {
-          const transferredCaseIds = (
-            await prisma.caseTransfer.groupBy({
-              by: ['caseId'],
-              where: { transferredBy: user.id, companyId: { in: allowedCompanyIds } },
-            })
-          ).map((r) => r.caseId);
-          if (transferredCaseIds.length === 0) return 0;
-          return prisma.case.count({
-            where: mergeSecurityWhere(
-              { id: { in: transferredCaseIds }, companyId: { in: allowedCompanyIds } },
-              securityWhere,
-            ),
-          });
-        })(),
+        // ile AYNI görünürlük kontratı — ama artık ID'leri JS'e toplayıp
+        // IN(...) ile saymak YERİNE, Case.transfers ilişkisi üzerinden
+        // Prisma'nın kendi EXISTS/JOIN'ine devrediyoruz (2026-08-18 fix —
+        // çok sayıda devir yapmış kullanıcılarda MSSQL 2100 parametre
+        // sınırına çarpıyordu, bkz. code 8003). Case.isArchived filtresi
+        // YOK — listTransferredByMe de filtrelemiyor, davranış aynı kalır.
+        prisma.case.count({
+          where: mergeSecurityWhere(
+            {
+              transfers: { some: { transferredBy: user.id, companyId: { in: allowedCompanyIds } } },
+              companyId: { in: allowedCompanyIds },
+            },
+            securityWhere,
+          ),
+        }),
         // unassigned chip: liste görünürlüğüyle tutarlı havuz sayısı.
         // L1 Agent (agentBlockedFromPool) hiç sahipsiz kayıt görmediği için
         // sorgu bile atılmadan 0 sabitlenir.
@@ -1670,24 +1667,18 @@ export const caseRepository = {
           where: scoped({ ...scope, ...teamFilter, resolvedAt: todayRange, status: 'Cozuldu' }),
         }),
         // transferredByMeCount — Supervisor "Yönlendirdiklerim" kartı (Agent'taki
-        // aynı kartın rol karşılığı). Aynı görünürlük kontratı: distinct caseId'leri
-        // topla, sonra securityWhere ile görünür Case sayısını say (bkz. yukarıdaki
-        // personal mode yorumu — kart sayısı ≠ liste sayısı sızıntısı önlenir).
-        (async () => {
-          const transferredCaseIds = (
-            await prisma.caseTransfer.groupBy({
-              by: ['caseId'],
-              where: { transferredBy: user.id, companyId: { in: allowedCompanyIds } },
-            })
-          ).map((r) => r.caseId);
-          if (transferredCaseIds.length === 0) return 0;
-          return prisma.case.count({
-            where: mergeSecurityWhere(
-              { id: { in: transferredCaseIds }, companyId: { in: allowedCompanyIds } },
-              securityWhere,
-            ),
-          });
-        })(),
+        // aynı kartın rol karşılığı, bkz. yukarıdaki personal mode yorumu —
+        // Case.transfers ilişkisi üzerinden, IN(...) parametre sınırına
+        // çarpmayan sürüm, 2026-08-18 fix).
+        prisma.case.count({
+          where: mergeSecurityWhere(
+            {
+              transfers: { some: { transferredBy: user.id, companyId: { in: allowedCompanyIds } } },
+              companyId: { in: allowedCompanyIds },
+            },
+            securityWhere,
+          ),
+        }),
         // chip sayıları — scope'taki tüm atanmamış/kritik açık + snooze-dışı vakalar
         prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
         prisma.case.count({ where: scoped({ ...scope, priority: 'Critical', status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
@@ -5575,12 +5566,26 @@ export const caseRepository = {
       }
     }
 
-    const where = { id: { in: [...byCase.keys()] } };
-    if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
-    const rows = await prisma.case.findMany({
-      where: mergeSecurityWhere(where, securityWhere),
-      include: CASE_INCLUDE,
-    });
+    // 2026-08-18 fix — id: { in: [...byCase.keys()] } çok sayıda devir yapmış
+    // kullanıcılarda ("Yönlendirdiklerim" kartına tıklayınca) MSSQL 2100
+    // parametre sınırına çarpıyordu (code 8003). `transfers: { some: {...} } }`
+    // relation-filter'ı count() için sorunu çözdü (yukarıdaki getStats), AMA
+    // include: CASE_INCLUDE ile birlikte findMany()'de Prisma'nın SQL Server
+    // sorgu planı yine ID'leri materialize edip aynı duvara çarpıyor (test
+    // edildi, doğrulandı) — o yüzden burada ID listesi 1000'lik chunk'lara
+    // bölünüp paralel sorgulanıyor (MSSQL parametre sınırının altında kalır,
+    // her chunk ayrı sorgu → limitsiz ölçeklenir).
+    const caseIds = [...byCase.keys()];
+    const CHUNK = 1000;
+    const chunkedRows = await Promise.all(
+      Array.from({ length: Math.ceil(caseIds.length / CHUNK) }, (_, i) => {
+        const chunk = caseIds.slice(i * CHUNK, (i + 1) * CHUNK);
+        const where = { id: { in: chunk } };
+        if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
+        return prisma.case.findMany({ where: mergeSecurityWhere(where, securityWhere), include: CASE_INCLUDE });
+      }),
+    );
+    const rows = chunkedRows.flat();
 
     const metas = [...byCase.values()];
     const teamIds = [...new Set(metas.map((v) => v.toTeamId).filter(Boolean))];
