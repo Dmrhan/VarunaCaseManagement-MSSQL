@@ -33,7 +33,16 @@ const METRICS = `
   SUM(CAST(YazilimaAcildi AS int)) AS yazilima,
   SUM(CAST(Kodlandi AS int)) AS kodlandi,
   SUM(CAST(KodlanmadanDondu AS int)) AS geriDondu,
-  SUM(CASE WHEN Tipi = N'Hata' AND UlastiL2 = 1 THEN 1 ELSE 0 END) AS hataL2`;
+  SUM(CASE WHEN Tipi = N'Hata' AND UlastiL2 = 1 THEN 1 ELSE 0 END) AS hataL2,
+  -- "Çözüldü" iki kaynağın farklı Durum sözlüğünü birleştirir: canlı
+  -- (Varuna) Case.status enum'ı 'Cozuldu' yazar, geçmiş (next4biz) ise
+  -- kendi kapanış durumunu 'Kapatıldı' olarak taşır — aynı iş anlamı
+  -- (bilet nihai/çözümlü durumda), farklı ham etiket.
+  SUM(CASE
+        WHEN Kaynak = N'Canlı (Varuna)'    AND Durum = N'Cozuldu'    THEN 1
+        WHEN Kaynak = N'Geçmiş (next4biz)' AND Durum = N'Kapatıldı'  THEN 1
+        ELSE 0
+      END) AS cozuldu`;
 
 const TIPI = new Set(['Hata', 'Talep', 'Bilgi', 'Soru', 'Öneri', 'Şikayet', 'Diğer']);
 const KAYNAK = new Set(['Canlı (Varuna)', 'Geçmiş (next4biz)']);
@@ -115,6 +124,7 @@ function buildWhere(qp) {
   if (typeof qp.kaynak === 'string' && KAYNAK.has(qp.kaynak)) w.push(`Kaynak = ${esc(qp.kaynak)}`);
   if (typeof qp.proje === 'string' && qp.proje) w.push(`Proje = ${esc(qp.proje)}`);
   if (typeof qp.dist === 'string' && qp.dist) w.push(`Dist = ${esc(qp.dist)}`);
+  if (typeof qp.takim === 'string' && qp.takim) w.push(`Takim = ${esc(qp.takim)}`);
   if (qp.onlyL2 === '1') w.push(`UlastiL2 = 1`);
   if (qp.onlyYazilim === '1') w.push(`YazilimaAcildi = 1`);
   if (qp.onlyKodlandi === '1') w.push(`Kodlandi = 1`);
@@ -189,10 +199,11 @@ router.get('/breakdown', requireManager, async (req, res) => {
 router.get('/filters', requireManager, async (req, res) => {
   try {
     const base = `FROM ${VIEW} WHERE Sirket = N'UNIVERA'`;
-    const [bounds, projeler, tipler, meta] = await Promise.all([
+    const [bounds, projeler, tipler, takimlar, meta] = await Promise.all([
       prisma.$queryRawUnsafe(`SELECT MIN(Yil) AS minYil, MAX(Yil) AS maxYil, CONVERT(varchar(10), MAX(AcilisTarihi), 23) AS sonTarih ${base}`),
       prisma.$queryRawUnsafe(`SELECT TOP 200 Proje AS [key], COUNT(*) AS c ${base} AND Proje <> N'(Atanmamış)' GROUP BY Proje ORDER BY COUNT(*) DESC`),
       prisma.$queryRawUnsafe(`SELECT Tipi AS [key], COUNT(*) AS c ${base} AND Tipi IS NOT NULL GROUP BY Tipi ORDER BY COUNT(*) DESC`),
+      prisma.$queryRawUnsafe(`SELECT Takim AS [key], COUNT(*) AS c ${base} AND Takim IS NOT NULL AND Takim <> N'' GROUP BY Takim ORDER BY COUNT(*) DESC`),
       // Snapshot tazeliği (rpt tablosu yoksa boş döner — dashboard yine çalışır)
       prisma.$queryRawUnsafe(`SELECT TOP 1 CONVERT(varchar(19), refreshedAt, 120) AS refreshedAt, satirSayisi FROM dbo.rpt_TicketLifecycle_meta WHERE id = 1`).catch(() => []),
     ]);
@@ -200,6 +211,7 @@ router.get('/filters', requireManager, async (req, res) => {
       bounds: serialize(bounds[0]),
       projeler: projeler.map(serialize),
       tipler: tipler.map(serialize),
+      takimlar: takimlar.map(serialize),
       meta: meta[0] ? serialize(meta[0]) : null,
     });
   } catch (err) {
