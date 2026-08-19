@@ -511,6 +511,113 @@ export async function loadCaseTransferAggregates(prisma, caseIds) {
   return map;
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// İlk Atanan Kişi / Takım aggregate
+// ──────────────────────────────────────────────────────────────────────
+//
+// Sözleşme — export-vaka-ilk-atanan-kapatan-temmuz-agustos.mjs script'iyle
+// (2026-08 vaka export'ları) BİREBİR AYNI mantık, rapor pipeline'ına taşındı:
+//   - "İlk atanan kişi" — Case.history'de fieldName='assignedPersonId' olan
+//     EN ERKEN CaseActivity kaydı.
+//       - fromValue doluysa (create() sırasında zaten atanmıştı, bu ilk
+//         transferdi) → fromValue = gerçek ilk atanan.
+//       - fromValue boşsa (gerçekten atanmamıştan atandı, ör. claim())
+//         → toValue = gerçek ilk atanan.
+//       - Hiç activity yoksa → hiç el değiştirmemiş, mevcut
+//         Case.assignedPersonName = ilk atanan (fallback).
+//   - "İlk atanan takım" — fieldName='assignedTeamId' EN ERKEN activity.
+//       - fromValue doluysa (zaten bir takımdan başka bir takıma geçmişti)
+//         → fromValue = gerçek ilk atanan takım.
+//       - fromValue boşsa (hiç takımı yokken ilk kez atandı) → toValue =
+//         gerçek ilk atanan takım.
+//     Hiç activity yoksa → mevcut Case.assignedTeamName. Transfer action'ı
+//     fromValue/toValue'ya takım ADINI yazar; ama case create sırasındaki
+//     İLK atama farklı bir action path'inden geçtiği için toValue'ya ham
+//     Team.id yazabiliyor (gerçek veride görüldü — bkz. smoke test) — bu
+//     yüzden kişi çözümlemesiyle aynı desende Team id→name haritası da var.
+//   - Kişi adı çözümleme — assignedPersonId activity'lerinde toValue bazen
+//     raw Person.id (claim() yolu), bazen okunabilir ad (auto-assign/manuel
+//     atama yolu). Tek haritadan her ikisi de çözülür.
+//
+// 4 fixed query (case sayısından bağımsız — N+1 değil): CaseActivity x2
+// (person + team fieldName'leri ayrı where) + Person + Team (isim
+// çözümleme). Case'in kendi mevcut assignedPersonName/assignedTeamName'i
+// (fallback için) ayrı bir küçük query ile çekilir — aggregate loader'lar
+// yalnız caseIds alır, dbRows'a erişimi yok (buildRows.js'teki genel
+// sözleşme).
+
+function buildEmptyFirstAssignmentPayload() {
+  return { firstAssignedPersonName: '', firstAssignedTeamName: '' };
+}
+
+export async function loadFirstAssignmentAggregates(prisma, caseIds) {
+  const map = new Map();
+  if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
+
+  const currentRows = await prisma.case.findMany({
+    where: { id: { in: caseIds } },
+    select: { id: true, assignedPersonName: true, assignedTeamName: true },
+  });
+  const currentByCase = new Map(currentRows.map((r) => [r.id, r]));
+
+  const [personHistory, teamHistory] = await Promise.all([
+    prisma.caseActivity.findMany({
+      where: { caseId: { in: caseIds }, fieldName: 'assignedPersonId' },
+      select: { caseId: true, fromValue: true, toValue: true, at: true },
+      orderBy: { at: 'asc' },
+    }),
+    prisma.caseActivity.findMany({
+      where: { caseId: { in: caseIds }, fieldName: 'assignedTeamId' },
+      select: { caseId: true, fromValue: true, toValue: true, at: true },
+      orderBy: { at: 'asc' },
+    }),
+  ]);
+
+  const firstPersonRawByCase = new Map();
+  for (const h of personHistory) {
+    if (!firstPersonRawByCase.has(h.caseId)) firstPersonRawByCase.set(h.caseId, h.fromValue || h.toValue);
+  }
+  const firstTeamRawByCase = new Map();
+  for (const h of teamHistory) {
+    if (!firstTeamRawByCase.has(h.caseId)) firstTeamRawByCase.set(h.caseId, h.fromValue || h.toValue);
+  }
+
+  const rawPersonRefs = Array.from(new Set([...firstPersonRawByCase.values()].filter(Boolean)));
+  const persons = rawPersonRefs.length
+    ? await prisma.person.findMany({
+        where: { OR: [{ id: { in: rawPersonRefs } }, { name: { in: rawPersonRefs } }] },
+        select: { id: true, name: true },
+      })
+    : [];
+  const personById = new Map(persons.map((p) => [p.id, p.name]));
+  const personByName = new Map(persons.map((p) => [p.name, p.name]));
+  const resolvePersonName = (raw) => (!raw ? null : personById.get(raw) ?? personByName.get(raw) ?? raw);
+
+  const rawTeamRefs = Array.from(new Set([...firstTeamRawByCase.values()].filter(Boolean)));
+  const teams = rawTeamRefs.length
+    ? await prisma.team.findMany({
+        where: { OR: [{ id: { in: rawTeamRefs } }, { name: { in: rawTeamRefs } }] },
+        select: { id: true, name: true },
+      })
+    : [];
+  const teamById = new Map(teams.map((t) => [t.id, t.name]));
+  const teamByName = new Map(teams.map((t) => [t.name, t.name]));
+  const resolveTeamName = (raw) => (!raw ? null : teamById.get(raw) ?? teamByName.get(raw) ?? raw);
+
+  for (const id of caseIds) {
+    const current = currentByCase.get(id);
+    const p = buildEmptyFirstAssignmentPayload();
+    p.firstAssignedPersonName = firstPersonRawByCase.has(id)
+      ? (resolvePersonName(firstPersonRawByCase.get(id)) ?? '')
+      : (current?.assignedPersonName ?? '');
+    p.firstAssignedTeamName = firstTeamRawByCase.has(id)
+      ? (resolveTeamName(firstTeamRawByCase.get(id)) ?? '')
+      : (current?.assignedTeamName ?? '');
+    map.set(id, p);
+  }
+  return map;
+}
+
 /** Test/debug için saf summarize'lar ihraç edilir (smoke + unit). */
 export const __internal = {
   summarize,
@@ -527,4 +634,5 @@ export const __internal = {
   buildEmptyCallPayload,
   summarizeTransfers,
   buildEmptyTransferPayload,
+  buildEmptyFirstAssignmentPayload,
 };

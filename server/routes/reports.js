@@ -32,6 +32,7 @@ import {
   needsCaseFileAggregates,
   needsCaseCallAggregates,
   needsCaseTransferAggregates,
+  needsFirstAssignmentAggregates,
   isColumnAllowedForRole,
   filterColumnsByRole,
 } from '../lib/caseReport/columnRegistry.js';
@@ -44,6 +45,7 @@ import {
   loadCaseFileAggregates,
   loadCaseCallAggregates,
   loadCaseTransferAggregates,
+  loadFirstAssignmentAggregates,
 } from '../lib/caseReport/aggregates.js';
 import {
   computePivot,
@@ -94,6 +96,9 @@ async function loadAggregatesIfNeeded(columns, items) {
   }
   if (needsCaseTransferAggregates(columns)) {
     jobs.push(loadCaseTransferAggregates(prisma, caseIds).then((m) => { aggregates.caseTransfer = m; }));
+  }
+  if (needsFirstAssignmentAggregates(columns)) {
+    jobs.push(loadFirstAssignmentAggregates(prisma, caseIds).then((m) => { aggregates.firstAssignment = m; }));
   }
   if (jobs.length > 0) await Promise.all(jobs);
   return aggregates;
