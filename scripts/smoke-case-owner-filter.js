@@ -18,16 +18,22 @@ const root = path.resolve(__dirname, '..');
 let pass = 0;
 let fail = 0;
 
-function check(label, filePath, pattern) {
+function check(label, filePath, predicate) {
   const content = readFileSync(path.resolve(root, filePath), 'utf8');
-  const ok = pattern.test(content);
+  const ok = predicate instanceof RegExp ? predicate.test(content) : predicate(content);
   console.log(`${ok ? '✔' : '✘'} ${label}`);
   if (ok) pass += 1; else fail += 1;
 }
 
 check('lookups.js — /case-creators endpoint tanımlı', 'server/routes/lookups.js', /router\.get\('\/case-creators'/);
 check('lookups.js — boş allowedCompanyIds → boş liste (sızıntı yok, WR-A7b P1 pattern)', 'server/routes/lookups.js', /if \(!allowed\.length\) return res\.json\(\[\]\);/);
-check('lookups.js — distinct createdByUserId sorgusu', 'server/routes/lookups.js', /distinct: \['createdByUserId'\]/);
+// 2026-08-19 review fix — Prisma SQL Server'da findMany({distinct}) gerçek
+// bir SQL DISTINCT üretmiyor (in-memory post-processing, take sınırı yok);
+// groupBy ise gerçekten GROUP BY'a çevriliyor (doğrulandı: sorgu logunda).
+check('lookups.js — SQL seviyesinde gerçek tekilleştirme (groupBy, findMany+distinct DEĞİL)', 'server/routes/lookups.js', /prisma\.case\.groupBy\(\{\s*\n\s*by: \['createdByUserId'\],/);
+check('lookups.js — eski findMany+distinct deseni kalmamış', 'server/routes/lookups.js', (content) => !/distinct: \['createdByUserId'\]/.test(content));
+check('schema.prisma — desteleyici index (companyId, createdByUserId) eklendi', 'prisma/schema.prisma', /@@index\(\[companyId, createdByUserId\]\)/);
+check('migration — index oluşturma dosyası mevcut', 'prisma/migrations/20260819c_case_created_by_index/migration.sql', /CREATE NONCLUSTERED INDEX \[Case_companyId_createdByUserId_idx\]/);
 check('cases.js — createdByUserId query param filters\'a geçiyor', 'server/routes/cases.js', /createdByUserId: typeof f\.createdByUserId === 'string' \? f\.createdByUserId : undefined,/);
 check('caseRepository.js — createdByUserId where clause\'a uygulanıyor (personId ile aynı yerde)', 'server/db/caseRepository.js', /if \(f\.personId\) where\.assignedPersonId = f\.personId;\s*\n[\s\S]{0,200}if \(f\.createdByUserId\) where\.createdByUserId = f\.createdByUserId;/);
 check('types.ts — CaseFilters.createdByUserId eklendi', 'src/features/cases/types.ts', /createdByUserId\?: string;/);

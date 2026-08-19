@@ -1856,6 +1856,9 @@ model Case {
   @@index([companyId, packageId])
   /// M6.1 — "Yanıt bekliyor" filtresi (M6.3 list/board) için.
   @@index([companyId, pendingCustomerReply])
+  /// 2026-08-19 review fix — "Vaka Sahibi" filtresi (/api/lookups/case-creators)
+  /// groupBy([companyId, createdByUserId])'yi destekler.
+  @@index([companyId, createdByUserId])
 }
 
 // CaseReminder — Faz 2 §6 "Bana Hatırlat" özelliği. Kullanıcı bir vakayı

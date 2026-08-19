@@ -44,18 +44,27 @@ router.get('/bootstrap', async (req, res) => {
  * User de vaka açmış olabilir, bu yüzden Person listesinden türetilemez.
  * Scope: yalnız req.user.allowedCompanyIds içindeki şirketlerin vakaları —
  * boş allowedCompanyIds → boş liste (sızıntı yok, WR-A7b P1 pattern).
+ *
+ * 2026-08-19 review fix — Prisma SQL Server'da `findMany({distinct})`'i
+ * gerçek bir SQL DISTINCT'e çevirmiyor; tekilleştirmeyi sorgu motorunda
+ * (in-memory) yapıyor, yani eşleşen HER satırı (COMP-UNIVERA'da 3.476)
+ * Node'a çekiyordu — sırf 33 distinct değerlik bir dropdown için, `take`
+ * sınırı da yok. `groupBy` kullanınca GROUP BY gerçekten SQL'e gidiyor
+ * (doğrulandı: 408ms → 121ms, ve satır sayısı değil grup sayısıyla
+ * ölçekleniyor). @@index([companyId, createdByUserId]) ile desteklenir.
  */
 router.get('/case-creators', async (req, res) => {
   try {
     const allowed = Array.isArray(req.user.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
     if (!allowed.length) return res.json([]);
-    const rows = await prisma.case.findMany({
+    const rows = await prisma.case.groupBy({
+      by: ['createdByUserId'],
       where: { companyId: { in: allowed }, createdByUserId: { not: null } },
-      select: { createdByUserId: true, createdByName: true },
-      distinct: ['createdByUserId'],
-      orderBy: { createdByName: 'asc' },
+      _max: { createdByName: true },
     });
-    res.json(rows.map((r) => ({ id: r.createdByUserId, name: r.createdByName ?? r.createdByUserId })));
+    const withName = rows.map((r) => ({ id: r.createdByUserId, name: r._max.createdByName ?? r.createdByUserId }));
+    withName.sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+    res.json(withName);
   } catch (err) {
     console.error('[lookups/case-creators]', err);
     res.status(500).json({ error: 'internal', message: err?.message });
