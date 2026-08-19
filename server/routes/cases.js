@@ -1088,6 +1088,7 @@ const TAGGING_REVIEW_FIELD_KEYS = [
   'closingRootCauseDetailVerdict', 'closingRootCauseDetailCorrectedCode',
   'closingResolutionTypeVerdict', 'closingResolutionTypeCorrectedCode',
   'closingPermanentPreventionVerdict', 'closingPermanentPreventionCorrectedCode',
+  'requestTypeVerdict', 'requestTypeCorrectedCode',
 ];
 
 router.put(

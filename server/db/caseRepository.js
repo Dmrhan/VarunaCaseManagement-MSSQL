@@ -1318,7 +1318,17 @@ const TAGGING_FIELD_DEFS = [
   { prefix: 'closing', tag: 'RootCauseDetail', customField: 'rootCauseDetail', taxonomyType: 'rootCauseDetail' },
   { prefix: 'closing', tag: 'ResolutionType', customField: 'resolutionType', taxonomyType: 'resolutionType' },
   { prefix: 'closing', tag: 'PermanentPrevention', customField: 'permanentPrevention', taxonomyType: 'permanentPrevention' },
+  // 2026-08-19 — Talep Türü. Diğer 9'dan farklı: kaynağı customFields JSON
+  // DEĞİL Case.requestType kolonu, geçerli seçenekleri TaxonomyDef DEĞİL
+  // sabit 5 değerlik enum (M_REQUEST). source:'enum' bu iki noktada
+  // (upsertTaggingReview'daki correction-doğrulama + original-snapshot)
+  // ayrı dallanma tetikler; prefix boş çünkü DB kolonu "requestType..."
+  // (ne "opening" ne "closing").
+  { prefix: '', tag: 'requestType', customField: 'requestType', source: 'enum' },
 ];
+// requestType düzeltme kodunu (ASCII: Bilgi/Oneri/Talep/Sikayet/Hata) TR
+// etikete çevirir — M_REQUEST'in tersi, TaxonomyDef'e ihtiyaç duymaz.
+const R_REQUEST_TYPE = Object.fromEntries(Object.entries(M_REQUEST).map(([tr, ascii]) => [ascii, tr]));
 
 // Vaka başına maksimum ek sayısı — kanal (browser upload / Connect ingest)
 // FARK ETMEKSİZİN geçerli bir iş kuralı. requestUpload (browser, aşağıda)
@@ -5812,21 +5822,25 @@ export const caseRepository = {
     }
 
     // correctedCode → kendi taxonomyType'ına karşı tek batched sorgu.
+    // requestType (source:'enum') TaxonomyDef'e hiç sorulmaz — sabit
+    // M_REQUEST/R_REQUEST_TYPE eşlemesine karşı doğrulanır.
     const correctedEntries = TAGGING_FIELD_DEFS
       .map((def) => ({ def, code: input[`${def.prefix}${def.tag}CorrectedCode`] }))
       .filter((e) => e.code !== undefined && e.code !== null && e.code !== '');
+    const taxonomyCorrectedEntries = correctedEntries.filter((e) => e.def.source !== 'enum');
+    const enumCorrectedEntries = correctedEntries.filter((e) => e.def.source === 'enum');
 
-    if (correctedEntries.length) {
+    if (taxonomyCorrectedEntries.length) {
       const rows = await prisma.taxonomyDef.findMany({
         where: {
           companyId,
           isActive: true,
-          OR: correctedEntries.map((e) => ({ taxonomyType: e.def.taxonomyType, code: e.code })),
+          OR: taxonomyCorrectedEntries.map((e) => ({ taxonomyType: e.def.taxonomyType, code: e.code })),
         },
         select: { taxonomyType: true, code: true, label: true },
       });
       const found = new Map(rows.map((r) => [`${r.taxonomyType}::${r.code}`, r.label]));
-      for (const e of correctedEntries) {
+      for (const e of taxonomyCorrectedEntries) {
         const label = found.get(`${e.def.taxonomyType}::${e.code}`);
         if (!label) {
           return {
@@ -5836,6 +5850,16 @@ export const caseRepository = {
         }
         e.label = label;
       }
+    }
+    for (const e of enumCorrectedEntries) {
+      const label = R_REQUEST_TYPE[e.code];
+      if (!label) {
+        return {
+          error: 'invalid_input',
+          message: `Geçersiz doğru etiket kodu: ${e.def.prefix}${e.def.tag} = "${e.code}".`,
+        };
+      }
+      e.label = label;
     }
     const correctedByDef = new Map(correctedEntries.map((e) => [e.def, e]));
 
@@ -5862,11 +5886,20 @@ export const caseRepository = {
       return prisma.caseTaggingReview.update({ where: { caseId: id }, data });
     }
 
-    const caseRow = await prisma.case.findUnique({ where: { id }, select: { customFields: true } });
+    const caseRow = await prisma.case.findUnique({ where: { id }, select: { customFields: true, requestType: true } });
     const smartTicket = caseRow?.customFields?.smartTicket ?? {};
     const closure = smartTicket?.closure ?? {};
     const originalData = {};
     for (const def of TAGGING_FIELD_DEFS) {
+      if (def.source === 'enum') {
+        // requestType — Case kolonundan doğrudan (DB'de zaten ASCII kod:
+        // Bilgi/Oneri/Talep/Sikayet/Hata). customFields JSON'ına hiç bakmaz.
+        originalData[`${def.prefix}${def.tag}OriginalCode`] = caseRow?.requestType ?? null;
+        originalData[`${def.prefix}${def.tag}OriginalLabel`] = caseRow?.requestType
+          ? (R_REQUEST_TYPE[caseRow.requestType] ?? caseRow.requestType)
+          : null;
+        continue;
+      }
       const src = def.prefix === 'opening' ? smartTicket : closure;
       originalData[`${def.prefix}${def.tag}OriginalCode`] = src?.[def.customField] ?? null;
       originalData[`${def.prefix}${def.tag}OriginalLabel`] = src?.[`${def.customField}Label`] ?? null;

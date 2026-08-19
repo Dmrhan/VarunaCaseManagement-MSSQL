@@ -2416,6 +2416,17 @@ model CaseTaggingReview {
   closingPermanentPreventionCorrectedCode  String? @db.NVarChar(255)
   closingPermanentPreventionCorrectedLabel String? @db.NVarChar(Max)
 
+  /// 2026-08-19 — Talep Türü doğrulaması. Diğer 9 etiketten farklı: kaynağı
+  /// Case.customFields.smartTicket JSON'ı DEĞİL, doğrudan Case.requestType
+  /// kolonu; geçerli seçenekleri TaxonomyDef DEĞİL, sabit 5 değerlik enum
+  /// (Bilgi/Öneri/Talep/Şikayet/Hata). Kolon ailesi aynı desende (prefix'siz —
+  /// ne "opening" ne "closing"), Original/Verdict/Corrected anlamı aynı.
+  requestTypeOriginalCode   String? @db.NVarChar(255)
+  requestTypeOriginalLabel  String? @db.NVarChar(Max)
+  requestTypeVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  requestTypeCorrectedCode  String? @db.NVarChar(255)
+  requestTypeCorrectedLabel String? @db.NVarChar(Max)
+
   note String? @db.NVarChar(Max)
 
   reviewerId   String?   @db.NVarChar(450)
