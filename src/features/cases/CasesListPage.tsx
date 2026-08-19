@@ -516,6 +516,7 @@ export function CasesListPage({
     filters.teamId,
     filters.teamIds,
     filters.personId,
+    filters.createdByUserId,
     filters.dateFrom,
     filters.dateTo,
     filters.customerMatchPending,

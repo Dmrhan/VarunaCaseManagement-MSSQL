@@ -43,6 +43,11 @@ check('CasesListPage.tsx — Vaka Sahibi bölümü Kişi ile Tarih arasında ren
 check('CasesListPage.tsx — Vaka Sahibi seçimi filters.createdByUserId\'a yazıyor', 'src/features/cases/CasesListPage.tsx', /setFilters\(\(f\) => \(\{ \.\.\.f, createdByUserId: e\.target\.value \|\| undefined \}\)\)/);
 check('CasesListPage.tsx — aktif filtre sayacı createdByUserId\'ı kapsıyor', 'src/features/cases/CasesListPage.tsx', /\(filters\.createdByUserId \? 1 : 0\)/);
 check('CasesListPage.tsx — initialFilters reset createdByUserId\'ı sıfırlıyor', 'src/features/cases/CasesListPage.tsx', /personId: '',\s*\n\s*createdByUserId: '',/);
+// 2026-08-19 review fix — filters.createdByUserId liste-yükleme effect'inin
+// dependency listesinde YOKTU: seçim state'i güncelliyordu (çip/sayaç
+// görünüyordu) ama gerçek fetch hiç tetiklenmiyordu, başka bir filtre/
+// sayfa/sıralama değişene kadar eski sonuçlar ekranda kalıyordu.
+check('CasesListPage.tsx — filters.createdByUserId liste-yükleme effect\'inin dependency\'sinde', 'src/features/cases/CasesListPage.tsx', /filters\.personId,\s*\n\s*filters\.createdByUserId,\s*\n\s*filters\.dateFrom,/);
 
 console.log(`\n${pass} geçti, ${fail} başarısız.`);
 if (fail > 0) process.exitCode = 1;
