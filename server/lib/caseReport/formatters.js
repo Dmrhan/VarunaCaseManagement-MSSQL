@@ -225,6 +225,7 @@ export function applyFormat(col, raw) {
       case 'solutionStepSource':
       case 'customerType':
       case 'caseRequestType':
+      case 'caseOrigin':
       case 'callOutcome':
         return formatEnum(raw, fmt);
       case 'datetimeTr':

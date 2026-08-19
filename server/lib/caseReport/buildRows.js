@@ -186,6 +186,7 @@ export function buildReportRows(dbRows, columns, aggregates) {
   const fileAggs = aggregates?.caseFile;
   const callAggs = aggregates?.caseCall;
   const transferAggs = aggregates?.caseTransfer;
+  const firstAssignmentAggs = aggregates?.firstAssignment;
   const out = new Array(dbRows.length);
   for (let i = 0; i < dbRows.length; i++) {
     const db = dbRows[i];
@@ -220,6 +221,7 @@ export function buildReportRows(dbRows, columns, aggregates) {
           : col.aggregateKey === 'caseFile'     ? fileAggs
           : col.aggregateKey === 'caseCall'     ? callAggs
           : col.aggregateKey === 'caseTransfer' ? transferAggs
+          : col.aggregateKey === 'firstAssignment' ? firstAssignmentAggs
           : null;
         if (aggMap) {
           const payload = aggMap.get(db.id);
