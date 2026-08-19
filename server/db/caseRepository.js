@@ -12,6 +12,7 @@ import { ActorRequiredError } from '../lib/actor.js';
 import { devopsClient, parseWorkItemId } from '../lib/devopsClient.js';
 import crypto from 'node:crypto';
 import { resolveSlaPolicy, resolveTargetMinutes } from '../lib/sla/slaPolicyResolver.js';
+import { parseIstanbulDateBound } from '../lib/istanbulDateBounds.js';
 import { getEffectiveCalendar, addBusinessMinutes, businessMinutesBetween, getCalendarGateFor, diffMinutes, netDayMinutes } from '../lib/sla/businessTime.js';
 import { closeCustomerWaitPatch } from '../lib/sla/customerWaitPause.js';
 import { resolveExtendedTargetMinutes, extendedSlaTriggerMet, buildExtendedSlaPatch } from '../lib/sla/extendedSla.js';
@@ -7085,24 +7086,27 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null, roleDefaultScope
   // Vaka Sahibi — vakayı açan kullanıcı (Case.createdByUserId), atamadan
   // bağımsız. "Kişi" filtresinden (assignedPersonId) AYRI kavram.
   if (f.createdByUserId) where.createdByUserId = f.createdByUserId;
-  if (f.dateFrom) where.createdAt = { ...(where.createdAt ?? {}), gte: new Date(f.dateFrom) };
-  if (f.dateTo) {
-    const to = new Date(f.dateTo);
-    to.setHours(23, 59, 59, 999);
-    where.createdAt = { ...(where.createdAt ?? {}), lte: to };
-  }
+  // 2026-08-19 fix — `new Date('YYYY-MM-DD')` HER ZAMAN UTC gece yarısı
+  // üretir (sunucu saat diliminden bağımsız, ECMAScript spec); TR gün
+  // sınırına anlanmadan doğrudan gte/lte'ye verilirse gün ~3 saat kayar
+  // (TR gününün ilk 3 saati dışlanır, ertesi günün ilk 3 saati dahil olur).
+  // parseIstanbulDateBound Rapor Studyosu'ndaki (server/lib/caseReport/
+  // buildWhere.js) daha önce düzeltilmiş aynı deseni paylaşılan tek
+  // noktadan uygular.
+  const dateFrom = parseIstanbulDateBound(f.dateFrom);
+  const dateTo = parseIstanbulDateBound(f.dateTo, { endOfDay: true });
+  if (dateFrom) where.createdAt = { ...(where.createdAt ?? {}), gte: dateFrom };
+  if (dateTo) where.createdAt = { ...(where.createdAt ?? {}), lte: dateTo };
   // 2026-08-19 — Çözüm Tarihi filtresi (Case.resolvedAt), Açılış Tarihi'nden
   // (dateFrom/dateTo → createdAt, üstte) BİLEREK ayrı. Vaka Etiket Doğrulama
   // ekranı "bugün açılan" değil "bugün çözülen" vakaları arıyor — aynı isimli
   // filtreyi paylaşsaydı diğer ekranlardaki (CasesListPage vb.) createdAt
   // anlamı bozulurdu. Additive: yalnız gönderen çağıran (tagging-review)
   // etkilenir.
-  if (f.resolvedDateFrom) where.resolvedAt = { ...(where.resolvedAt ?? {}), gte: new Date(f.resolvedDateFrom) };
-  if (f.resolvedDateTo) {
-    const to = new Date(f.resolvedDateTo);
-    to.setHours(23, 59, 59, 999);
-    where.resolvedAt = { ...(where.resolvedAt ?? {}), lte: to };
-  }
+  const resolvedDateFrom = parseIstanbulDateBound(f.resolvedDateFrom);
+  const resolvedDateTo = parseIstanbulDateBound(f.resolvedDateTo, { endOfDay: true });
+  if (resolvedDateFrom) where.resolvedAt = { ...(where.resolvedAt ?? {}), gte: resolvedDateFrom };
+  if (resolvedDateTo) where.resolvedAt = { ...(where.resolvedAt ?? {}), lte: resolvedDateTo };
   // Phase D — Müşteri eşleştirme bekleyen vakalar filter.
   if (f.customerMatchPending === true) where.customerMatchPending = true;
   if (f.customerMatchPending === false) where.customerMatchPending = false;
