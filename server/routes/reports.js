@@ -10,7 +10,10 @@
  *   Frontend hiçbir scope kararı vermez; her endpoint allowedCompanyIds
  *   ile intersect eder.
  *
- * Phase 1 export sınırı: 5000 satır. Üzeri 400 + clear error message.
+ * Export sınırı: 20.000 satır (2026-08-19'da 5.000'den yükseltildi — gerçek
+ * kullanım hacmi rahatça bunun üzerinde, DB tarafı 14K+ satırlık sorguları
+ * saniyeler içinde karşılıyor; darboğaz bu sabitti, veritabanı değil).
+ * Üzeri 400 + clear error message.
  */
 import { Router } from 'express';
 import * as XLSX from 'xlsx';
@@ -96,7 +99,7 @@ async function loadAggregatesIfNeeded(columns, items) {
   return aggregates;
 }
 const PREVIEW_MAX_PAGE_SIZE = 200;
-const EXPORT_MAX_ROWS = 5000;
+const EXPORT_MAX_ROWS = 20000;
 
 function handleAuthorizationRuntimeError(res, err) {
   if (err instanceof AuthorizationRuntimeError) {
@@ -244,7 +247,7 @@ router.post('/cases/preview', async (req, res) => {
  * POST /api/reports/cases/export
  * Body: { columns: string[], filters?: object }
  * Response: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
- * Sınır: EXPORT_MAX_ROWS (Phase 1 = 5000). Aşılırsa 400.
+ * Sınır: EXPORT_MAX_ROWS (20.000). Aşılırsa 400.
  */
 router.post('/cases/export', async (req, res) => {
   const body = req.body ?? {};
