@@ -3,8 +3,10 @@
  *
  * Sözleşme:
  *   - `loadSolutionStepAggregates(prisma, caseIds)` → `Map<caseId, AggregatePayload>`
- *   - Tek bir `prisma.caseSolutionStep.findMany({ where: { caseId: { in: caseIds } } })`
- *     çağrısı. N+1 yasak — preview/export aynı toplu fetch'i paylaşır.
+ *   - `findManyChunked()` helper'ıyla toplu fetch (bkz. aşağıdaki tanım).
+ *     N+1 yasak — preview/export aynı toplu fetch'i paylaşır.
+ *     (2026-08-19: MSSQL 2100 parametre sınırı için 1000'lik chunk'lara
+ *     bölünür — bkz. findManyChunked tanımı.)
  *   - caseIds[] boşsa boş Map döner (DB'ye dokunma).
  *   - Caller aggregate kolon seçilmediyse bu helper'ı hiç çağırmaz (perf).
  *
@@ -35,6 +37,30 @@
 
 const TRIED_STATUSES = new Set(['tried', 'worked', 'not_worked']);
 const COMPLETED_STATUSES = new Set(['tried', 'worked', 'not_worked', 'skipped']);
+
+// 2026-08-19 fix — MSSQL parametre sınırı (2100). Rapor Studyosu export'u
+// tek seferde 20.000 case id'ye kadar aggregate sorgusu atabiliyor;
+// caseId filtresi tek IN(...) sorgusunda kalırsa liste kolayca
+// parametre sınırını aşıyor (code 8003, "The incoming request has too many
+// parameters"). TÜM aggregate loader'lar caseIds'i 1000'lik gruplara bölüp
+// ayrı sorgularla çeker (caseRepository.js'teki aynı chunking deseni —
+// findManyChunked). Chunk case ID'ye göre bölündüğü için (zamana göre
+// DEĞİL), bir case'in tüm satırları her zaman AYNI chunk'ta kalır —
+// per-case "en erken/en son" mantığı (orderBy her chunk'ta korunur) bozulmaz.
+const CASE_ID_CHUNK_SIZE = 1000;
+async function findManyChunked(model, caseIds, { where = {}, select, orderBy } = {}) {
+  const out = [];
+  for (let i = 0; i < caseIds.length; i += CASE_ID_CHUNK_SIZE) {
+    const chunk = caseIds.slice(i, i + CASE_ID_CHUNK_SIZE);
+    const rows = await model.findMany({
+      where: { ...where, caseId: { in: chunk } },
+      select,
+      ...(orderBy ? { orderBy } : {}),
+    });
+    out.push(...rows);
+  }
+  return out;
+}
 
 function maxDate(...vals) {
   let best = null;
@@ -132,9 +158,8 @@ function summarize(steps) {
 export async function loadSolutionStepAggregates(prisma, caseIds) {
   const map = new Map();
   if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
-  // Tek query — tüm caseId'lerin step'lerini bir kerede çek.
-  const rows = await prisma.caseSolutionStep.findMany({
-    where: { caseId: { in: caseIds } },
+  // caseIds 1000'lik gruplara bölünür (MSSQL 2100 parametre sınırı — bkz. findManyChunked).
+  const rows = await findManyChunked(prisma.caseSolutionStep, caseIds, {
     select: {
       caseId: true,
       stepIndex: true,
@@ -248,8 +273,7 @@ function summarizeActivities(rows) {
 export async function loadCaseActivityAggregates(prisma, caseIds) {
   const map = new Map();
   if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
-  const rows = await prisma.caseActivity.findMany({
-    where: { caseId: { in: caseIds } },
+  const rows = await findManyChunked(prisma.caseActivity, caseIds, {
     select: { caseId: true, actor: true, at: true, actionType: true, toValue: true },
   });
   const byCase = new Map();
@@ -316,8 +340,7 @@ function summarizeNotes(rows) {
 export async function loadCaseNoteAggregates(prisma, caseIds) {
   const map = new Map();
   if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
-  const rows = await prisma.caseNote.findMany({
-    where: { caseId: { in: caseIds } },
+  const rows = await findManyChunked(prisma.caseNote, caseIds, {
     select: { caseId: true, authorName: true, visibility: true, createdAt: true },
   });
   const byCase = new Map();
@@ -373,8 +396,7 @@ function summarizeFiles(rows) {
 export async function loadCaseFileAggregates(prisma, caseIds) {
   const map = new Map();
   if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
-  const rows = await prisma.caseAttachment.findMany({
-    where: { caseId: { in: caseIds } },
+  const rows = await findManyChunked(prisma.caseAttachment, caseIds, {
     select: { caseId: true, fileSize: true },
   });
   const byCase = new Map();
@@ -426,8 +448,7 @@ function summarizeCalls(rows) {
 export async function loadCaseCallAggregates(prisma, caseIds) {
   const map = new Map();
   if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
-  const rows = await prisma.caseCallLog.findMany({
-    where: { caseId: { in: caseIds } },
+  const rows = await findManyChunked(prisma.caseCallLog, caseIds, {
     select: { caseId: true, callDate: true, callOutcome: true },
   });
   const byCase = new Map();
@@ -487,8 +508,7 @@ function summarizeTransfers(rows, teamNamesById) {
 export async function loadCaseTransferAggregates(prisma, caseIds) {
   const map = new Map();
   if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
-  const rows = await prisma.caseTransfer.findMany({
-    where: { caseId: { in: caseIds } },
+  const rows = await findManyChunked(prisma.caseTransfer, caseIds, {
     select: { caseId: true, toTeamId: true, transferredAt: true },
   });
   // Team isimleri için tek ek query (N+1 değil — distinct toTeamId set'i)
@@ -511,6 +531,159 @@ export async function loadCaseTransferAggregates(prisma, caseIds) {
   return map;
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// İlk Atanan Kişi / Takım aggregate
+// ──────────────────────────────────────────────────────────────────────
+//
+// Sözleşme — export-vaka-ilk-atanan-kapatan-temmuz-agustos.mjs script'iyle
+// başlayan mantık, rapor pipeline'ına taşındı, sonra code-review bulgusuyla
+// düzeltildi:
+//   - "İlk atanan kişi" — kişi değişikliği İKİ farklı kaynaktan gelebilir:
+//       1) CaseActivity fieldName='assignedPersonId' — claim()/manuel atama
+//          yolu.
+//       2) CaseTransfer.fromPersonId/toPersonId — transferCase() yolu.
+//          ÖNEMLİ: transferCase() (caseRepository.js ~5255-5303) kişi
+//          değişse bile SADECE fieldName='assignedTeamId' CaseActivity
+//          yazar — assignedPersonId için HİÇ activity satırı YOK. Bu
+//          kaynak atlanırsa (yalnız CaseActivity okunursa), oluşturulurken
+//          atanmış bir vaka sonradan transferCase ile başka birine (veya
+//          havuza) devredildiğinde firstPersonRawByCase boş kalır ve
+//          fallback MEVCUT (transfer SONRASI, yanlış) atananı "ilk atanan"
+//          diye raporlar.
+//     Doğru çözüm: iki kaynaktan gelen olaylar caseId bazında zaman
+//     damgasına göre BİRLEŞTİRİLİR (CaseActivity.at / CaseTransfer.
+//     transferredAt); kronolojik olarak EN ERKEN olay hangisiyse (activity
+//     veya transfer fark etmez) ondan fromValue/fromPersonId (doluysa) yoksa
+//     toValue/toPersonId alınır. Hiç olay yoksa → mevcut
+//     Case.assignedPersonName (case hiç el değiştirmemiş, fallback doğru).
+//   - "İlk atanan takım" — fieldName='assignedTeamId' EN ERKEN activity.
+//       - fromValue doluysa (zaten bir takımdan başka bir takıma geçmişti)
+//         → fromValue = gerçek ilk atanan takım.
+//       - fromValue boşsa (hiç takımı yokken ilk kez atandı) → toValue =
+//         gerçek ilk atanan takım.
+//     Hiç activity yoksa → mevcut Case.assignedTeamName. Transfer action'ı
+//     fromValue/toValue'ya takım ADINI yazar; ama case create sırasındaki
+//     İLK atama farklı bir action path'inden geçtiği için toValue'ya ham
+//     Team.id yazabiliyor (gerçek veride görüldü — bkz. smoke test) — bu
+//     yüzden kişi çözümlemesiyle aynı desende Team id→name haritası da var.
+//   - Kişi adı çözümleme — assignedPersonId activity'lerinde toValue bazen
+//     raw Person.id (claim() yolu), bazen okunabilir ad (auto-assign/manuel
+//     atama yolu). Tek haritadan her ikisi de çözülür.
+//
+// 5 fixed query (case sayısından bağımsız — N+1 değil): CaseActivity x2
+// (person + team fieldName'leri ayrı where) + CaseTransfer (person değişim
+// olaylarının ikinci kaynağı) + Person + Team (isim çözümleme). Case'in
+// kendi mevcut assignedPersonName/assignedTeamName'i (fallback için) ayrı
+// bir küçük query ile çekilir — aggregate loader'lar yalnız caseIds alır,
+// dbRows'a erişimi yok (buildRows.js'teki genel sözleşme).
+
+function buildEmptyFirstAssignmentPayload() {
+  return { firstAssignedPersonName: '', firstAssignedTeamName: '' };
+}
+
+export async function loadFirstAssignmentAggregates(prisma, caseIds) {
+  const map = new Map();
+  if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
+
+  // Case.id de caseIds kadar büyüyebildiği için ayrıca chunk'lanır
+  // (findManyChunked "caseId" alanına göre filtreliyor — Case'in kendi
+  // PK'sı "id", o yüzden burada inline chunking).
+  const currentRows = [];
+  for (let i = 0; i < caseIds.length; i += CASE_ID_CHUNK_SIZE) {
+    const chunk = caseIds.slice(i, i + CASE_ID_CHUNK_SIZE);
+    currentRows.push(...await prisma.case.findMany({
+      where: { id: { in: chunk } },
+      select: { id: true, assignedPersonName: true, assignedTeamName: true },
+    }));
+  }
+  const currentByCase = new Map(currentRows.map((r) => [r.id, r]));
+
+  const [personHistory, teamHistory, transferHistory] = await Promise.all([
+    findManyChunked(prisma.caseActivity, caseIds, {
+      where: { fieldName: 'assignedPersonId' },
+      select: { caseId: true, fromValue: true, toValue: true, at: true },
+      orderBy: { at: 'asc' },
+    }),
+    findManyChunked(prisma.caseActivity, caseIds, {
+      where: { fieldName: 'assignedTeamId' },
+      select: { caseId: true, fromValue: true, toValue: true, at: true },
+      orderBy: { at: 'asc' },
+    }),
+    findManyChunked(prisma.caseTransfer, caseIds, {
+      select: { caseId: true, fromPersonId: true, toPersonId: true, transferredAt: true },
+      orderBy: { transferredAt: 'asc' },
+    }),
+  ]);
+
+  // Kişi değişikliği olaylarını İKİ kaynaktan (CaseActivity + CaseTransfer)
+  // caseId bazında birleştirip zaman damgasına göre sırala — hangisi
+  // kronolojik olarak EN ERKEN ise ondan fromValue/fromPersonId (doluysa)
+  // yoksa toValue/toPersonId alınır (bkz. yukarıdaki sözleşme yorumu).
+  const personEventsByCase = new Map();
+  for (const h of personHistory) {
+    let bucket = personEventsByCase.get(h.caseId);
+    if (!bucket) { bucket = []; personEventsByCase.set(h.caseId, bucket); }
+    bucket.push({ at: h.at, fromRaw: h.fromValue, toRaw: h.toValue });
+  }
+  for (const t of transferHistory) {
+    let bucket = personEventsByCase.get(t.caseId);
+    if (!bucket) { bucket = []; personEventsByCase.set(t.caseId, bucket); }
+    bucket.push({ at: t.transferredAt, fromRaw: t.fromPersonId, toRaw: t.toPersonId });
+  }
+  const firstPersonRawByCase = new Map();
+  for (const [caseId, events] of personEventsByCase) {
+    // Takım-sadece transferler (CaseTransfer.fromPersonId/toPersonId ikisi
+    // de null — kişi hiç değişmedi/dokunulmadı) kişi hakkında BİLGİ TAŞIMAZ;
+    // en erken olay seçilirken bunlar yok sayılmalı, yoksa gerçek ilk
+    // kişi-olayından daha erken tarihli boş bir transfer, sonucu boşa
+    // düşürür (gerçek veride görüldü — bkz. smoke test).
+    const informative = events.filter((e) => e.fromRaw || e.toRaw);
+    if (informative.length === 0) continue; // hiç kişi-olayı yok → fallback (mevcut atanan) kullanılacak
+    informative.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+    const earliest = informative[0];
+    firstPersonRawByCase.set(caseId, earliest.fromRaw || earliest.toRaw);
+  }
+  const firstTeamRawByCase = new Map();
+  for (const h of teamHistory) {
+    if (!firstTeamRawByCase.has(h.caseId)) firstTeamRawByCase.set(h.caseId, h.fromValue || h.toValue);
+  }
+
+  const rawPersonRefs = Array.from(new Set([...firstPersonRawByCase.values()].filter(Boolean)));
+  const persons = rawPersonRefs.length
+    ? await prisma.person.findMany({
+        where: { OR: [{ id: { in: rawPersonRefs } }, { name: { in: rawPersonRefs } }] },
+        select: { id: true, name: true },
+      })
+    : [];
+  const personById = new Map(persons.map((p) => [p.id, p.name]));
+  const personByName = new Map(persons.map((p) => [p.name, p.name]));
+  const resolvePersonName = (raw) => (!raw ? null : personById.get(raw) ?? personByName.get(raw) ?? raw);
+
+  const rawTeamRefs = Array.from(new Set([...firstTeamRawByCase.values()].filter(Boolean)));
+  const teams = rawTeamRefs.length
+    ? await prisma.team.findMany({
+        where: { OR: [{ id: { in: rawTeamRefs } }, { name: { in: rawTeamRefs } }] },
+        select: { id: true, name: true },
+      })
+    : [];
+  const teamById = new Map(teams.map((t) => [t.id, t.name]));
+  const teamByName = new Map(teams.map((t) => [t.name, t.name]));
+  const resolveTeamName = (raw) => (!raw ? null : teamById.get(raw) ?? teamByName.get(raw) ?? raw);
+
+  for (const id of caseIds) {
+    const current = currentByCase.get(id);
+    const p = buildEmptyFirstAssignmentPayload();
+    p.firstAssignedPersonName = firstPersonRawByCase.has(id)
+      ? (resolvePersonName(firstPersonRawByCase.get(id)) ?? '')
+      : (current?.assignedPersonName ?? '');
+    p.firstAssignedTeamName = firstTeamRawByCase.has(id)
+      ? (resolveTeamName(firstTeamRawByCase.get(id)) ?? '')
+      : (current?.assignedTeamName ?? '');
+    map.set(id, p);
+  }
+  return map;
+}
+
 /** Test/debug için saf summarize'lar ihraç edilir (smoke + unit). */
 export const __internal = {
   summarize,
@@ -527,4 +700,5 @@ export const __internal = {
   buildEmptyCallPayload,
   summarizeTransfers,
   buildEmptyTransferPayload,
+  buildEmptyFirstAssignmentPayload,
 };

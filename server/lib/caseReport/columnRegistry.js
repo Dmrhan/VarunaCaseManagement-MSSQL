@@ -66,18 +66,31 @@ export const REPORT_COLUMNS = [
   { id: 'companyName',    label: 'Şirket',      category: 'core', type: 'string', source: 'scalar', prismaField: 'companyName', excelWidth: 20 },
   { id: 'accountName',    label: 'Müşteri',     category: 'core', type: 'string', source: 'scalar', prismaField: 'accountName', excelWidth: 24 },
   { id: 'accountProjectName', label: 'Proje',   category: 'core', type: 'string', source: 'scalar', prismaField: 'accountProjectName', excelWidth: 20 },
+  // AccountProject.code — Account detay sayfasında "Proje Kodu" (kullanıcı
+  // dilinde "Proje Şifresi") olarak gösterilen alan. accountCompany.
+  // externalCustomerCode ("Müşteri Kodu") ile KARIŞTIRILMASIN — o
+  // AccountCompany (müşteri-şirket ilişkisi) seviyesinde, bu ise projenin
+  // KENDİ kodu (Case.accountProject join, to-one relation).
+  { id: 'accountProject.code', label: 'Proje Şifresi', category: 'core', type: 'string', source: 'join', joinTable: 'accountProject', joinField: 'code', excelWidth: 14 },
+  { id: 'origin',         label: 'Geliş Kanalı', category: 'core', type: 'string', source: 'scalar', prismaField: 'origin', format: 'caseOrigin' },
 
   // ── Sınıflandırma ────────────────────────────────────────────────
   { id: 'category',     label: 'Kategori',     category: 'classification', type: 'string', source: 'scalar', prismaField: 'category' },
   { id: 'subCategory',  label: 'Alt Kategori', category: 'classification', type: 'string', source: 'scalar', prismaField: 'subCategory' },
   { id: 'requestType',  label: 'Talep Türü',   category: 'classification', type: 'string', source: 'scalar', prismaField: 'requestType', format: 'caseRequestType' },
+  { id: 'productGroup', label: 'Ürün Grubu',   category: 'classification', type: 'string', source: 'scalar', prismaField: 'productGroup' },
   { id: 'productName',  label: 'Ürün',         category: 'classification', type: 'string', source: 'scalar', prismaField: 'productName' },
   { id: 'packageName',  label: 'Paket',        category: 'classification', type: 'string', source: 'scalar', prismaField: 'packageName' },
   { id: 'productVersion', label: 'Versiyon No', category: 'classification', type: 'string', source: 'scalar', prismaField: 'productVersion' },
 
   // ── Atama ────────────────────────────────────────────────────────
+  { id: 'createdByName',      label: 'Vaka Sahibi',  category: 'assignment', type: 'string', source: 'scalar', prismaField: 'createdByName' },
   { id: 'assignedTeamName',   label: 'Atanan Takım', category: 'assignment', type: 'string', source: 'scalar', prismaField: 'assignedTeamName' },
   { id: 'assignedPersonName', label: 'Atanan Kişi',  category: 'assignment', type: 'string', source: 'scalar', prismaField: 'assignedPersonName' },
+  // İlk atanan kişi/takım — history tabanlı aggregate (export-vaka-ilk-atanan-
+  // kapatan-temmuz-agustos.mjs script'iyle aynı mantık, bkz. aggregates.js).
+  { id: 'firstAssignment.personName', label: 'İlk Atanan Kişi',  category: 'assignment', type: 'string', source: 'aggregate', aggregateKey: 'firstAssignment', aggregateField: 'firstAssignedPersonName' },
+  { id: 'firstAssignment.teamName',   label: 'İlk Atanan Takım', category: 'assignment', type: 'string', source: 'aggregate', aggregateKey: 'firstAssignment', aggregateField: 'firstAssignedTeamName' },
   { id: 'supportLevel',       label: 'Destek Seviyesi', category: 'assignment', type: 'string', source: 'scalar', prismaField: 'supportLevel' },
   { id: 'escalationLevel',    label: 'Eskalasyon Seviyesi', category: 'assignment', type: 'string', source: 'scalar', prismaField: 'escalationLevel', format: 'escalationLevel' },
 
@@ -356,6 +369,14 @@ export function needsCaseCallAggregates(columns) {
 export function needsCaseTransferAggregates(columns) {
   for (const col of columns) {
     if (col.source === 'aggregate' && col.aggregateKey === 'caseTransfer') return true;
+  }
+  return false;
+}
+
+/** En az bir İlk Atanan Kişi/Takım aggregate kolonu seçili mi? */
+export function needsFirstAssignmentAggregates(columns) {
+  for (const col of columns) {
+    if (col.source === 'aggregate' && col.aggregateKey === 'firstAssignment') return true;
   }
   return false;
 }
