@@ -66,6 +66,12 @@ export const REPORT_COLUMNS = [
   { id: 'companyName',    label: 'Şirket',      category: 'core', type: 'string', source: 'scalar', prismaField: 'companyName', excelWidth: 20 },
   { id: 'accountName',    label: 'Müşteri',     category: 'core', type: 'string', source: 'scalar', prismaField: 'accountName', excelWidth: 24 },
   { id: 'accountProjectName', label: 'Proje',   category: 'core', type: 'string', source: 'scalar', prismaField: 'accountProjectName', excelWidth: 20 },
+  // AccountProject.code — Account detay sayfasında "Proje Kodu" (kullanıcı
+  // dilinde "Proje Şifresi") olarak gösterilen alan. accountCompany.
+  // externalCustomerCode ("Müşteri Kodu") ile KARIŞTIRILMASIN — o
+  // AccountCompany (müşteri-şirket ilişkisi) seviyesinde, bu ise projenin
+  // KENDİ kodu (Case.accountProject join, to-one relation).
+  { id: 'accountProject.code', label: 'Proje Şifresi', category: 'core', type: 'string', source: 'join', joinTable: 'accountProject', joinField: 'code', excelWidth: 14 },
   { id: 'origin',         label: 'Geliş Kanalı', category: 'core', type: 'string', source: 'scalar', prismaField: 'origin', format: 'caseOrigin' },
 
   // ── Sınıflandırma ────────────────────────────────────────────────

@@ -1,13 +1,14 @@
 /**
  * Rapor Studyosu'na 6 yeni kolon: Geliş Kanalı, Ürün Grubu, Vaka Sahibi,
- * İlk Atanan Kişi, İlk Atanan Takım.
+ * İlk Atanan Kişi, İlk Atanan Takım, Proje Şifresi.
  *
- * "Proje Şifresi" BİLEREK eklenmedi — bu veri zaten registry'de
- * `accountCompany.externalCustomerCode` olarak "Müşteri Kodu" etiketiyle
- * mevcut (callLogRepository.js'teki "Proje şifreden çözülür" ile aynı
- * DB alanı, AccountCompany.externalCustomerCode). Aynı veriyi iki farklı
- * etiketle iki ayrı kolon olarak eklemek, kullanıcıyı picker'da birebir
- * aynı değeri veren iki kolonla karşı karşıya bırakırdı — kafa karıştırıcı.
+ * "Proje Şifresi" (AccountProject.code) ilk turda eklenmedi — AccountCompany.
+ * externalCustomerCode ("Müşteri Kodu") ile aynı veri sanılmıştı. Kullanıcı
+ * ekran görüntüsüyle (Account detay sayfası, Projeler kartı, "99746" kodu)
+ * bunun AYRI bir alan olduğunu doğruladı: Müşteri Kodu AccountCompany
+ * (müşteri-şirket ilişkisi) seviyesinde, Proje Şifresi ise projenin KENDİ
+ * kodu (AccountProject.code) — Case.accountProject join (to-one relation)
+ * ile okunuyor, yeni bir aggregate/formatter gerektirmedi.
  *
  * İlk Atanan Kişi/Takım — export-vaka-ilk-atanan-kapatan-temmuz-agustos.mjs
  * script'indeki mantığın rapor pipeline'ına taşınmış hali (yeni bir
@@ -51,6 +52,8 @@ checkSrc('columnRegistry.js — productGroup (Ürün Grubu) kolonu', 'server/lib
   /\{ id: 'productGroup', +label: 'Ürün Grubu',/);
 checkSrc('columnRegistry.js — createdByName (Vaka Sahibi) kolonu', 'server/lib/caseReport/columnRegistry.js',
   /\{ id: 'createdByName', +label: 'Vaka Sahibi',/);
+checkSrc('columnRegistry.js — accountProject.code (Proje Şifresi) kolonu — join source, accountCompany.externalCustomerCode\'dan AYRI', 'server/lib/caseReport/columnRegistry.js',
+  /\{ id: 'accountProject\.code', label: 'Proje Şifresi', +category: 'core', type: 'string', source: 'join', joinTable: 'accountProject', joinField: 'code',/);
 checkSrc('columnRegistry.js — firstAssignment.personName kolonu (aggregate source)', 'server/lib/caseReport/columnRegistry.js',
   /\{ id: 'firstAssignment\.personName', label: 'İlk Atanan Kişi', +category: 'assignment', type: 'string', source: 'aggregate', aggregateKey: 'firstAssignment', aggregateField: 'firstAssignedPersonName' \}/);
 checkSrc('columnRegistry.js — firstAssignment.teamName kolonu (aggregate source)', 'server/lib/caseReport/columnRegistry.js',
@@ -96,6 +99,22 @@ checkSrc('aggregates.js — loadFirstAssignmentAggregates export edilmiş', 'ser
         payload?.firstAssignedPersonName === 'Burak Demir');
       check('Gerçek vaka (VK-MPBQ07I3) — ilk atanan takım ham ID değil, "Mobil Takımı" (çözümlenmiş)',
         payload?.firstAssignedTeamName === 'Mobil Takımı');
+
+      // accountProject.code — bir projeye bağlı gerçek bir vakayla uçtan
+      // uca doğrulama (Case.accountProject join → AccountProject.code).
+      const { resolveColumns, buildPrismaSelect } = await import('../server/lib/caseReport/columnRegistry.js');
+      const { buildReportRows } = await import('../server/lib/caseReport/buildRows.js');
+      const { columns } = resolveColumns(['caseNumber', 'accountProject.code']);
+      const select = buildPrismaSelect(columns);
+      const c = await prisma.case.findFirst({ where: { accountProjectId: { not: null } }, select });
+      if (c) {
+        const rows = buildReportRows([c], columns, {});
+        check('accountProject.code — projeye bağlı gerçek bir vakada dolu ve DB\'deki kodla eşleşiyor',
+          typeof rows[0]?.['accountProject.code'] === 'string' && rows[0]['accountProject.code'].length > 0
+          && rows[0]['accountProject.code'] === c.accountProject?.code);
+      } else {
+        console.log('⚠ Projeye bağlı vaka bulunamadı — bu kontrol atlandı.');
+      }
     } finally {
       await prisma.$disconnect();
     }
