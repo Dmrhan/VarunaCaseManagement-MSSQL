@@ -521,6 +521,8 @@ export const caseService = {
       closingResolutionTypeCorrectedCode?: string | null;
       closingPermanentPreventionVerdict?: TaggingVerdict | null;
       closingPermanentPreventionCorrectedCode?: string | null;
+      requestTypeVerdict?: TaggingVerdict | null;
+      requestTypeCorrectedCode?: string | null;
     },
   ): Promise<CaseTaggingReview | undefined> {
     if (USE_MOCK) return undefined;

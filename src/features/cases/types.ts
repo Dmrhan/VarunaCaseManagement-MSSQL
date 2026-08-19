@@ -861,6 +861,13 @@ export interface CaseTaggingReview {
   closingPermanentPreventionCorrectedCode: string | null;
   closingPermanentPreventionCorrectedLabel: string | null;
 
+  /** 2026-08-19 — Talep Türü doğrulaması (source: enum, TaxonomyDef DEĞİL). */
+  requestTypeOriginalCode: string | null;
+  requestTypeOriginalLabel: string | null;
+  requestTypeVerdict: TaggingVerdict | null;
+  requestTypeCorrectedCode: string | null;
+  requestTypeCorrectedLabel: string | null;
+
   note: string | null;
   reviewerId: string | null;
   reviewerName: string | null;
