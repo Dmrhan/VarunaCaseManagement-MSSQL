@@ -215,7 +215,11 @@ function ExpandableCell({ text }: { text: string }) {
   );
 }
 
-const FILTER_KEY = 'varuna:tagging-review-filters-v2';
+// v3 — 2026-08-19: tarih filtresi Açılış Tarihi'nden (createdAt) Çözüm
+// Tarihi'ne (resolvedAt) geçti; eski v2 kaydı farklı bir alanı temsil
+// ediyordu, sürüm bilerek bumplandı ki eski dateFrom/dateTo kaydı yanlış
+// yorumlanıp sessizce "Çözüm Tarihi" gibi uygulanmasın.
+const FILTER_KEY = 'varuna:tagging-review-filters-v3';
 
 function formatUtcDateTime(value?: string | null): string {
   if (!value) return '';
@@ -228,7 +232,7 @@ function loadSavedFilters() {
   try {
     const raw = localStorage.getItem(FILTER_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as { dateFrom: string; dateTo: string; statuses: CaseStatus[]; teamId: string };
+    return JSON.parse(raw) as { resolvedDateFrom: string; resolvedDateTo: string; statuses: CaseStatus[]; teamId: string };
   } catch {
     return null;
   }
@@ -562,8 +566,8 @@ function TagSection({ title, defs, case_, draft, taxonomies, overrideOptionsByKe
 // ── Ana sayfa ───────────────────────────────────────────────────────────────
 
 export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPageProps) {
-  const [dateFrom, setDateFrom] = useState(() => loadSavedFilters()?.dateFrom ?? '');
-  const [dateTo, setDateTo]     = useState(() => loadSavedFilters()?.dateTo ?? '');
+  const [resolvedDateFrom, setResolvedDateFrom] = useState(() => loadSavedFilters()?.resolvedDateFrom ?? '');
+  const [resolvedDateTo, setResolvedDateTo]     = useState(() => loadSavedFilters()?.resolvedDateTo ?? '');
   const [statuses, setStatuses] = useState<CaseStatus[]>(() => loadSavedFilters()?.statuses ?? ['Çözüldü']);
   const [teamId, setTeamId]     = useState(() => loadSavedFilters()?.teamId ?? '');
   const [page, setPage]         = useState(1);
@@ -600,8 +604,8 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
     setLoading(true);
     const result = await caseService.listTaggingReviews(
       {
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
+        resolvedDateFrom: resolvedDateFrom || undefined,
+        resolvedDateTo: resolvedDateTo || undefined,
         statuses: statuses.length ? statuses : undefined,
         teamId: teamId || undefined,
       },
@@ -619,8 +623,8 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
     setExporting(true);
     try {
       const { items, reviews } = await caseService.exportTaggingReviews({
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
+        resolvedDateFrom: resolvedDateFrom || undefined,
+        resolvedDateTo: resolvedDateTo || undefined,
         statuses: statuses.length ? statuses : undefined,
         teamId: teamId || undefined,
       });
@@ -674,9 +678,9 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
 
   useEffect(() => {
     try {
-      localStorage.setItem(FILTER_KEY, JSON.stringify({ dateFrom, dateTo, statuses, teamId }));
+      localStorage.setItem(FILTER_KEY, JSON.stringify({ resolvedDateFrom, resolvedDateTo, statuses, teamId }));
     } catch {}
-  }, [dateFrom, dateTo, statuses, teamId]);
+  }, [resolvedDateFrom, resolvedDateTo, statuses, teamId]);
 
   useEffect(() => {
     void fetchPage();
@@ -778,11 +782,11 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           </p>
         </div>
         <div className="ml-auto flex flex-wrap items-end gap-2">
-          <Field label="Başlangıç tarihi" className="w-36">
-            <TextInput type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} max={dateTo || undefined} />
+          <Field label="Çözüm Başlangıç" className="w-36">
+            <TextInput type="date" value={resolvedDateFrom} onChange={(e) => setResolvedDateFrom(e.target.value)} max={resolvedDateTo || undefined} />
           </Field>
-          <Field label="Bitiş tarihi" className="w-36">
-            <TextInput type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} min={dateFrom || undefined} />
+          <Field label="Çözüm Bitiş" className="w-36">
+            <TextInput type="date" value={resolvedDateTo} onChange={(e) => setResolvedDateTo(e.target.value)} min={resolvedDateFrom || undefined} />
           </Field>
           <Field label="Takım" className="w-48">
             <Select value={teamId} onChange={(e) => setTeamId(e.target.value)}>

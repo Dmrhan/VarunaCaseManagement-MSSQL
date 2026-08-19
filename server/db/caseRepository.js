@@ -7091,6 +7091,18 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null, roleDefaultScope
     to.setHours(23, 59, 59, 999);
     where.createdAt = { ...(where.createdAt ?? {}), lte: to };
   }
+  // 2026-08-19 — Çözüm Tarihi filtresi (Case.resolvedAt), Açılış Tarihi'nden
+  // (dateFrom/dateTo → createdAt, üstte) BİLEREK ayrı. Vaka Etiket Doğrulama
+  // ekranı "bugün açılan" değil "bugün çözülen" vakaları arıyor — aynı isimli
+  // filtreyi paylaşsaydı diğer ekranlardaki (CasesListPage vb.) createdAt
+  // anlamı bozulurdu. Additive: yalnız gönderen çağıran (tagging-review)
+  // etkilenir.
+  if (f.resolvedDateFrom) where.resolvedAt = { ...(where.resolvedAt ?? {}), gte: new Date(f.resolvedDateFrom) };
+  if (f.resolvedDateTo) {
+    const to = new Date(f.resolvedDateTo);
+    to.setHours(23, 59, 59, 999);
+    where.resolvedAt = { ...(where.resolvedAt ?? {}), lte: to };
+  }
   // Phase D — Müşteri eşleştirme bekleyen vakalar filter.
   if (f.customerMatchPending === true) where.customerMatchPending = true;
   if (f.customerMatchPending === false) where.customerMatchPending = false;

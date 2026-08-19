@@ -450,7 +450,7 @@ export const caseService = {
    * Vaka listesi + her vakanın review kaydı (varsa) tek çağrıda döner.
    */
   async listTaggingReviews(
-    filters?: { dateFrom?: string; dateTo?: string; statuses?: CaseStatus[]; teamId?: string },
+    filters?: { resolvedDateFrom?: string; resolvedDateTo?: string; statuses?: CaseStatus[]; teamId?: string },
     pagination?: CaseListPagination,
     sort?: { sortBy?: string; sortDir?: 'asc' | 'desc' },
   ): Promise<{ items: Case[]; total: number; reviews: Map<string, CaseTaggingReview> }> {
@@ -458,8 +458,8 @@ export const caseService = {
       return { items: [], total: 0, reviews: new Map() };
     }
     const params = new URLSearchParams();
-    if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
-    if (filters?.dateTo) params.set('dateTo', filters.dateTo);
+    if (filters?.resolvedDateFrom) params.set('resolvedDateFrom', filters.resolvedDateFrom);
+    if (filters?.resolvedDateTo) params.set('resolvedDateTo', filters.resolvedDateTo);
     if (filters?.statuses?.length) params.set('statuses', filters.statuses.join(','));
     if (filters?.teamId) params.set('teamId', filters.teamId);
     if (pagination) {
@@ -481,12 +481,12 @@ export const caseService = {
   },
 
   async exportTaggingReviews(
-    filters?: { dateFrom?: string; dateTo?: string; statuses?: CaseStatus[]; teamId?: string },
+    filters?: { resolvedDateFrom?: string; resolvedDateTo?: string; statuses?: CaseStatus[]; teamId?: string },
   ): Promise<{ items: Case[]; reviews: Map<string, CaseTaggingReview> }> {
     if (USE_MOCK) return { items: [], reviews: new Map() };
     const params = new URLSearchParams();
-    if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
-    if (filters?.dateTo) params.set('dateTo', filters.dateTo);
+    if (filters?.resolvedDateFrom) params.set('resolvedDateFrom', filters.resolvedDateFrom);
+    if (filters?.resolvedDateTo) params.set('resolvedDateTo', filters.resolvedDateTo);
     if (filters?.statuses?.length) params.set('statuses', filters.statuses.join(','));
     if (filters?.teamId) params.set('teamId', filters.teamId);
     const data = await apiFetch<{
