@@ -20,6 +20,19 @@
  * ("TEAM-MOBIL") olarak yazıldığı, isim çözümlemesi olmadan boş/yanlış
  * sonuç vereceği doğrulandı.
  *
+ * 2026-08-19 fix — PRODUKSİYONDA gerçek hata: büyük export'larda (2100+
+ * vaka) "Excel export başarısız (500) — MssqlError code 8003, too many
+ * parameters" hatası alındı. Kök neden: aggregates.js'teki 7 aggregate
+ * loader'ın TAMAMI (solutionSteps, caseActivity, caseNote, caseFile,
+ * caseCall, caseTransfer, YENİ firstAssignment dahil) `caseId: { in:
+ * caseIds } }` filtresini TEK sorguda, hiç chunk'lamadan kullanıyordu —
+ * MSSQL'in 2100 parametre sınırını (Rapor Studyosu export limiti 20.000
+ * satır) kolayca aşıyordu. Bu ÖNCEDEN de var olan, firstAssignment'tan
+ * bağımsız bir bug'dı — yeni eklenen kolon sadece kullanıcıyı ilk kez
+ * aggregate seçili büyük bir export denemeye itti. Tüm 7 loader artık
+ * caseRepository.js'teki aynı chunking deseniyle (findManyChunked,
+ * 1000'lik gruplar) çalışıyor.
+ *
  * Statik + fonksiyonel karma smoke: kayıt/formatter wiring'i statik regex
  * ile, hesaplama mantığı gerçek DB'ye karşı çalıştırılarak doğrulanır.
  *
@@ -70,6 +83,26 @@ checkSrc('reports.js — loadFirstAssignmentAggregates import + orkestrasyon', '
 checkSrc('aggregates.js — loadFirstAssignmentAggregates export edilmiş', 'server/lib/caseReport/aggregates.js',
   /export async function loadFirstAssignmentAggregates\(prisma, caseIds\)/);
 
+// ── Statik — MSSQL 2100 parametre sınırı: 7 aggregate loader'ın TAMAMI
+// findManyChunked kullanıyor mu (ham `caseId: { in: caseIds } }` kalmamış mı)?
+checkSrc('aggregates.js — findManyChunked() helper tanımlı', 'server/lib/caseReport/aggregates.js',
+  /async function findManyChunked\(model, caseIds, \{ where = \{\}, select, orderBy \} = \{\}\)/);
+checkSrc('aggregates.js — hiçbir yerde ham chunk\'lanmamış `caseId: { in: caseIds } }` kalmamış', 'server/lib/caseReport/aggregates.js',
+  (content) => {
+    // findManyChunked'ın kendi tanımındaki `caseId: { in: chunk } }` hariç —
+    // o zaten chunk'lanmış (chunk, caseIds değil). Sadece ham `caseIds`
+    // referanslı IN filtresi arıyoruz.
+    const matches = content.match(/caseId: \{ in: caseIds \}/g) || [];
+    return matches.length === 0;
+  });
+checkSrc('aggregates.js — 8 findManyChunked çağrısı (6 eski loader + firstAssignment\'ın 2 CaseActivity sorgusu)', 'server/lib/caseReport/aggregates.js',
+  (content) => {
+    const calls = content.match(/findManyChunked\(prisma\.\w+, caseIds,/g) || [];
+    return calls.length === 8;
+  });
+checkSrc('aggregates.js — loadFirstAssignmentAggregates Case.id sorgusu da chunk\'lı (inline)', 'server/lib/caseReport/aggregates.js',
+  /for \(let i = 0; i < caseIds\.length; i \+= CASE_ID_CHUNK_SIZE\) \{\s*\n\s*const chunk = caseIds\.slice\(i, i \+ CASE_ID_CHUNK_SIZE\);\s*\n\s*currentRows\.push/);
+
 // ── Fonksiyonel — formatter gerçekten çalışıyor ──
 {
   const { applyFormat } = await import('../server/lib/caseReport/formatters.js');
@@ -114,6 +147,37 @@ checkSrc('aggregates.js — loadFirstAssignmentAggregates export edilmiş', 'ser
           && rows[0]['accountProject.code'] === c.accountProject?.code);
       } else {
         console.log('⚠ Projeye bağlı vaka bulunamadı — bu kontrol atlandı.');
+      }
+
+      // MSSQL 2100 parametre sınırı regresyon testi — üretimde alınan
+      // gerçek hatanın (Excel export başarısız 500, code 8003) birebir
+      // reprodüksiyonu. 2100'ü kesin aşan bir case ID kümesiyle TÜM
+      // aggregate loader'lar hatasız tamamlanmalı.
+      const {
+        loadCaseActivityAggregates, loadCaseNoteAggregates, loadCaseFileAggregates,
+        loadCaseCallAggregates, loadCaseTransferAggregates, loadSolutionStepAggregates,
+      } = await import('../server/lib/caseReport/aggregates.js');
+      const bigCases = await prisma.case.findMany({ where: { companyId: 'COMP-UNIVERA' }, select: { id: true }, take: 3000 });
+      const bigIds = bigCases.map((c) => c.id);
+      if (bigIds.length > 2100) {
+        let allOk = true;
+        try {
+          await Promise.all([
+            loadFirstAssignmentAggregates(prisma, bigIds),
+            loadCaseActivityAggregates(prisma, bigIds),
+            loadCaseNoteAggregates(prisma, bigIds),
+            loadCaseFileAggregates(prisma, bigIds),
+            loadCaseCallAggregates(prisma, bigIds),
+            loadCaseTransferAggregates(prisma, bigIds),
+            loadSolutionStepAggregates(prisma, bigIds),
+          ]);
+        } catch (e) {
+          allOk = false;
+          console.log(`  → hata: ${e.message}`);
+        }
+        check(`2100 parametre sınırı regresyonu — ${bigIds.length} case ID'yle 7 aggregate loader hatasız tamamlandı`, allOk);
+      } else {
+        console.log(`⚠ COMP-UNIVERA'da 2100'den fazla vaka yok (${bigIds.length}) — 2100 parametre regresyon testi atlandı.`);
       }
     } finally {
       await prisma.$disconnect();

@@ -3,8 +3,10 @@
  *
  * Sözleşme:
  *   - `loadSolutionStepAggregates(prisma, caseIds)` → `Map<caseId, AggregatePayload>`
- *   - Tek bir `prisma.caseSolutionStep.findMany({ where: { caseId: { in: caseIds } } })`
- *     çağrısı. N+1 yasak — preview/export aynı toplu fetch'i paylaşır.
+ *   - `findManyChunked()` helper'ıyla toplu fetch (bkz. aşağıdaki tanım).
+ *     N+1 yasak — preview/export aynı toplu fetch'i paylaşır.
+ *     (2026-08-19: MSSQL 2100 parametre sınırı için 1000'lik chunk'lara
+ *     bölünür — bkz. findManyChunked tanımı.)
  *   - caseIds[] boşsa boş Map döner (DB'ye dokunma).
  *   - Caller aggregate kolon seçilmediyse bu helper'ı hiç çağırmaz (perf).
  *
@@ -35,6 +37,30 @@
 
 const TRIED_STATUSES = new Set(['tried', 'worked', 'not_worked']);
 const COMPLETED_STATUSES = new Set(['tried', 'worked', 'not_worked', 'skipped']);
+
+// 2026-08-19 fix — MSSQL parametre sınırı (2100). Rapor Studyosu export'u
+// tek seferde 20.000 case id'ye kadar aggregate sorgusu atabiliyor;
+// caseId filtresi tek IN(...) sorgusunda kalırsa liste kolayca
+// parametre sınırını aşıyor (code 8003, "The incoming request has too many
+// parameters"). TÜM aggregate loader'lar caseIds'i 1000'lik gruplara bölüp
+// ayrı sorgularla çeker (caseRepository.js'teki aynı chunking deseni —
+// findManyChunked). Chunk case ID'ye göre bölündüğü için (zamana göre
+// DEĞİL), bir case'in tüm satırları her zaman AYNI chunk'ta kalır —
+// per-case "en erken/en son" mantığı (orderBy her chunk'ta korunur) bozulmaz.
+const CASE_ID_CHUNK_SIZE = 1000;
+async function findManyChunked(model, caseIds, { where = {}, select, orderBy } = {}) {
+  const out = [];
+  for (let i = 0; i < caseIds.length; i += CASE_ID_CHUNK_SIZE) {
+    const chunk = caseIds.slice(i, i + CASE_ID_CHUNK_SIZE);
+    const rows = await model.findMany({
+      where: { ...where, caseId: { in: chunk } },
+      select,
+      ...(orderBy ? { orderBy } : {}),
+    });
+    out.push(...rows);
+  }
+  return out;
+}
 
 function maxDate(...vals) {
   let best = null;
@@ -132,9 +158,8 @@ function summarize(steps) {
 export async function loadSolutionStepAggregates(prisma, caseIds) {
   const map = new Map();
   if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
-  // Tek query — tüm caseId'lerin step'lerini bir kerede çek.
-  const rows = await prisma.caseSolutionStep.findMany({
-    where: { caseId: { in: caseIds } },
+  // caseIds 1000'lik gruplara bölünür (MSSQL 2100 parametre sınırı — bkz. findManyChunked).
+  const rows = await findManyChunked(prisma.caseSolutionStep, caseIds, {
     select: {
       caseId: true,
       stepIndex: true,
@@ -248,8 +273,7 @@ function summarizeActivities(rows) {
 export async function loadCaseActivityAggregates(prisma, caseIds) {
   const map = new Map();
   if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
-  const rows = await prisma.caseActivity.findMany({
-    where: { caseId: { in: caseIds } },
+  const rows = await findManyChunked(prisma.caseActivity, caseIds, {
     select: { caseId: true, actor: true, at: true, actionType: true, toValue: true },
   });
   const byCase = new Map();
@@ -316,8 +340,7 @@ function summarizeNotes(rows) {
 export async function loadCaseNoteAggregates(prisma, caseIds) {
   const map = new Map();
   if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
-  const rows = await prisma.caseNote.findMany({
-    where: { caseId: { in: caseIds } },
+  const rows = await findManyChunked(prisma.caseNote, caseIds, {
     select: { caseId: true, authorName: true, visibility: true, createdAt: true },
   });
   const byCase = new Map();
@@ -373,8 +396,7 @@ function summarizeFiles(rows) {
 export async function loadCaseFileAggregates(prisma, caseIds) {
   const map = new Map();
   if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
-  const rows = await prisma.caseAttachment.findMany({
-    where: { caseId: { in: caseIds } },
+  const rows = await findManyChunked(prisma.caseAttachment, caseIds, {
     select: { caseId: true, fileSize: true },
   });
   const byCase = new Map();
@@ -426,8 +448,7 @@ function summarizeCalls(rows) {
 export async function loadCaseCallAggregates(prisma, caseIds) {
   const map = new Map();
   if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
-  const rows = await prisma.caseCallLog.findMany({
-    where: { caseId: { in: caseIds } },
+  const rows = await findManyChunked(prisma.caseCallLog, caseIds, {
     select: { caseId: true, callDate: true, callOutcome: true },
   });
   const byCase = new Map();
@@ -487,8 +508,7 @@ function summarizeTransfers(rows, teamNamesById) {
 export async function loadCaseTransferAggregates(prisma, caseIds) {
   const map = new Map();
   if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
-  const rows = await prisma.caseTransfer.findMany({
-    where: { caseId: { in: caseIds } },
+  const rows = await findManyChunked(prisma.caseTransfer, caseIds, {
     select: { caseId: true, toTeamId: true, transferredAt: true },
   });
   // Team isimleri için tek ek query (N+1 değil — distinct toTeamId set'i)
@@ -554,20 +574,27 @@ export async function loadFirstAssignmentAggregates(prisma, caseIds) {
   const map = new Map();
   if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
 
-  const currentRows = await prisma.case.findMany({
-    where: { id: { in: caseIds } },
-    select: { id: true, assignedPersonName: true, assignedTeamName: true },
-  });
+  // Case.id de caseIds kadar büyüyebildiği için ayrıca chunk'lanır
+  // (findManyChunked "caseId" alanına göre filtreliyor — Case'in kendi
+  // PK'sı "id", o yüzden burada inline chunking).
+  const currentRows = [];
+  for (let i = 0; i < caseIds.length; i += CASE_ID_CHUNK_SIZE) {
+    const chunk = caseIds.slice(i, i + CASE_ID_CHUNK_SIZE);
+    currentRows.push(...await prisma.case.findMany({
+      where: { id: { in: chunk } },
+      select: { id: true, assignedPersonName: true, assignedTeamName: true },
+    }));
+  }
   const currentByCase = new Map(currentRows.map((r) => [r.id, r]));
 
   const [personHistory, teamHistory] = await Promise.all([
-    prisma.caseActivity.findMany({
-      where: { caseId: { in: caseIds }, fieldName: 'assignedPersonId' },
+    findManyChunked(prisma.caseActivity, caseIds, {
+      where: { fieldName: 'assignedPersonId' },
       select: { caseId: true, fromValue: true, toValue: true, at: true },
       orderBy: { at: 'asc' },
     }),
-    prisma.caseActivity.findMany({
-      where: { caseId: { in: caseIds }, fieldName: 'assignedTeamId' },
+    findManyChunked(prisma.caseActivity, caseIds, {
+      where: { fieldName: 'assignedTeamId' },
       select: { caseId: true, fromValue: true, toValue: true, at: true },
       orderBy: { at: 'asc' },
     }),
