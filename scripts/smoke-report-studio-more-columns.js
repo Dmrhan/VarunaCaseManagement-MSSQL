@@ -33,6 +33,19 @@
  * caseRepository.js'teki aynı chunking deseniyle (findManyChunked,
  * 1000'lik gruplar) çalışıyor.
  *
+ * 2026-08-19 fix #2 — code-review bulgusu: transferCase() (caseRepository.js
+ * ~5255-5303) kişi değişse bile SADECE assignedTeamId CaseActivity yazıyor,
+ * assignedPersonId için HİÇ activity satırı yaratmıyor (kişi değişikliği
+ * sadece CaseTransfer.fromPersonId/toPersonId'de kayıtlı). Bu kaynak
+ * atlanırsa, oluşturulurken atanmış bir vaka SADECE transferCase ile el
+ * değiştirdiğinde firstPersonRawByCase boş kalır, fallback mevcut (yanlış)
+ * atananı "ilk atanan" diye raporlar. Fix: CaseActivity + CaseTransfer'dan
+ * gelen kişi-değişim olayları caseId bazında zaman damgasına göre
+ * birleştirilip en erken olay seçiliyor. Gerçek vakada (UNV-1001754)
+ * doğrulandı: mevcut atanan "Fıratcan Günter", gerçek ilk atanan (ilk
+ * transferin fromPersonId zinciri) "Ceren Üstkoyuncu" — fix öncesi yanlış
+ * (mevcut atananı) raporlardı.
+ *
  * Statik + fonksiyonel karma smoke: kayıt/formatter wiring'i statik regex
  * ile, hesaplama mantığı gerçek DB'ye karşı çalıştırılarak doğrulanır.
  *
@@ -95,13 +108,20 @@ checkSrc('aggregates.js — hiçbir yerde ham chunk\'lanmamış `caseId: { in: c
     const matches = content.match(/caseId: \{ in: caseIds \}/g) || [];
     return matches.length === 0;
   });
-checkSrc('aggregates.js — 8 findManyChunked çağrısı (6 eski loader + firstAssignment\'ın 2 CaseActivity sorgusu)', 'server/lib/caseReport/aggregates.js',
+checkSrc('aggregates.js — 9 findManyChunked çağrısı (6 eski loader + firstAssignment\'ın 2 CaseActivity + 1 CaseTransfer sorgusu)', 'server/lib/caseReport/aggregates.js',
   (content) => {
     const calls = content.match(/findManyChunked\(prisma\.\w+, caseIds,/g) || [];
-    return calls.length === 8;
+    return calls.length === 9;
   });
 checkSrc('aggregates.js — loadFirstAssignmentAggregates Case.id sorgusu da chunk\'lı (inline)', 'server/lib/caseReport/aggregates.js',
   /for \(let i = 0; i < caseIds\.length; i \+= CASE_ID_CHUNK_SIZE\) \{\s*\n\s*const chunk = caseIds\.slice\(i, i \+ CASE_ID_CHUNK_SIZE\);\s*\n\s*currentRows\.push/);
+checkSrc('aggregates.js — CaseTransfer de kişi-değişim kaynağı olarak çekiliyor', 'server/lib/caseReport/aggregates.js',
+  /findManyChunked\(prisma\.caseTransfer, caseIds, \{\s*\n\s*select: \{ caseId: true, fromPersonId: true, toPersonId: true, transferredAt: true \},/);
+checkSrc('aggregates.js — CaseActivity + CaseTransfer olayları zaman damgasına göre birleştirilip en erkeni seçiliyor (takım-sadece/boş olaylar hariç)', 'server/lib/caseReport/aggregates.js',
+  (content) => content.includes('const informative = events.filter((e) => e.fromRaw || e.toRaw);')
+    && content.includes('if (informative.length === 0) continue;')
+    && content.includes('informative.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());')
+    && content.includes('firstPersonRawByCase.set(caseId, earliest.fromRaw || earliest.toRaw);'));
 
 // ── Fonksiyonel — formatter gerçekten çalışıyor ──
 {
@@ -132,6 +152,17 @@ checkSrc('aggregates.js — loadFirstAssignmentAggregates Case.id sorgusu da chu
         payload?.firstAssignedPersonName === 'Burak Demir');
       check('Gerçek vaka (VK-MPBQ07I3) — ilk atanan takım ham ID değil, "Mobil Takımı" (çözümlenmiş)',
         payload?.firstAssignedTeamName === 'Mobil Takımı');
+
+      // Code-review bulgusu regresyonu — UNV-1001754: transferCase() ile
+      // devredilmiş, hiç assignedPersonId CaseActivity'si OLMAYAN gerçek
+      // vaka. Mevcut atanan "Fıratcan Günter"; gerçek ilk atanan (ilk
+      // transferin fromPersonId'si, null→toPersonId zinciriyle) "Ceren
+      // Üstkoyuncu". Fix öncesi bu, yanlışlıkla mevcut atananı raporlardı.
+      const TRANSFER_ONLY_CASE_ID = 'cmrg740440i5nnyrgru67at37';
+      const transferAgg = await loadFirstAssignmentAggregates(prisma, [TRANSFER_ONLY_CASE_ID]);
+      const transferPayload = transferAgg.get(TRANSFER_ONLY_CASE_ID);
+      check('Gerçek vaka (UNV-1001754, transferCase-only) — ilk atanan kişi "Ceren Üstkoyuncu" (mevcut "Fıratcan Günter" DEĞİL)',
+        transferPayload?.firstAssignedPersonName === 'Ceren Üstkoyuncu');
 
       // accountProject.code — bir projeye bağlı gerçek bir vakayla uçtan
       // uca doğrulama (Case.accountProject join → AccountProject.code).
