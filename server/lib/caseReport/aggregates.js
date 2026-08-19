@@ -536,15 +536,26 @@ export async function loadCaseTransferAggregates(prisma, caseIds) {
 // ──────────────────────────────────────────────────────────────────────
 //
 // Sözleşme — export-vaka-ilk-atanan-kapatan-temmuz-agustos.mjs script'iyle
-// (2026-08 vaka export'ları) BİREBİR AYNI mantık, rapor pipeline'ına taşındı:
-//   - "İlk atanan kişi" — Case.history'de fieldName='assignedPersonId' olan
-//     EN ERKEN CaseActivity kaydı.
-//       - fromValue doluysa (create() sırasında zaten atanmıştı, bu ilk
-//         transferdi) → fromValue = gerçek ilk atanan.
-//       - fromValue boşsa (gerçekten atanmamıştan atandı, ör. claim())
-//         → toValue = gerçek ilk atanan.
-//       - Hiç activity yoksa → hiç el değiştirmemiş, mevcut
-//         Case.assignedPersonName = ilk atanan (fallback).
+// başlayan mantık, rapor pipeline'ına taşındı, sonra code-review bulgusuyla
+// düzeltildi:
+//   - "İlk atanan kişi" — kişi değişikliği İKİ farklı kaynaktan gelebilir:
+//       1) CaseActivity fieldName='assignedPersonId' — claim()/manuel atama
+//          yolu.
+//       2) CaseTransfer.fromPersonId/toPersonId — transferCase() yolu.
+//          ÖNEMLİ: transferCase() (caseRepository.js ~5255-5303) kişi
+//          değişse bile SADECE fieldName='assignedTeamId' CaseActivity
+//          yazar — assignedPersonId için HİÇ activity satırı YOK. Bu
+//          kaynak atlanırsa (yalnız CaseActivity okunursa), oluşturulurken
+//          atanmış bir vaka sonradan transferCase ile başka birine (veya
+//          havuza) devredildiğinde firstPersonRawByCase boş kalır ve
+//          fallback MEVCUT (transfer SONRASI, yanlış) atananı "ilk atanan"
+//          diye raporlar.
+//     Doğru çözüm: iki kaynaktan gelen olaylar caseId bazında zaman
+//     damgasına göre BİRLEŞTİRİLİR (CaseActivity.at / CaseTransfer.
+//     transferredAt); kronolojik olarak EN ERKEN olay hangisiyse (activity
+//     veya transfer fark etmez) ondan fromValue/fromPersonId (doluysa) yoksa
+//     toValue/toPersonId alınır. Hiç olay yoksa → mevcut
+//     Case.assignedPersonName (case hiç el değiştirmemiş, fallback doğru).
 //   - "İlk atanan takım" — fieldName='assignedTeamId' EN ERKEN activity.
 //       - fromValue doluysa (zaten bir takımdan başka bir takıma geçmişti)
 //         → fromValue = gerçek ilk atanan takım.
@@ -559,12 +570,12 @@ export async function loadCaseTransferAggregates(prisma, caseIds) {
 //     raw Person.id (claim() yolu), bazen okunabilir ad (auto-assign/manuel
 //     atama yolu). Tek haritadan her ikisi de çözülür.
 //
-// 4 fixed query (case sayısından bağımsız — N+1 değil): CaseActivity x2
-// (person + team fieldName'leri ayrı where) + Person + Team (isim
-// çözümleme). Case'in kendi mevcut assignedPersonName/assignedTeamName'i
-// (fallback için) ayrı bir küçük query ile çekilir — aggregate loader'lar
-// yalnız caseIds alır, dbRows'a erişimi yok (buildRows.js'teki genel
-// sözleşme).
+// 5 fixed query (case sayısından bağımsız — N+1 değil): CaseActivity x2
+// (person + team fieldName'leri ayrı where) + CaseTransfer (person değişim
+// olaylarının ikinci kaynağı) + Person + Team (isim çözümleme). Case'in
+// kendi mevcut assignedPersonName/assignedTeamName'i (fallback için) ayrı
+// bir küçük query ile çekilir — aggregate loader'lar yalnız caseIds alır,
+// dbRows'a erişimi yok (buildRows.js'teki genel sözleşme).
 
 function buildEmptyFirstAssignmentPayload() {
   return { firstAssignedPersonName: '', firstAssignedTeamName: '' };
@@ -587,7 +598,7 @@ export async function loadFirstAssignmentAggregates(prisma, caseIds) {
   }
   const currentByCase = new Map(currentRows.map((r) => [r.id, r]));
 
-  const [personHistory, teamHistory] = await Promise.all([
+  const [personHistory, teamHistory, transferHistory] = await Promise.all([
     findManyChunked(prisma.caseActivity, caseIds, {
       where: { fieldName: 'assignedPersonId' },
       select: { caseId: true, fromValue: true, toValue: true, at: true },
@@ -598,11 +609,39 @@ export async function loadFirstAssignmentAggregates(prisma, caseIds) {
       select: { caseId: true, fromValue: true, toValue: true, at: true },
       orderBy: { at: 'asc' },
     }),
+    findManyChunked(prisma.caseTransfer, caseIds, {
+      select: { caseId: true, fromPersonId: true, toPersonId: true, transferredAt: true },
+      orderBy: { transferredAt: 'asc' },
+    }),
   ]);
 
-  const firstPersonRawByCase = new Map();
+  // Kişi değişikliği olaylarını İKİ kaynaktan (CaseActivity + CaseTransfer)
+  // caseId bazında birleştirip zaman damgasına göre sırala — hangisi
+  // kronolojik olarak EN ERKEN ise ondan fromValue/fromPersonId (doluysa)
+  // yoksa toValue/toPersonId alınır (bkz. yukarıdaki sözleşme yorumu).
+  const personEventsByCase = new Map();
   for (const h of personHistory) {
-    if (!firstPersonRawByCase.has(h.caseId)) firstPersonRawByCase.set(h.caseId, h.fromValue || h.toValue);
+    let bucket = personEventsByCase.get(h.caseId);
+    if (!bucket) { bucket = []; personEventsByCase.set(h.caseId, bucket); }
+    bucket.push({ at: h.at, fromRaw: h.fromValue, toRaw: h.toValue });
+  }
+  for (const t of transferHistory) {
+    let bucket = personEventsByCase.get(t.caseId);
+    if (!bucket) { bucket = []; personEventsByCase.set(t.caseId, bucket); }
+    bucket.push({ at: t.transferredAt, fromRaw: t.fromPersonId, toRaw: t.toPersonId });
+  }
+  const firstPersonRawByCase = new Map();
+  for (const [caseId, events] of personEventsByCase) {
+    // Takım-sadece transferler (CaseTransfer.fromPersonId/toPersonId ikisi
+    // de null — kişi hiç değişmedi/dokunulmadı) kişi hakkında BİLGİ TAŞIMAZ;
+    // en erken olay seçilirken bunlar yok sayılmalı, yoksa gerçek ilk
+    // kişi-olayından daha erken tarihli boş bir transfer, sonucu boşa
+    // düşürür (gerçek veride görüldü — bkz. smoke test).
+    const informative = events.filter((e) => e.fromRaw || e.toRaw);
+    if (informative.length === 0) continue; // hiç kişi-olayı yok → fallback (mevcut atanan) kullanılacak
+    informative.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+    const earliest = informative[0];
+    firstPersonRawByCase.set(caseId, earliest.fromRaw || earliest.toRaw);
   }
   const firstTeamRawByCase = new Map();
   for (const h of teamHistory) {
