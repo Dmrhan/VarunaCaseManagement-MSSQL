@@ -7,6 +7,7 @@ export interface FunnelMetrics {
   kodlandi: number;
   geriDondu: number;
   hataL2: number;
+  cozuldu: number;
 }
 
 export interface Summary extends FunnelMetrics {
@@ -34,6 +35,7 @@ export interface FiltersResponse {
   bounds: { minYil: number | null; maxYil: number | null; sonTarih: string | null };
   projeler: { key: string; c: number }[];
   tipler: { key: string; c: number }[];
+  takimlar: { key: string; c: number }[];
   meta: { refreshedAt: string | null; satirSayisi: number | null } | null;
 }
 
@@ -46,6 +48,7 @@ export interface MonitoringFilters {
   kaynak?: string;
   proje?: string;
   dist?: string;
+  takim?: string;
   onlyL2?: '1';
   onlyYazilim?: '1';
 }

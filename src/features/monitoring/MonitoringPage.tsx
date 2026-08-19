@@ -2,7 +2,7 @@
 // (açılan → L2 devir → yazılıma → kodlandı/döndü) + drill-down (KeyAccount →
 // Proje → Dist) + zaman serisi. Veri: dbo.vw_TicketLifecycle_All (canlı+geçmiş).
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Inbox, ArrowUpRight, Code2, Check, Undo2, Clock, X, Filter } from 'lucide-react';
+import { Inbox, ArrowUpRight, Code2, Check, CheckCircle2, Undo2, Clock, X, Filter } from 'lucide-react';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { MetricTile } from '@/components/charts/MetricTile';
 import { BarList } from '@/components/charts/BarList';
@@ -30,7 +30,7 @@ const GRAINS: { key: Grain; label: string }[] = [
   { key: 'month', label: 'Ay' }, { key: 'year', label: 'Yıl' },
 ];
 const CHIP_LABEL: Partial<Record<keyof MonitoringFilters, string>> = {
-  proje: 'Proje', dist: 'Dist', tipi: 'Tipi', kaynak: 'Kaynak',
+  proje: 'Proje', dist: 'Dist', tipi: 'Tipi', kaynak: 'Kaynak', takim: 'Takım',
 };
 const nf = (n: number | null | undefined) => (n == null ? '—' : n.toLocaleString('tr-TR'));
 
@@ -236,6 +236,17 @@ export function MonitoringPage() {
               <option key={p.key} value={p.key}>{p.key} ({p.c})</option>
             ))}
           </select>
+          <select
+            value={filters.takim ?? ''}
+            onChange={(e) => patch({ takim: e.target.value || undefined })}
+            className="max-w-[180px] rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+            title="Takım"
+          >
+            <option value="">Tüm takımlar</option>
+            {opts?.takimlar.map((t) => (
+              <option key={t.key} value={t.key}>{t.key} ({t.c})</option>
+            ))}
+          </select>
           <div className="ml-auto flex items-center gap-1 text-xs">
             <span className="text-slate-400">Dönem:</span>
             {PRESETS.map((p) => (
@@ -260,8 +271,10 @@ export function MonitoringPage() {
       </Card>
 
       {/* Funnel KPI'ları */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
         <MetricTile label="Açılan" value={nf(summary?.acilan)} icon={<Inbox size={13} />} tone="info" />
+        <MetricTile label="Çözüldü" value={nf(summary?.cozuldu)} icon={<CheckCircle2 size={13} />} tone="good"
+          hint={summary ? `%${funnelPct(summary.cozuldu)}` : undefined} />
         <MetricTile label="L2'ye Devir" value={nf(summary?.l2ye)} icon={<ArrowUpRight size={13} />} tone="neutral"
           hint={summary ? `%${funnelPct(summary.l2ye)}` : undefined} />
         <MetricTile label="Yazılıma Açılan" value={nf(summary?.yazilima)} icon={<Code2 size={13} />} tone="warn"

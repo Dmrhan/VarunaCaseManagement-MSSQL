@@ -37,6 +37,32 @@ router.get('/bootstrap', async (req, res) => {
 });
 
 /**
+ * GET /api/lookups/case-creators
+ * "Vaka Sahibi" filtresi (CasesListPage) için — vaka açan kullanıcıların
+ * distinct listesi (Case.createdByUserId/createdByName). "Kişi" filtresinden
+ * (assignedPersonId → Person tablosu) AYRI kavram; Person kaydı olmayan bir
+ * User de vaka açmış olabilir, bu yüzden Person listesinden türetilemez.
+ * Scope: yalnız req.user.allowedCompanyIds içindeki şirketlerin vakaları —
+ * boş allowedCompanyIds → boş liste (sızıntı yok, WR-A7b P1 pattern).
+ */
+router.get('/case-creators', async (req, res) => {
+  try {
+    const allowed = Array.isArray(req.user.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
+    if (!allowed.length) return res.json([]);
+    const rows = await prisma.case.findMany({
+      where: { companyId: { in: allowed }, createdByUserId: { not: null } },
+      select: { createdByUserId: true, createdByName: true },
+      distinct: ['createdByUserId'],
+      orderBy: { createdByName: 'asc' },
+    });
+    res.json(rows.map((r) => ({ id: r.createdByUserId, name: r.createdByName ?? r.createdByUserId })));
+  } catch (err) {
+    console.error('[lookups/case-creators]', err);
+    res.status(500).json({ error: 'internal', message: err?.message });
+  }
+});
+
+/**
  * WR-A2 — Sync UX validation feedback endpoints.
  *
  * Auth: verifyJwt (authenticated all roles). Pure input validation; scope/tenant

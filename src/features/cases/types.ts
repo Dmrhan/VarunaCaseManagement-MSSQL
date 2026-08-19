@@ -861,6 +861,13 @@ export interface CaseTaggingReview {
   closingPermanentPreventionCorrectedCode: string | null;
   closingPermanentPreventionCorrectedLabel: string | null;
 
+  /** 2026-08-19 — Talep Türü doğrulaması (source: enum, TaxonomyDef DEĞİL). */
+  requestTypeOriginalCode: string | null;
+  requestTypeOriginalLabel: string | null;
+  requestTypeVerdict: TaggingVerdict | null;
+  requestTypeCorrectedCode: string | null;
+  requestTypeCorrectedLabel: string | null;
+
   note: string | null;
   reviewerId: string | null;
   reviewerName: string | null;
@@ -945,6 +952,9 @@ export interface CaseFilters {
    *  Havuz kartı bunu kullanır. */
   teamIds?: string[];
   personId?: string;
+  /** Vaka Sahibi — Case.createdByUserId (vakayı açan kullanıcı, atamadan
+   *  bağımsız). "Kişi" (personId → assignedPersonId) filtresinden AYRI. */
+  createdByUserId?: string;
   dateFrom?: string;                // ISO date (YYYY-MM-DD)
   dateTo?: string;                  // ISO date
   // Phase D — yalnız Supervisor+ rolleri görür; backend ignore eder Agent için.
