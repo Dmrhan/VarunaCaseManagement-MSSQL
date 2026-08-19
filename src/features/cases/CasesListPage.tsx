@@ -677,6 +677,7 @@ export function CasesListPage({
     (filters.caseType && filters.caseType !== 'Tümü') ||
     Boolean(filters.teamId) ||
     Boolean(filters.personId) ||
+    Boolean(filters.createdByUserId) ||
     Boolean(filters.dateFrom) ||
     Boolean(filters.dateTo) ||
     Boolean(filters.customerMatchPending) ||

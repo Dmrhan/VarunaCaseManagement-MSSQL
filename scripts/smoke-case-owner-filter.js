@@ -48,6 +48,11 @@ check('CasesListPage.tsx — initialFilters reset createdByUserId\'ı sıfırlı
 // görünüyordu) ama gerçek fetch hiç tetiklenmiyordu, başka bir filtre/
 // sayfa/sıralama değişene kadar eski sonuçlar ekranda kalıyordu.
 check('CasesListPage.tsx — filters.createdByUserId liste-yükleme effect\'inin dependency\'sinde', 'src/features/cases/CasesListPage.tsx', /filters\.personId,\s*\n\s*filters\.createdByUserId,\s*\n\s*filters\.dateFrom,/);
+// 2026-08-19 review fix — hasActiveFilters createdByUserId'ı saymıyordu:
+// yalnız Vaka Sahibi seçiliyken 0 sonuç dönerse "Henüz vaka yok / Yeni
+// Vaka" (yanlış) gösteriliyordu, "Filtrelere uyan vaka yok / Temizle"
+// (doğru) değil; filtre panelindeki Temizle butonu da görünmüyordu.
+check('CasesListPage.tsx — hasActiveFilters createdByUserId\'ı kapsıyor', 'src/features/cases/CasesListPage.tsx', /Boolean\(filters\.personId\) \|\|\s*\n\s*Boolean\(filters\.createdByUserId\) \|\|\s*\n\s*Boolean\(filters\.dateFrom\)/);
 
 console.log(`\n${pass} geçti, ${fail} başarısız.`);
 if (fail > 0) process.exitCode = 1;
