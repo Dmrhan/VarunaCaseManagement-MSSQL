@@ -34,6 +34,33 @@ export class MailProviderError extends Error {
   }
 }
 
+// Geçici ağ hatalarında otomatik retry (Adım 2 — kod-tarafı iyileştirme
+// planı). smtp.gmail.com:587'ye giden bağlantı zaman zaman ETIMEDOUT ile
+// başarısız oluyor (görülen üretim hatası: "connect ETIMEDOUT
+// 142.251.127.108:587"); tek denemede pes edip kullanıcıya ham hata
+// göstermek yerine, SADECE ağ-kaynaklı (bağlantı kuramama) hatalarda kısa
+// bir bekleme ile 2 kez daha denenir. Kimlik doğrulama (EAUTH) veya zarf/
+// mesaj hataları (EENVELOPE/EMESSAGE) retry YAPILMAZ — bunlar tekrar
+// denense de değişmez, sadece kullanıcıyı gereksiz bekletir.
+const MAIL_SEND_MAX_ATTEMPTS = 3; // ilk deneme + 2 retry
+const MAIL_SEND_RETRY_DELAYS_MS = [1000, 3000]; // 1. retry 1sn sonra, 2. retry 3sn sonra
+const RETRYABLE_MAIL_ERROR_CODES = new Set([
+  'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH',
+  'ECONNECTION', 'ESOCKET', 'ENOTFOUND',
+]);
+
+function isRetryableMailError(err) {
+  if (!err) return false;
+  if (RETRYABLE_MAIL_ERROR_CODES.has(err.code)) return true;
+  // nodemailer/Node bazen orijinal ağ hatasını `cause` altında saklar.
+  if (err.cause && RETRYABLE_MAIL_ERROR_CODES.has(err.cause.code)) return true;
+  return false;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Mail config resolver — M1 env + M5 per-tenant DB-first.
  *
@@ -312,51 +339,62 @@ export async function sendMail({
     ? config.from
     : (from || config.from);
 
-  try {
-    const info = await transport.sendMail({
-      from: finalFrom,
-      to,
-      cc,
-      bcc,
-      subject,
-      text,
-      html,
-      replyTo,
-      headers,
-      attachments,
-    });
+  for (let attempt = 1; attempt <= MAIL_SEND_MAX_ATTEMPTS; attempt++) {
+    try {
+      const info = await transport.sendMail({
+        from: finalFrom,
+        to,
+        cc,
+        bcc,
+        subject,
+        text,
+        html,
+        replyTo,
+        headers,
+        attachments,
+      });
 
-    // Ethereal için preview URL — bu URL'i browser'da açınca gönderilen
-    // mesajı görebilirsin. SMTP'de null döner.
-    const previewUrl =
-      config.transport === 'ethereal'
-        ? (nodemailer.getTestMessageUrl(info) || null)
-        : null;
+      // Ethereal için preview URL — bu URL'i browser'da açınca gönderilen
+      // mesajı görebilirsin. SMTP'de null döner.
+      const previewUrl =
+        config.transport === 'ethereal'
+          ? (nodemailer.getTestMessageUrl(info) || null)
+          : null;
 
-    return {
-      ok: true,
-      rawSource: RAW_SOURCE,
-      messageId: info?.messageId ?? null,
-      previewUrl,
-      meta: {
-        proxiedAt,
-        transport: config.transport,
-        source: config.source,
-        // FAZ B — teşhis: gönderim hangi inbox'tan yapıldı ('inbox' source ise).
-        ...(config.inboxId ? { inboxId: config.inboxId } : {}),
-      },
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      rawSource: RAW_SOURCE,
-      error: {
-        code: 'mail_send_failed',
-        message: err?.message ?? 'Gönderim başarısız.',
-        status: 502,
-      },
-      meta: { proxiedAt, transport: config.transport, source: config.source },
-    };
+      return {
+        ok: true,
+        rawSource: RAW_SOURCE,
+        messageId: info?.messageId ?? null,
+        previewUrl,
+        meta: {
+          proxiedAt,
+          transport: config.transport,
+          source: config.source,
+          // FAZ B — teşhis: gönderim hangi inbox'tan yapıldı ('inbox' source ise).
+          ...(config.inboxId ? { inboxId: config.inboxId } : {}),
+          ...(attempt > 1 ? { attempts: attempt } : {}),
+        },
+      };
+    } catch (err) {
+      const isLastAttempt = attempt === MAIL_SEND_MAX_ATTEMPTS;
+      if (!isLastAttempt && isRetryableMailError(err)) {
+        console.warn(
+          `[mailProvider] gönderim denemesi ${attempt}/${MAIL_SEND_MAX_ATTEMPTS} başarısız (ağ hatası, retry ediliyor): ${err?.code ?? err?.message}`,
+        );
+        await sleep(MAIL_SEND_RETRY_DELAYS_MS[attempt - 1]);
+        continue;
+      }
+      return {
+        ok: false,
+        rawSource: RAW_SOURCE,
+        error: {
+          code: 'mail_send_failed',
+          message: err?.message ?? 'Gönderim başarısız.',
+          status: 502,
+        },
+        meta: { proxiedAt, transport: config.transport, source: config.source, attempts: attempt },
+      };
+    }
   }
 }
 
