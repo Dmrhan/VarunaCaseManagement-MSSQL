@@ -33,6 +33,7 @@ import { TextInput } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { devopsService, type DevopsItem, type DevopsItemsResponse } from '@/services/devopsService';
+import type { Case } from '@/features/cases/types';
 
 interface DevOpsSectionProps {
   caseId: string;
@@ -41,6 +42,12 @@ interface DevOpsSectionProps {
    * Backend her durumda kendi rol guard'ını uygular (Agent+ yazma).
    */
   canWrite: boolean;
+  /**
+   * Bağla/Kaldır backend'de yan etki olarak Case'i güncelleyebilir (örn.
+   * requestType → Hata otomatik ataması). Üst bileşenin paylaşılan case
+   * state'ini tazelemek için dönen güncel Case buradan iletilir.
+   */
+  onCaseUpdated?: (updated: Case) => void;
 }
 
 /**
@@ -99,7 +106,7 @@ function formatRelative(iso: string | null): string {
   }
 }
 
-export function DevOpsSection({ caseId, canWrite }: DevOpsSectionProps) {
+export function DevOpsSection({ caseId, canWrite, onCaseUpdated }: DevOpsSectionProps) {
   const { toast } = useToast();
   const [data, setData] = useState<DevopsItemsResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -179,6 +186,7 @@ export function DevOpsSection({ caseId, canWrite }: DevOpsSectionProps) {
     setLinkModalOpen(false);
     setLinkInput('');
     toast({ type: 'success', title: 'Bağlandı', message: 'DevOps iş öğesi vakaya bağlandı.', duration: 2000 });
+    onCaseUpdated?.(updated);
     void load();
   }
 
@@ -191,6 +199,7 @@ export function DevOpsSection({ caseId, canWrite }: DevOpsSectionProps) {
     setUnlinkingId(null);
     if (!updated) return;
     toast({ type: 'success', title: 'Kaldırıldı', message: `#${id} bağı kaldırıldı.`, duration: 2000 });
+    onCaseUpdated?.(updated);
     void load();
   }
 

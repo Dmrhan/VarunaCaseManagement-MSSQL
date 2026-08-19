@@ -2804,17 +2804,30 @@ function LinksTab({
   const isOwner = !!user?.personId && item.assignedPersonId === user.personId;
   const canRemove = elevated || isOwner;
 
+  // Race guard — LinksTab kullanıcı bu tab'i açıkken başka bir vakaya
+  // geçebilir (aynı CaseDetailPage instance'ı, bu component unmount OLMAZ —
+  // satır ~1476'da key yok). reload()/loadAi()/addLink()/removeLink() async
+  // yanıtları geç gelirse, artık ekranda gösterilen vaka DEĞİŞMİŞ olabilir;
+  // bu ref her render'da en güncel item.id'yi tutar (activeIdRef deseniyle
+  // aynı — bkz. handleCommitDescription).
+  const itemIdRef = useRef(item.id);
+  itemIdRef.current = item.id;
+
   async function reload() {
+    const caseIdAtCall = item.id;
     setLoading(true);
-    const rows = await caseService.listLinks(item.id);
+    const rows = await caseService.listLinks(caseIdAtCall);
+    if (itemIdRef.current !== caseIdAtCall) return; // kullanıcı başka vakaya geçti — bu yanıtı UYGULAMA
     setLinks(rows);
     setLoading(false);
   }
 
   async function loadAi() {
+    const caseIdAtCall = item.id;
     setAiLoading(true);
     setAiErrored(false);
-    const r = await aiService.suggestLinks(item.id);
+    const r = await aiService.suggestLinks(caseIdAtCall);
+    if (itemIdRef.current !== caseIdAtCall) return; // kullanıcı başka vakaya geçti — bu yanıtı UYGULAMA
     setAiLoading(false);
     if (r.ok) setSuggestions(r.data.suggestions);
     else setAiErrored(true);
@@ -2827,9 +2840,11 @@ function LinksTab({
   }, [item.id]);
 
   async function addLink(linkedCaseId: string, linkType: import('./types').CaseLinkType) {
+    const caseIdAtCall = item.id;
     setBusy(true);
-    const r = await caseService.addLink(item.id, linkedCaseId, linkType);
+    const r = await caseService.addLink(caseIdAtCall, linkedCaseId, linkType);
     setBusy(false);
+    if (itemIdRef.current !== caseIdAtCall) return; // kullanıcı başka vakaya geçti — bu yanıtı UYGULAMA
     if (r) {
       toast({ type: 'success', message: 'Bağlantı eklendi.', duration: 1500 });
       await reload();
@@ -2839,9 +2854,11 @@ function LinksTab({
   }
 
   async function removeLink(linkId: string) {
+    const caseIdAtCall = item.id;
     setBusy(true);
-    const r = await caseService.removeLink(item.id, linkId);
+    const r = await caseService.removeLink(caseIdAtCall, linkId);
     setBusy(false);
+    if (itemIdRef.current !== caseIdAtCall) return; // kullanıcı başka vakaya geçti — bu yanıtı UYGULAMA
     if (r) {
       toast({ type: 'success', message: 'Bağlantı kaldırıldı.', duration: 1500 });
       setLinks((ls) => ls.filter((l) => l.linkId !== linkId));
@@ -3876,7 +3893,7 @@ function DetailTab({
       {/* PR-D3 — Azure DevOps İş Öğeleri.
           Backend ALLOWLIST guard'lı (16 alan). Read role-gate ile arşivli case
           için SystemAdmin görür, diğer roller 404. Bağla/Kaldır case-write. */}
-      <DevOpsSection caseId={item.id} canWrite={canWriteCase} />
+      <DevOpsSection caseId={item.id} canWrite={canWriteCase} onCaseUpdated={onCaseUpdated} />
 
       {/* Adım-2 #5 — "Müşteri & Sınıflandırma" → "Sınıflandırma":
           Şirket/Müşteri sol panelde zaten var (duplikasyon kaldırıldı).
