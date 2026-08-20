@@ -64,6 +64,8 @@ export interface ReportFilters {
   priorities?: string[] | string;
   assignedTeamId?: string;
   assignedPersonId?: string;
+  /** Case.accountProjectName ile TAM eşleşme — dropdown'dan seçilen kesin değer. */
+  accountProjectName?: string;
   search?: string;
 }
 
@@ -171,6 +173,11 @@ const VIEWS_BASE = '/api/reports/views';
 export const reportService = {
   async listColumns(): Promise<ReportColumnsResponse | undefined> {
     return apiFetch<ReportColumnsResponse>(`${BASE}/columns`, undefined, 'Rapor kolonları');
+  },
+
+  /** "Proje" filtresi dropdown'ı için — izinli şirketler kapsamında benzersiz proje adları. */
+  async listProjectOptions(): Promise<string[] | undefined> {
+    return apiFetch<string[]>(`${BASE}/project-options`, undefined, 'Proje listesi');
   },
 
   async preview(

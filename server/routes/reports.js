@@ -162,6 +162,45 @@ router.get('/cases/columns', async (req, res) => {
 });
 
 /**
+ * GET /api/reports/cases/project-options
+ * "Proje" filtresi için — izinli şirketler kapsamında Case.accountProjectName'in
+ * benzersiz (boş olmayan) değerleri, alfabetik. Univera bayi/distribütör
+ * modelinde proje adı genelde ana firma/marka adı olduğu için (ör. "Nestle"
+ * onlarca farklı bayi hesabında AYNI proje adıyla geçiyor) benzersiz değer
+ * sayısı düşük (gerçek veride ~150-200) — dropdown için uygun.
+ *
+ * `groupBy` kullanılır, `findMany({distinct})` DEĞİL — Prisma'nın MSSQL
+ * connector'ında distinct bellek-içi post-processing yapıp `take` sınırı
+ * uygulamıyor (lookups.js/case-creators'ta bulunan aynı sınıf hata; burada
+ * baştan groupBy ile önlendi — gerçek SQL GROUP BY).
+ */
+router.get('/cases/project-options', async (req, res) => {
+  try {
+    await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read', throwIfEmpty: true });
+  } catch (err) {
+    if (handleAuthorizationRuntimeError(res, err)) return;
+    console.error('[reports/cases/project-options][authz]', err);
+    return res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+  try {
+    const allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read' });
+    if (!allowed.length) return res.json([]);
+    const rows = await prisma.case.groupBy({
+      by: ['accountProjectName'],
+      where: { companyId: { in: allowed }, accountProjectName: { not: null } },
+    });
+    const names = rows
+      .map((r) => r.accountProjectName)
+      .filter((n) => typeof n === 'string' && n.trim().length > 0)
+      .sort((a, b) => a.localeCompare(b, 'tr'));
+    res.json(names);
+  } catch (err) {
+    console.error('[reports/cases/project-options]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+/**
  * POST /api/reports/cases/preview
  * Body: { columns: string[], filters?: object, page?: number, pageSize?: number }
  * Response: { rows: object[], total: number, columns: ColumnDef[], page, pageSize }
