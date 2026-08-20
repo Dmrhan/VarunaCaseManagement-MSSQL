@@ -17,6 +17,7 @@ const REASON_LABEL = {
   workload: 'İş Yükü',
   escalation: 'Eskalasyon',
   customer_request: 'Müşteri Talebi',
+  internal_transfer: 'İç Aktarım',
   other: 'Diğer',
 };
 

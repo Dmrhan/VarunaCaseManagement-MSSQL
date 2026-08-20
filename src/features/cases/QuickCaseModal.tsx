@@ -143,6 +143,7 @@ const TRANSFER_REASON_CHIPS: TransferReasonChip[] = [
   { code: 'workload', label: 'İş Yükü' },
   { code: 'escalation', label: 'Eskalasyon' },
   { code: 'customer_request', label: 'Müşteri Talebi' },
+  { code: 'internal_transfer', label: 'İç Aktarım' },
   { code: 'other', label: 'Diğer' },
 ];
 

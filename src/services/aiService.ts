@@ -256,6 +256,7 @@ export type TransferReasonCode =
   | 'workload'
   | 'escalation'
   | 'customer_request'
+  | 'internal_transfer'
   | 'other';
 
 export interface TransferSuggestion {

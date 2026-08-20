@@ -772,7 +772,7 @@ router.post(
     // 3. Strict JSON schema — model sadece geçerli teamId üretebilir
     const teamIdEnum = teams.map((t) => t.id);
     const teamNameEnum = teams.map((t) => t.name);
-    const reasonCodeEnum = ['wrong_team', 'expertise', 'workload', 'escalation', 'customer_request', 'followed_case', 'other'];
+    const reasonCodeEnum = ['wrong_team', 'expertise', 'workload', 'escalation', 'customer_request', 'followed_case', 'internal_transfer', 'other'];
 
     const schema = {
       type: 'object',
