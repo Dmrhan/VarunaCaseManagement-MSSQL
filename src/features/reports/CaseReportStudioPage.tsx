@@ -159,6 +159,10 @@ export function CaseReportStudioPage() {
   const [loadingColumns, setLoadingColumns] = useState(true);
   const [columnsError, setColumnsError] = useState<string | null>(null);
 
+  // "Proje" filtresi dropdown'ı — izinli şirketler kapsamında benzersiz
+  // proje adları, bir kere yüklenir (columns ile aynı desende).
+  const [projectOptions, setProjectOptions] = useState<string[]>([]);
+
   const [selectedColumnIds, setSelectedColumnIds] = useState<string[]>([
     'caseNumber',
     'title',
@@ -257,6 +261,17 @@ export function CaseReportStudioPage() {
         setColumnsError(null);
       }
       setLoadingColumns(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void reportService.listProjectOptions().then((res) => {
+      if (cancelled || !res) return;
+      setProjectOptions(res);
     });
     return () => {
       cancelled = true;
@@ -814,6 +829,19 @@ export function CaseReportStudioPage() {
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Proje">
+              <Select
+                value={filters.accountProjectName ?? ''}
+                onChange={(e) =>
+                  setFilters((f) => ({ ...f, accountProjectName: e.target.value || undefined }))
+                }
+              >
+                <option value="">— Hepsi —</option>
+                {projectOptions.map((p) => (
+                  <option key={p} value={p}>{p}</option>
                 ))}
               </Select>
             </Field>
