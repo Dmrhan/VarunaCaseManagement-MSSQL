@@ -7072,6 +7072,27 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null, roleDefaultScope
       andClauses.push({ OR: orClauses });
     }
   }
+  // Vaka Etiket Doğrulama ekranı — sadece Vaka No'da arama. f.search'ten
+  // AYRI ve additive bir filtre: f.search title/accountName'i de eşleştirir
+  // (üstteki blok), ama bu ekran SADECE Vaka No istiyor — paylaşılan
+  // f.search'ü genişletmek diğer ekranlarda (CasesListPage vb.) istenmeyen
+  // başlık/müşteri eşleşmeleri getirirdi. resolvedDateFrom/resolvedDateTo
+  // ile aynı prensip (bkz. üstteki yorum) — additive, mevcut f.search
+  // davranışı değişmedi.
+  if (f.caseNumberSearch) {
+    const q = f.caseNumberSearch.trim();
+    if (q) {
+      const numericOnly = /^\d+$/.test(q);
+      const orClauses = [{ caseNumber: { contains: q } }];
+      if (numericOnly) {
+        const asNumber = Number(q);
+        if (Number.isSafeInteger(asNumber)) {
+          orClauses.push({ caseSeq: asNumber });
+        }
+      }
+      andClauses.push({ OR: orClauses });
+    }
+  }
   if (andClauses.length) where.AND = andClauses;
   if (f.statuses?.length) where.status = { in: f.statuses };
   if (f.caseType && f.caseType !== 'Tümü') where.caseType = f.caseType;

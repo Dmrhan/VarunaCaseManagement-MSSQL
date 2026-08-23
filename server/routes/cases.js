@@ -1001,6 +1001,10 @@ router.get(
       resolvedDateFrom: f.resolvedDateFrom,
       resolvedDateTo: f.resolvedDateTo,
       teamId: f.teamId || undefined,
+      // Vaka No araması — f.search'ten BİLEREK ayrı (bkz. buildWhere'deki
+      // caseNumberSearch yorumu): bu ekran sadece Vaka No'da arar, f.search
+      // gibi başlık/müşteri adını da eşleştirmez.
+      caseNumberSearch: f.search || undefined,
     };
     const securityWhere = await buildCaseListSecurityWhere(req);
     const { items } = await caseRepository.list({
@@ -1018,9 +1022,12 @@ router.get(
 );
 
 /**
- * GET /api/cases/tagging-review?resolvedDateFrom&resolvedDateTo&statuses&page&pageSize
+ * GET /api/cases/tagging-review?resolvedDateFrom&resolvedDateTo&statuses&teamId&search&page&pageSize
  *
  * Vaka Etiket Doğrulama Ekranı — Supervisor/Admin/SystemAdmin.
+ * `search` — SADECE Vaka No'da arar (caseNumberSearch filtresine map'lenir);
+ * f.search'ün title/accountName eşleştirmesinden BİLEREK ayrı — bkz.
+ * buildWhere()'deki caseNumberSearch yorumu.
  * KRİTİK: bu literal route GET /:id'den (aşağıda) ÖNCE mount edilmeli,
  * yoksa Express '/:id' ile eşleşir (id="tagging-review") ve buraya hiç
  * ulaşılmaz — bkz. aşağıdaki /watching route'undaki aynı uyarı.
@@ -1047,6 +1054,10 @@ router.get(
       resolvedDateFrom: f.resolvedDateFrom,
       resolvedDateTo: f.resolvedDateTo,
       teamId: f.teamId || undefined,
+      // Vaka No araması — f.search'ten BİLEREK ayrı (bkz. buildWhere'deki
+      // caseNumberSearch yorumu): bu ekran sadece Vaka No'da arar, f.search
+      // gibi başlık/müşteri adını da eşleştirmez.
+      caseNumberSearch: f.search || undefined,
     };
     const HARD_MAX_PAGE_SIZE = 200;
     const requestedPageSize = Number(f.pageSize ?? 25);

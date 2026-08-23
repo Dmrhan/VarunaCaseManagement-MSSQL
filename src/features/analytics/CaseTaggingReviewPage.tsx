@@ -219,7 +219,8 @@ function ExpandableCell({ text }: { text: string }) {
 // Tarihi'ne (resolvedAt) geçti; eski v2 kaydı farklı bir alanı temsil
 // ediyordu, sürüm bilerek bumplandı ki eski dateFrom/dateTo kaydı yanlış
 // yorumlanıp sessizce "Çözüm Tarihi" gibi uygulanmasın.
-const FILTER_KEY = 'varuna:tagging-review-filters-v3';
+// v4 — Vaka No arama alanı (search) eklendi.
+const FILTER_KEY = 'varuna:tagging-review-filters-v4';
 
 function formatUtcDateTime(value?: string | null): string {
   if (!value) return '';
@@ -232,7 +233,7 @@ function loadSavedFilters() {
   try {
     const raw = localStorage.getItem(FILTER_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as { resolvedDateFrom: string; resolvedDateTo: string; statuses: CaseStatus[]; teamId: string };
+    return JSON.parse(raw) as { resolvedDateFrom: string; resolvedDateTo: string; statuses: CaseStatus[]; teamId: string; search: string };
   } catch {
     return null;
   }
@@ -570,6 +571,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
   const [resolvedDateTo, setResolvedDateTo]     = useState(() => loadSavedFilters()?.resolvedDateTo ?? '');
   const [statuses, setStatuses] = useState<CaseStatus[]>(() => loadSavedFilters()?.statuses ?? ['Çözüldü']);
   const [teamId, setTeamId]     = useState(() => loadSavedFilters()?.teamId ?? '');
+  const [search, setSearch]     = useState(() => loadSavedFilters()?.search ?? '');
   const [page, setPage]         = useState(1);
   const [sortKey, setSortKey]   = useState<TaggingSortKey>('createdAt');
   const [sortDir, setSortDir]   = useState<SortDir>('desc');
@@ -608,6 +610,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
         resolvedDateTo: resolvedDateTo || undefined,
         statuses: statuses.length ? statuses : undefined,
         teamId: teamId || undefined,
+        search: search || undefined,
       },
       { page: pageOverride ?? page, pageSize },
       { sortBy: sortKey, sortDir },
@@ -627,6 +630,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
         resolvedDateTo: resolvedDateTo || undefined,
         statuses: statuses.length ? statuses : undefined,
         teamId: teamId || undefined,
+        search: search || undefined,
       });
 
       const VERDICT_TR: Record<string, string> = { Dogru: 'Doğru', Yanlis: 'Yanlış', Belirsiz: 'Belirsiz' };
@@ -678,9 +682,9 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
 
   useEffect(() => {
     try {
-      localStorage.setItem(FILTER_KEY, JSON.stringify({ resolvedDateFrom, resolvedDateTo, statuses, teamId }));
+      localStorage.setItem(FILTER_KEY, JSON.stringify({ resolvedDateFrom, resolvedDateTo, statuses, teamId, search }));
     } catch {}
-  }, [resolvedDateFrom, resolvedDateTo, statuses, teamId]);
+  }, [resolvedDateFrom, resolvedDateTo, statuses, teamId, search]);
 
   useEffect(() => {
     void fetchPage();
@@ -795,6 +799,14 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
             </Select>
+          </Field>
+          <Field label="Vaka No" className="w-40">
+            <TextInput
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); void fetchPage(1); } }}
+              placeholder="örn. UNV-1000042"
+            />
           </Field>
           <Button
             leftIcon={loading ? <Loader2 size={13} className="animate-spin" /> : <Filter size={13} />}
