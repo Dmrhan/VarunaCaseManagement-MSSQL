@@ -162,14 +162,54 @@ router.get('/cases/columns', async (req, res) => {
 });
 
 /**
+ * GET /api/reports/cases/project-options
+ * "Proje" filtresi için — izinli şirketler kapsamında Case.accountProjectName'in
+ * benzersiz (boş olmayan) değerleri, alfabetik. Univera bayi/distribütör
+ * modelinde proje adı genelde ana firma/marka adı olduğu için (ör. "Nestle"
+ * onlarca farklı bayi hesabında AYNI proje adıyla geçiyor) benzersiz değer
+ * sayısı düşük (gerçek veride ~150-200) — dropdown için uygun.
+ *
+ * `groupBy` kullanılır, `findMany({distinct})` DEĞİL — Prisma'nın MSSQL
+ * connector'ında distinct bellek-içi post-processing yapıp `take` sınırı
+ * uygulamıyor (lookups.js/case-creators'ta bulunan aynı sınıf hata; burada
+ * baştan groupBy ile önlendi — gerçek SQL GROUP BY).
+ */
+router.get('/cases/project-options', async (req, res) => {
+  let allowed;
+  try {
+    allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read', throwIfEmpty: true });
+  } catch (err) {
+    if (handleAuthorizationRuntimeError(res, err)) return;
+    console.error('[reports/cases/project-options][authz]', err);
+    return res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+  try {
+    if (!allowed.length) return res.json([]);
+    const rows = await prisma.case.groupBy({
+      by: ['accountProjectName'],
+      where: { companyId: { in: allowed }, accountProjectName: { not: null } },
+    });
+    const names = rows
+      .map((r) => r.accountProjectName)
+      .filter((n) => typeof n === 'string' && n.trim().length > 0)
+      .sort((a, b) => a.localeCompare(b, 'tr'));
+    res.json(names);
+  } catch (err) {
+    console.error('[reports/cases/project-options]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+/**
  * POST /api/reports/cases/preview
  * Body: { columns: string[], filters?: object, page?: number, pageSize?: number }
  * Response: { rows: object[], total: number, columns: ColumnDef[], page, pageSize }
  */
 router.post('/cases/preview', async (req, res) => {
   const body = req.body ?? {};
+  let allowed;
   try {
-    await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read', throwIfEmpty: true });
+    allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read', throwIfEmpty: true });
   } catch (err) {
     if (handleAuthorizationRuntimeError(res, err)) return;
     console.error('[reports/cases/preview][authz]', err);
@@ -211,7 +251,6 @@ router.post('/cases/preview', async (req, res) => {
     });
   }
 
-  const allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read' });
   const { where, scopeValid } = buildReportWhere(body.filters, allowed);
   if (!scopeValid) {
     return res.json({
@@ -267,8 +306,9 @@ router.post('/cases/preview', async (req, res) => {
  */
 router.post('/cases/export', async (req, res) => {
   const body = req.body ?? {};
+  let allowed;
   try {
-    await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'export', throwIfEmpty: true });
+    allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'export', throwIfEmpty: true });
   } catch (err) {
     if (handleAuthorizationRuntimeError(res, err)) return;
     console.error('[reports/cases/export][authz]', err);
@@ -300,7 +340,6 @@ router.post('/cases/export', async (req, res) => {
     });
   }
 
-  const allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'export' });
   const { where, scopeValid } = buildReportWhere(body.filters, allowed);
   if (!scopeValid) {
     // Boş scope → boş Excel üret. Kullanıcıya "izinli şirket yok" sinyali
@@ -368,8 +407,9 @@ const PIVOT_MAX_ROWS = 5000;
 
 router.post('/cases/pivot', async (req, res) => {
   const body = req.body ?? {};
+  let allowed;
   try {
-    await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read', throwIfEmpty: true });
+    allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read', throwIfEmpty: true });
   } catch (err) {
     if (handleAuthorizationRuntimeError(res, err)) return;
     console.error('[reports/cases/pivot][authz]', err);
@@ -438,7 +478,6 @@ router.post('/cases/pivot', async (req, res) => {
     });
   }
 
-  const allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read' });
   const { where, scopeValid } = buildReportWhere(body.filters, allowed);
   if (!scopeValid) {
     return res.json({
@@ -543,8 +582,9 @@ const DRILL_DEFAULT_COLUMNS = [
 
 router.post('/cases/pivot/drill', async (req, res) => {
   const body = req.body ?? {};
+  let allowed;
   try {
-    await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read', throwIfEmpty: true });
+    allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read', throwIfEmpty: true });
   } catch (err) {
     if (handleAuthorizationRuntimeError(res, err)) return;
     console.error('[reports/cases/pivot/drill][authz]', err);
@@ -579,7 +619,6 @@ router.post('/cases/pivot/drill', async (req, res) => {
     });
   }
 
-  const allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read' });
   const { where, scopeValid } = buildReportWhere(body.filters, allowed);
   if (!scopeValid) {
     return res.json({
@@ -636,8 +675,9 @@ router.post('/cases/pivot/drill', async (req, res) => {
 // satırı. Sheet "Bilgi": timestamp + pivot config + filtre özeti.
 
 router.post('/cases/pivot/export', async (req, res) => {
+  let allowed;
   try {
-    await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'export', throwIfEmpty: true });
+    allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'export', throwIfEmpty: true });
   } catch (err) {
     if (handleAuthorizationRuntimeError(res, err)) return;
     console.error('[reports/cases/pivot/export][authz]', err);
@@ -683,7 +723,6 @@ router.post('/cases/pivot/export', async (req, res) => {
       forbiddenIds: roleCheck.forbidden,
     });
   }
-  const allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'export' });
   const { where, scopeValid } = buildReportWhere(body.filters, allowed);
   if (!scopeValid) {
     return sendPivotXlsx(res, { row: rowCol, col: colCol, measure: { fn: measureFn, columnLabel: measureCol?.label }, piv: { rowLabels: [], colLabels: [], matrix: {}, rowTotals: {}, colTotals: {}, grandTotal: 0 } }, body.filters);

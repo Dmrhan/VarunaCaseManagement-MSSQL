@@ -450,7 +450,7 @@ export const caseService = {
    * Vaka listesi + her vakanın review kaydı (varsa) tek çağrıda döner.
    */
   async listTaggingReviews(
-    filters?: { resolvedDateFrom?: string; resolvedDateTo?: string; statuses?: CaseStatus[]; teamId?: string },
+    filters?: { resolvedDateFrom?: string; resolvedDateTo?: string; statuses?: CaseStatus[]; teamId?: string; search?: string },
     pagination?: CaseListPagination,
     sort?: { sortBy?: string; sortDir?: 'asc' | 'desc' },
   ): Promise<{ items: Case[]; total: number; reviews: Map<string, CaseTaggingReview> }> {
@@ -462,6 +462,7 @@ export const caseService = {
     if (filters?.resolvedDateTo) params.set('resolvedDateTo', filters.resolvedDateTo);
     if (filters?.statuses?.length) params.set('statuses', filters.statuses.join(','));
     if (filters?.teamId) params.set('teamId', filters.teamId);
+    if (filters?.search) params.set('search', filters.search);
     if (pagination) {
       params.set('page', String(pagination.page));
       params.set('pageSize', String(pagination.pageSize));
@@ -481,7 +482,7 @@ export const caseService = {
   },
 
   async exportTaggingReviews(
-    filters?: { resolvedDateFrom?: string; resolvedDateTo?: string; statuses?: CaseStatus[]; teamId?: string },
+    filters?: { resolvedDateFrom?: string; resolvedDateTo?: string; statuses?: CaseStatus[]; teamId?: string; search?: string },
   ): Promise<{ items: Case[]; reviews: Map<string, CaseTaggingReview> }> {
     if (USE_MOCK) return { items: [], reviews: new Map() };
     const params = new URLSearchParams();
@@ -489,6 +490,7 @@ export const caseService = {
     if (filters?.resolvedDateTo) params.set('resolvedDateTo', filters.resolvedDateTo);
     if (filters?.statuses?.length) params.set('statuses', filters.statuses.join(','));
     if (filters?.teamId) params.set('teamId', filters.teamId);
+    if (filters?.search) params.set('search', filters.search);
     const data = await apiFetch<{
       value: Case[];
       reviews: Record<string, CaseTaggingReview>;

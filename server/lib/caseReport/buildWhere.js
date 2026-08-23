@@ -23,6 +23,11 @@
  *   - priorities         → CSV veya string[] (zaten ASCII; conversion yok)
  *   - assignedTeamId     → tek değer
  *   - assignedPersonId   → tek değer
+ *   - accountProjectName → tek değer, TAM eşleşme (contains değil — Univera
+ *     bayi/distribütör modelinde proje adı genelde ana firma/marka adı,
+ *     ör. "Nestle" onlarca farklı proje adında GEÇİYOR olabilir ama tam
+ *     eşleşme kesinlik verir; UI kesin değer listesinden dropdown ile
+ *     seçtiriyor, serbest metin değil)
  *   - search             → caseNumber / title / accountName OR (contains)
  *
  * Bilinmeyen filter key'leri sessizce yok sayılır — UI ve backend birbirinden
@@ -135,6 +140,9 @@ export function buildReportWhere(filters, allowedCompanyIds) {
   }
   if (typeof f.assignedPersonId === 'string' && f.assignedPersonId.trim()) {
     where.assignedPersonId = f.assignedPersonId.trim();
+  }
+  if (typeof f.accountProjectName === 'string' && f.accountProjectName.trim()) {
+    where.accountProjectName = f.accountProjectName.trim();
   }
 
   const dateFrom = parseDate(f.dateFrom);
