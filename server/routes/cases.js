@@ -1267,6 +1267,51 @@ router.delete(
 );
 
 /**
+ * Uzak Destek — POST /api/cases/:id/remote-session ("Bağlantı Al")
+ *
+ * Müşteri TeamViewer ID'siyle bir uzak destek oturumu işareti açar. Süre
+ * ölçmez; gece reconcile TeamViewer raporundan gerçek süreyi yazar.
+ * Body: { customerTvId: string, launchedVia?: 'deeplink'|'manual' }
+ * Dönen: { session, launch: { deepLink } }
+ */
+router.post(
+  '/:id/remote-session',
+  requireRole('Agent', 'Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    const actor = requireActor(req);
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
+    const { customerTvId, launchedVia } = req.body ?? {};
+    const session = await caseRepository.startRemoteSession(req.params.id, {
+      customerTvId,
+      actor,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+      launchedVia: launchedVia === 'deeplink' || launchedVia === 'manual' ? launchedVia : null,
+    });
+    if (!session) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    // TeamViewer deep link (en iyi çaba — garantili açılış Windows launcher işi).
+    const deepLink = `teamviewer8://control?device=${encodeURIComponent(session.customerTvId)}`;
+    res.status(201).json({ session, launch: { deepLink } });
+  }),
+);
+
+/**
+ * Uzak Destek — GET /api/cases/:id/remote-sessions (vakanın oturumları)
+ */
+router.get(
+  '/:id/remote-sessions',
+  asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
+    const result = await caseRepository.listRemoteSessions(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (result === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(result);
+  }),
+);
+
+/**
  * PR-D2 — GET /api/cases/:id/devops-items
  *
  * Bağlı TFS work item'larının CANLI değerlerini batch çek (UI render

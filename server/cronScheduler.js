@@ -5,6 +5,9 @@ import { runQaScoreBatch } from './cron/qaScoreBatch.js';
 import { runNotificationCleanup } from './cron/notificationCleanup.js';
 import { runActionItemArchive } from './cron/actionItemArchive.js';
 import { runSlaBreachSweep } from './cron/slaBreachSweep.js';
+import { runMonitoringSnapshot } from './cron/monitoringSnapshot.js';
+import { runDevopsStateSync } from './cron/devopsStateSync.js';
+import { runRemoteSessionReconcile } from './cron/remoteSessionReconcile.js';
 import { startImapPollingInterval } from './lib/imapPoller.js';
 
 /**
@@ -21,6 +24,8 @@ import { startImapPollingInterval } from './lib/imapPoller.js';
  *   her 5 dk   → snooze-wakeup        (ertelenen vakaları uyandır)
  *   her 15 dk  → pattern-detect       (vaka kümeleri → PatternAlert)
  *   02:00      → qa-score-batch       (AI QA skorlama; OPENAI_API_KEY yoksa no-op)
+ *   03:00      → monitoring-snapshot  (yönetici raporlama rpt_TicketLifecycle rebuild)
+ *   03:15      → devops-state-sync    (bağlı TFS work item state'ini vakaya mirror'la — TÜM vakalar, kapalı dahil / all)
  *   03:00      → notification-cleanup (30 günden eski okunmuş bildirimler)
  *   03:30      → actionitem-archive   (kapanmış eylem öğelerini arşivle)
  */
@@ -72,11 +77,17 @@ export function startCronScheduler() {
   schedule('pattern-detect', '*/15 * * * *', runPatternDetect);
   schedule('sla-breach-sweep', '*/5 * * * *', runSlaBreachSweep);
   schedule('qa-score-batch', '0 2 * * *', runQaScoreBatch);
+  schedule('monitoring-snapshot', '0 3 * * *', runMonitoringSnapshot);
+  // onlyOpen:false → TÜM devops-bağlı vakalar (KAPALI dahil). Kapanış sonrası
+  // TFS state değişimi (Proposed→Closed vb.) snapshot'a yansısın diye "all"
+  // moduna alındı; onlyOpen sadece açık vakaları tazeliyor, kapalıları bayatlatıyordu.
+  schedule('devops-state-sync', '15 3 * * *', () => runDevopsStateSync({ onlyOpen: false, dryRun: false }));
+  schedule('remote-session-reconcile', '20 3 * * *', () => runRemoteSessionReconcile({ dryRun: false }));
   schedule('notification-cleanup', '0 3 * * *', runNotificationCleanup);
   schedule('actionitem-archive', '30 3 * * *', runActionItemArchive);
   // Mail M3 — IMAP polling. env MAIL_IMAP_POLL_INTERVAL_SEC > 0 → aktif;
   // default kapalı. imapPoller.js içinde setInterval yönetimi (manuel
   // tetik admin POST /external-mail-settings/:companyId/poll).
   startImapPollingInterval();
-  console.log('[cron] scheduler aktif: snooze 5dk, pattern 15dk, sla-breach 5dk, qa 02:00, cleanup 03:00, archive 03:30 (Europe/Istanbul).');
+  console.log('[cron] scheduler aktif: snooze 5dk, pattern 15dk, sla-breach 5dk, qa 02:00, monitoring 03:00, devops-sync 03:15, cleanup 03:00, archive 03:30 (Europe/Istanbul).');
 }

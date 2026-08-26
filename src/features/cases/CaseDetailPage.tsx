@@ -92,6 +92,7 @@ import { FilesTab } from './components/CaseFiles';
 import { CustomerPulsePanel } from './components/CustomerPulsePanel';
 import { CaseTitleEditable } from './components/CaseTitleEditable';
 import { DevOpsSection } from './components/DevOpsSection';
+import { RemoteSupportSection } from './components/RemoteSupportSection';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { useToast } from '@/components/ui/Toast';
 import { ExpandableText } from '@/components/ui/ExpandableText';
@@ -3876,6 +3877,7 @@ function DetailTab({
           Backend ALLOWLIST guard'lı (16 alan). Read role-gate ile arşivli case
           için SystemAdmin görür, diğer roller 404. Bağla/Kaldır case-write. */}
       <DevOpsSection caseId={item.id} canWrite={canWriteCase} />
+      <RemoteSupportSection caseId={item.id} canWrite={canWriteCase} />
 
       {/* Adım-2 #5 — "Müşteri & Sınıflandırma" → "Sınıflandırma":
           Şirket/Müşteri sol panelde zaten var (duplikasyon kaldırıldı).
