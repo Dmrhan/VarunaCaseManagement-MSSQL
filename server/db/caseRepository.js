@@ -3371,6 +3371,244 @@ export const caseRepository = {
   },
 
   /**
+   * DevOps state mirror — toplu senkron (gece job + manuel tetik).
+   *
+   * Bağlı work item'ların CANLI TFS state'ini çekip vakadaki saklı
+   * customFields.devops[].* alanlarını günceller. Amaç: "DevOps'ta ne
+   * durumdaysa vakada da o görünsün" (Closed→Closed, Resolved→Resolved).
+   * listDevopsLive yalnız OKUR (persist etmez) → saklı state bayat kalıyordu;
+   * bu metod farkı DB'ye YAZAR.
+   *
+   * KRİTİK: CSM vaka STATÜSÜNE (Açık/Çözüldü…) DOKUNMAZ. Yalnız bağlı work
+   * item snapshot'ını tazeler — kapanış guard'ı / SLA / bildirim tetiklenmez.
+   * State değişen her work item için CaseActivity('DevopsStateSynced') düşer.
+   *
+   * @param {string} companyId
+   * @param {{ onlyOpen?: boolean, dryRun?: boolean }} opts
+   *   onlyOpen (default true): yalnız terminal olmayan vakalar (Cozuldu/
+   *   IptalEdildi hariç) — "burada açık" kümesi. false → tüm linkli vakalar.
+   *   dryRun: DB'ye yazmaz; ne değişeceğini döndürür.
+   * @returns { scanned, linked, itemsFetched, casesUpdated, changes[], stale, errors[] }
+   */
+  async syncDevopsStates(companyId, { onlyOpen = true, dryRun = false } = {}) {
+    const where = { companyId, customFields: { contains: '"devops"' } };
+    if (onlyOpen) where.status = { notIn: ['Cozuldu', 'IptalEdildi'] };
+    const cases = await prisma.case.findMany({
+      where,
+      select: { id: true, caseNumber: true, companyId: true, customFields: true },
+    });
+
+    // Tüm work item id'lerini topla → tek batch (chunk 100) TFS sorgusu.
+    const idSet = new Set();
+    for (const c of cases) {
+      for (const e of readDevopsArray(c.customFields)) {
+        if (Number.isInteger(e?.id) && e.id > 0) idSet.add(e.id);
+      }
+    }
+    const allIds = [...idSet];
+    const summary = {
+      scanned: cases.length, linked: cases.filter((c) => readDevopsArray(c.customFields).length > 0).length,
+      itemsFetched: 0, casesUpdated: 0, changes: [], stale: false, errors: [],
+    };
+    if (allIds.length === 0) return summary;
+
+    const CHUNK = 100;
+    const liveById = new Map();
+    for (let i = 0; i < allIds.length; i += CHUNK) {
+      const chunk = allIds.slice(i, i + CHUNK);
+      const r = await devopsClient.getWorkItems(chunk, { companyId });
+      if (!r.ok) {
+        summary.stale = true;
+        summary.errors.push({ code: r.error?.code, message: r.error?.message, chunkStart: i });
+        continue; // bu chunk atlanır; diğerleri denenir
+      }
+      for (const n of (r.data?.normalized ?? [])) liveById.set(n.id, n);
+    }
+    summary.itemsFetched = liveById.size;
+
+    const now = new Date().toISOString();
+    for (const c of cases) {
+      const arr = readDevopsArray(c.customFields);
+      if (arr.length === 0) continue;
+      let changed = false;
+      const caseChanges = [];
+      const nextArr = arr.map((entry) => {
+        const live = liveById.get(entry?.id);
+        if (!live) return entry; // bu id çekilemedi → dokunma
+        if ((entry?.state ?? null) !== (live.state ?? null)) {
+          changed = true;
+          caseChanges.push({ id: entry.id, from: entry?.state ?? null, to: live.state ?? null, title: live.title ?? entry?.title ?? null });
+        }
+        return {
+          ...live,                       // 16 allowlist alanı (canlı)
+          linkedAt: entry?.linkedAt ?? null,
+          linkedByUserId: entry?.linkedByUserId ?? null,
+          linkedByUserName: entry?.linkedByUserName ?? null,
+          lastSyncedAt: now,
+        };
+      });
+      if (!changed) continue;
+      summary.casesUpdated += 1;
+      for (const ch of caseChanges) summary.changes.push({ caseNumber: c.caseNumber, ...ch });
+      if (dryRun) continue;
+      try {
+        await prisma.case.update({
+          where: { id: c.id },
+          data: { customFields: writeDevopsArray(c.customFields, nextArr) },
+        });
+        for (const ch of caseChanges) {
+          await prisma.caseActivity.create({
+            data: {
+              caseId: c.id, companyId: c.companyId,
+              // actionType kasıtlı null — CaseHistoryActionType enum'una yeni
+              // değer eklemiyoruz (mevcut konvansiyon); ayrım action/note'ta.
+              actionType: null, action: 'DevOps durumu senkronlandı',
+              actor: 'Sistem (DevOps senkron)', actorUserId: null,
+              note: `#${ch.id}: ${ch.from ?? '—'} → ${ch.to ?? '—'}`, at: new Date(),
+            },
+          });
+        }
+      } catch (err) {
+        summary.errors.push({ caseNumber: c.caseNumber, code: 'persist_failed', message: String(err?.message ?? err).slice(0, 120) });
+      }
+    }
+    return summary;
+  },
+
+  /**
+   * Uzak Destek (TeamViewer) — "Bağlantı Al" butonu bir oturum işareti açar.
+   *
+   * Süre burada ölçülmez; yalnız (vaka + temsilci + müşteri TV ID + başlangıç)
+   * kaydedilir. Gece reconcile job'ı TeamViewer raporundan gerçek süreyi yazar.
+   * Auth/scope: assertCaseInScope (kullanıcının allowedCompanyIds'i).
+   */
+  async startRemoteSession(caseId, { customerTvId, actor, allowedCompanyIds, launchedVia = null }) {
+    assertActor(actor, 'caseRepository.startRemoteSession');
+    const tvId = String(customerTvId ?? '').replace(/\s+/g, '');
+    if (!/^\d{5,15}$/.test(tvId)) {
+      throw new CaseValidationError(
+        'Geçerli bir müşteri TeamViewer ID girin (sadece rakam).',
+        { status: 400, code: 'remote_session_tvid_invalid' },
+      );
+    }
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+    const session = await prisma.caseRemoteSession.create({
+      data: {
+        caseId, companyId,
+        agentUserId: actor.userId ?? null,
+        agentName: actor.displayName,
+        customerTvId: tvId,
+        launchedVia,
+        startedAt: new Date(),
+        matchState: 'pending',
+      },
+    });
+    await prisma.caseActivity.create({
+      data: {
+        caseId, companyId,
+        actionType: null, action: 'Bağlantılı destek başlatıldı',
+        actor: actor.displayName, actorUserId: actor.userId ?? null,
+        note: `TeamViewer #${tvId} — süre gece senkronunda hesaplanacak`, at: new Date(),
+      },
+    });
+    return session;
+  },
+
+  /** Bir vakanın uzak destek oturumları (read). */
+  async listRemoteSessions(caseId, allowedCompanyIds, actorRole) {
+    const companyId = await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole);
+    if (!companyId) return null;
+    const rows = await prisma.caseRemoteSession.findMany({
+      where: { caseId },
+      orderBy: { startedAt: 'desc' },
+    });
+    return { items: rows };
+  },
+
+  /**
+   * Uzak destek reconcile — TeamViewer bağlantı raporundan gerçek süreyi eşle.
+   *
+   * pending işaretleri, TeamViewer kayıtlarıyla (deviceid == customerTvId +
+   * temsilci adı + oturum başlangıcı ± pencere) birebir eşler; tek aday →
+   * matched (start/end/durationSec yazılır), çok aday → ambiguous (en yakın
+   * seçilir), aday yok → henüz bekliyor (rapor gecikmiş olabilir, pending kalır)
+   * veya pencere aşıldıysa unmatched.
+   *
+   * @param {{ windowMin?: number, lookbackHours?: number, dryRun?: boolean,
+   *           connections?: Array }} opts
+   *   connections verilirse tekrar TeamViewer'a gidilmez (çok-şirket job paylaşımı).
+   */
+  async reconcileRemoteSessions(companyId, { windowMin = 20, lookbackHours = 72, dryRun = false, connections = null } = {}) {
+    const since = new Date(Date.now() - lookbackHours * 3600 * 1000);
+    const pending = await prisma.caseRemoteSession.findMany({
+      where: { companyId, matchState: { in: ['pending', 'ambiguous'] }, startedAt: { gte: since } },
+      select: { id: true, agentName: true, customerTvId: true, startedAt: true },
+    });
+    const summary = { scanned: pending.length, matched: 0, ambiguous: 0, stillPending: 0, unmatched: 0, changes: [] };
+    if (pending.length === 0) return summary;
+
+    let conns = connections;
+    if (!conns) {
+      const { fetchConnections } = await import('../lib/teamviewerClient.js');
+      const r = await fetchConnections({ from: since, to: new Date() });
+      if (!r.ok) { summary.error = r.error; return summary; }
+      conns = r.records;
+    }
+    const norm = (s) => (s || '').toLocaleLowerCase('tr').replace(/\s+/g, ' ').trim();
+    const winMs = windowMin * 60000;
+
+    for (const s of pending) {
+      const st = s.startedAt.getTime();
+      // Aday: aynı cihaz (deviceid) + aynı temsilci + oturum başı, işaretin ±pencere
+      const cands = conns.filter((c) =>
+        String(c.deviceid) === s.customerTvId &&
+        norm(c.username) === norm(s.agentName) &&
+        Math.abs(new Date(c.start_date).getTime() - st) <= winMs,
+      );
+      let state, target = null;
+      if (cands.length === 1) { state = 'matched'; target = cands[0]; }
+      else if (cands.length > 1) {
+        state = 'ambiguous';
+        target = cands.sort((a, b) => Math.abs(new Date(a.start_date) - st) - Math.abs(new Date(b.start_date) - st))[0];
+      } else {
+        // Deviceid+agent eşleşmedi. Pencere hâlâ açıksa (rapor gecikmiş olabilir)
+        // pending bırak; başlangıç penceresi geçtiyse unmatched.
+        state = (Date.now() - st > (windowMin + 60) * 60000) ? 'unmatched' : 'pending';
+      }
+
+      if (state === 'matched' || state === 'ambiguous') {
+        const durSec = target.start_date && target.end_date
+          ? Math.max(0, Math.round((new Date(target.end_date) - new Date(target.start_date)) / 1000)) : null;
+        summary[state === 'matched' ? 'matched' : 'ambiguous']++;
+        summary.changes.push({ id: s.id, state, durationSec: durSec, tvStart: target.start_date, tvEnd: target.end_date ?? null });
+        if (!dryRun) {
+          await prisma.caseRemoteSession.update({
+            where: { id: s.id },
+            data: {
+              tvConnectionId: String(target.id ?? ''),
+              tvStartDate: target.start_date ? new Date(target.start_date) : null,
+              tvEndDate: target.end_date ? new Date(target.end_date) : null,
+              durationSec: durSec,
+              matchState: state,
+              matchedAt: new Date(),
+              note: state === 'ambiguous' ? `Birden çok aday; en yakın seçildi` : null,
+            },
+          });
+        }
+      } else if (state === 'unmatched') {
+        summary.unmatched++;
+        if (!dryRun) {
+          await prisma.caseRemoteSession.update({ where: { id: s.id }, data: { matchState: 'unmatched', matchedAt: new Date() } });
+        }
+      } else {
+        summary.stillPending++;
+      }
+    }
+    return summary;
+  },
+
+  /**
    * Phase D — PATCH /api/cases/:id/link-account
    *
    * Müşterisiz açılmış (customerMatchPending=true) bir vakaya Supervisor/Admin

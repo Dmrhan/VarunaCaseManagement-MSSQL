@@ -3,6 +3,9 @@ import { runPatternDetect } from '../cron/patternDetect.js';
 import { runQaScoreBatch, runScoreCase } from '../cron/qaScoreBatch.js';
 import { runNotificationCleanup } from '../cron/notificationCleanup.js';
 import { runActionItemArchive } from '../cron/actionItemArchive.js';
+import { runRefreshTicketLifecycle } from '../cron/refreshTicketLifecycle.js';
+import { runDevopsStateSync } from '../cron/devopsStateSync.js';
+import { runRemoteSessionReconcile } from '../cron/remoteSessionReconcile.js';
 
 /**
  * /api/cron/* — uzaktan tetiklenen periyodik işler.
@@ -92,6 +95,58 @@ router.post('/actionitem-archive', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[cron:actionitem-archive]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+/**
+ * rpt_TicketLifecycle materialized rapor tablosu yenileme — manuel tetik.
+ * dbo.usp_Refresh_rpt_TicketLifecycle (~1-2dk). Zamanlanmış karşılığı 04:00
+ * (cronScheduler: rpt-lifecycle-refresh).
+ */
+router.post('/rpt-lifecycle-refresh', async (req, res) => {
+  if (!checkCronSecret(req, res)) return;
+  try {
+    const result = await runRefreshTicketLifecycle();
+    if (result && result.ok === false) return res.status(500).json(result);
+    res.json(result ?? { ok: true });
+  } catch (err) {
+    console.error('[cron:rpt-lifecycle-refresh]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+/**
+ * DevOps state mirror — manuel tetik. Bağlı TFS work item state'ini vakaya
+ * yansıtır (CSM statüsüne dokunmaz). Query: ?dryRun=1 (yazma yok, önizleme),
+ * ?all=1 (kapalı vakalar dahil; default yalnız açık). Zamanlanmış karşılığı 03:15.
+ */
+router.post('/devops-state-sync', async (req, res) => {
+  if (!checkCronSecret(req, res)) return;
+  try {
+    const dryRun = req.query.dryRun === '1';
+    const onlyOpen = req.query.all !== '1';
+    const result = await runDevopsStateSync({ onlyOpen, dryRun });
+    if (!result.ok) return res.status(500).json(result);
+    res.json(result);
+  } catch (err) {
+    console.error('[cron:devops-state-sync]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+/**
+ * Uzak Destek reconcile — manuel tetik. "Bağlantı Al" işaretlerini TeamViewer
+ * gerçek süresiyle eşler. ?dryRun=1 (yazma yok). Zamanlanmış karşılığı 03:20.
+ */
+router.post('/remote-session-reconcile', async (req, res) => {
+  if (!checkCronSecret(req, res)) return;
+  try {
+    const result = await runRemoteSessionReconcile({ dryRun: req.query.dryRun === '1' });
+    if (!result.ok) return res.status(500).json(result);
+    res.json(result);
+  } catch (err) {
+    console.error('[cron:remote-session-reconcile]', err);
     res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
   }
 });
