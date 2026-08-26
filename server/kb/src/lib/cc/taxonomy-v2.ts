@@ -359,13 +359,26 @@ export function enforcePlatformFromHints(
 
 // ─── Açılış alanları ─────────────────────────────────────────────────────
 
-export function getOpenField(field: OpenField): OpenSpec {
-  return loadTaxonomyV2().open[field];
+// Option C (WR-Smart-Ticket açılışı Haiku'ya taşı) — Kapanıştaki
+// CloseTaxonomyOverride ile aynı mantık: açılış vocab'ı da DB (TaxonomyDef) tek
+// doğruluk kaynağından gelebilsin. Çağıran (smartTicket.js) aktif DB satırlarından
+// { <OpenField>: {label,description,values} } kurup HTTP body ile categorize-v2'ye
+// taşır. Verilmezse (undefined) mevcut davranış aynen: loadTaxonomyV2() →
+// data/cc-taxonomy-v2.json (geri uyum).
+export type OpenTaxonomyOverride = Partial<Record<OpenField, OpenSpec>>;
+
+export function getOpenField(field: OpenField, override?: OpenTaxonomyOverride): OpenSpec {
+  return override?.[field] ?? loadTaxonomyV2().open[field];
 }
 
-export function isValidOpenValue(field: OpenField, value: string | null): boolean {
+export function isValidOpenValue(
+  field: OpenField,
+  value: string | null,
+  override?: OpenTaxonomyOverride,
+): boolean {
   if (value == null) return true;
-  return getOpenField(field).values.includes(value);
+  const spec = getOpenField(field, override);
+  return Array.isArray(spec?.values) ? spec.values.includes(value) : false;
 }
 
 // ─── Kapanış alanları ───────────────────────────────────────────────────
@@ -447,14 +460,19 @@ export function isValidKaliciOnlem(value: string | null, override?: CloseTaxonom
 
 // ─── LLM Prompt formatters ───────────────────────────────────────────────
 
-export function formatOpenForPrompt(): string {
+export function formatOpenForPrompt(override?: OpenTaxonomyOverride): string {
   const t = loadTaxonomyV2();
   return OPEN_FIELD_ORDER.map((f) => {
-    const spec = t.open[f];
+    const base = t.open[f];
+    const ov = override?.[f];
+    // Override yalnız values'ı taşır; açıklama (guidance) yoksa statik açıklamaya düş.
+    const label = ov?.label ?? base.label;
+    const description = ov?.description?.trim() ? ov.description : base.description;
+    const values = Array.isArray(ov?.values) && ov.values.length ? ov.values : base.values;
     return [
-      `## ${spec.label} (${f})`,
-      spec.description,
-      ...spec.values.map((v) => `  • ${v}`),
+      `## ${label} (${f})`,
+      description,
+      ...values.map((v) => `  • ${v}`),
     ].join("\n");
   }).join("\n\n");
 }
