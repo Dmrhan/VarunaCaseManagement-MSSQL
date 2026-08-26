@@ -3895,7 +3895,7 @@ function DetailTab({
           Backend ALLOWLIST guard'lı (16 alan). Read role-gate ile arşivli case
           için SystemAdmin görür, diğer roller 404. Bağla/Kaldır case-write. */}
       <DevOpsSection caseId={item.id} canWrite={canWriteCase} onCaseUpdated={onCaseUpdated} />
-      <RemoteSupportSection caseId={item.id} canWrite={canWriteCase} />
+      <RemoteSupportSection caseId={item.id} canWrite={canWriteCase} caseStatus={item.status} />
 
       {/* Adım-2 #5 — "Müşteri & Sınıflandırma" → "Sınıflandırma":
           Şirket/Müşteri sol panelde zaten var (duplikasyon kaldırıldı).

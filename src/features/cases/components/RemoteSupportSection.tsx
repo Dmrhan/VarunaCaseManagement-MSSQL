@@ -18,10 +18,13 @@ import { TextInput } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { remoteSupportService, type RemoteSession } from '@/services/remoteSupportService';
+import type { CaseStatus } from '../types';
 
 interface RemoteSupportSectionProps {
   caseId: string;
   canWrite: boolean;
+  /** Kapalı (Çözüldü/İptal) vakaya bağlantılı destek başlatılamaz. */
+  caseStatus: CaseStatus;
 }
 
 const fmtDur = (sec: number | null): string => {
@@ -46,8 +49,9 @@ const fmtDate = (iso: string): string => {
   }
 };
 
-export function RemoteSupportSection({ caseId, canWrite }: RemoteSupportSectionProps) {
+export function RemoteSupportSection({ caseId, canWrite, caseStatus }: RemoteSupportSectionProps) {
   const { toast } = useToast();
+  const isClosed = caseStatus === 'Çözüldü' || caseStatus === 'İptalEdildi';
   const [sessions, setSessions] = useState<RemoteSession[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -103,10 +107,13 @@ export function RemoteSupportSection({ caseId, canWrite }: RemoteSupportSectionP
           >
             {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
           </button>
-          {canWrite && (
+          {canWrite && !isClosed && (
             <Button size="sm" variant="outline" leftIcon={<Monitor size={13} />} onClick={() => setModalOpen(true)}>
               Bağlantı Al
             </Button>
+          )}
+          {canWrite && isClosed && (
+            <span className="text-[11px] text-slate-400">Kapalı vakaya bağlantı eklenemez</span>
           )}
         </div>
       </div>

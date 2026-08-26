@@ -3493,6 +3493,15 @@ export const caseRepository = {
     }
     const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
     if (!companyId) return null;
+    // Kapalı (terminal) vakaya bağlantılı destek başlatılamaz — çözülmüş/iptal
+    // edilmiş vakada uzak oturum açmak mantıksız (DB enum: Cozuldu/IptalEdildi).
+    const current = await prisma.case.findUnique({ where: { id: caseId }, select: { status: true } });
+    if (current && (current.status === 'Cozuldu' || current.status === 'IptalEdildi')) {
+      throw new CaseValidationError(
+        'Çözülmüş veya iptal edilmiş vakaya bağlantılı destek eklenemez.',
+        { status: 400, code: 'remote_session_case_closed' },
+      );
+    }
     const session = await prisma.caseRemoteSession.create({
       data: {
         caseId, companyId,
