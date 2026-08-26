@@ -45,6 +45,13 @@ export interface IncomingCall {
   matchedName?: string;
   /** Gelen (inbound) çağrı mı — otomatik screen-pop yalnız inbound'da tetiklenir. */
   inbound: boolean;
+  // Faz 2 — /active-call enrichment: gelen çağrı webhook'unun şifresinden çözülen
+  // müşteri (screen-pop'u callerId yerine buradan kesin açar) + link-call anahtarı.
+  matchedAccountId?: string | null;
+  matchedAccountName?: string | null;
+  matchedProjectId?: string | null;
+  matchedProjectName?: string | null;
+  callLogKey?: string | null;
 }
 
 interface SoftphoneState {
@@ -105,7 +112,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const startedRef = useRef(false);
   const lastIncomingKey = useRef<string | null>(null);
   const dismissedKey = useRef<string | null>(null);
-  const lastInbound = useRef<{ callerId: string; queue: string; key: string } | null>(null);
+  const lastInbound = useRef<{ callerId: string; queue: string; key: string; matchedAccountId?: string | null; matchedAccountName?: string | null; matchedProjectId?: string | null; matchedProjectName?: string | null; callLogKey?: string | null } | null>(null);
   const lastAnsweredKey = useRef<string | null>(null);
 
   const refreshStatus = useCallback(async () => {
@@ -201,35 +208,34 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       }
       if (r && 'agentStatus' in r) {
         // Çağrı yanıtlandığında (talking) → screen pop event, çağrı başına BİR KEZ.
-        // Dedup STABİL çağrı key'i ile. lastInbound null'a düşse bile (aktif çağrı
-        // MyActiveCalls'ta inbound görünmüyorsa) 'answered' gibi resetlenebilir bir
-        // key'e düşürüp HER POLL'DE yeniden dispatch ETMEYELİM — aksi halde event
-        // 2sn'de bir tekrar tetikleniyor ve yeni-vaka ekranını sürekli açıyordu.
+        // Dedup STABİL çağrı key'i ile (dev fix: 2sn'de bir re-dispatch etmesin).
+        // Detail'e Faz 2 enrichment (şifreden çözülen müşteri + link anahtarı) eklenir.
         if (r.agentStatus === 'talking' && lastInbound.current && lastAnsweredKey.current !== lastInbound.current.key) {
           lastAnsweredKey.current = lastInbound.current.key;
-          window.dispatchEvent(new CustomEvent(SOFTPHONE_ANSWERED_EVENT, { detail: { number: lastInbound.current.callerId, key: lastInbound.current.key } }));
+          window.dispatchEvent(new CustomEvent(SOFTPHONE_ANSWERED_EVENT, { detail: { number: lastInbound.current.callerId, key: lastInbound.current.key, matchedAccountId: lastInbound.current.matchedAccountId, matchedAccountName: lastInbound.current.matchedAccountName, matchedProjectId: lastInbound.current.matchedProjectId, matchedProjectName: lastInbound.current.matchedProjectName, callLogKey: lastInbound.current.callLogKey } }));
         } else if (r.agentStatus !== 'talking' && r.agentStatus !== 'ringing' && r.agentStatus !== 'dialing') {
           lastAnsweredKey.current = null;
         }
         setAgentStatus(r.agentStatus);
       }
       const inbound = (r?.calls || []).find((c) => c.inbound);
-      if (inbound) lastInbound.current = { callerId: inbound.callerId, queue: inbound.queue, key: inbound.key };
+      if (inbound) lastInbound.current = { callerId: inbound.callerId, queue: inbound.queue, key: inbound.key, matchedAccountId: inbound.matchedAccountId ?? null, matchedAccountName: inbound.matchedAccountName ?? null, matchedProjectId: inbound.matchedProjectId ?? null, matchedProjectName: inbound.matchedProjectName ?? null, callLogKey: inbound.callLogKey ?? null };
       // Çağrı CEVAPLANDIYSA (talking) artık "gelen çağrı" DEĞİL → banner düşsün, ticket
-      // bir daha açılmasın. Aktif çağrı MyActiveCalls'ta hâlâ inbound göründüğünden eski
-      // koşul (|| !!inbound) banner'ı TÜM görüşme boyunca "GELEN ÇAĞRI" asılı bırakıyor,
-      // screen-pop'u tekrar tetikliyordu. lastInbound KORUNUR (ANSWERED dispatch/pop onu
-      // kullanır) — yalnız banner gizlenir; cevaplanan çağrı yeniden "gelen" gösterilmez.
+      // bir daha açılmasın (dev fix: aktif çağrı MyActiveCalls'ta hâlâ inbound göründüğünden
+      // eski `|| !!inbound` koşulu banner'ı asılı bırakıp screen-pop'u tekrar tetikliyordu).
+      // lastInbound KORUNUR (ANSWERED dispatch/pop onu kullanır). Faz 2 enrichment src'ye taşınır.
       const answered = r?.agentStatus === 'talking';
       const ringing = r?.agentStatus === 'ringing' || r?.agentStatus === 'dialing' || !!inbound;
       if (answered) {
         setIncomingCall(null);
       } else if (ringing) {
-        const src = inbound ? { callerId: inbound.callerId, queue: inbound.queue, key: inbound.key } : lastInbound.current;
+        const src = inbound
+          ? { callerId: inbound.callerId, queue: inbound.queue, key: inbound.key, matchedAccountId: inbound.matchedAccountId ?? null, matchedAccountName: inbound.matchedAccountName ?? null, matchedProjectId: inbound.matchedProjectId ?? null, matchedProjectName: inbound.matchedProjectName ?? null, callLogKey: inbound.callLogKey ?? null }
+          : lastInbound.current;
         const key = src?.key || 'ringing';
         if (key !== dismissedKey.current && key !== lastIncomingKey.current) {
           lastIncomingKey.current = key;
-          const call: IncomingCall = { number: src?.callerId || 'Bilinmeyen', queue: src?.queue, key, status: 'ringing', inbound: !!inbound };
+          const call: IncomingCall = { number: src?.callerId || 'Bilinmeyen', queue: src?.queue, key, status: 'ringing', inbound: !!inbound, matchedAccountId: src?.matchedAccountId ?? null, matchedAccountName: src?.matchedAccountName ?? null, matchedProjectId: src?.matchedProjectId ?? null, matchedProjectName: src?.matchedProjectName ?? null, callLogKey: src?.callLogKey ?? null, matchedName: src?.matchedAccountName ?? undefined };
           setIncomingCall(call);
           window.dispatchEvent(new CustomEvent(SOFTPHONE_INCOMING_EVENT, { detail: call }));
         }

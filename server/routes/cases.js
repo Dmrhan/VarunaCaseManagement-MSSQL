@@ -324,7 +324,10 @@ async function assertCaseResourcePolicy(req, { resourceKey, action, baselineAllo
   const resourceEnabled = isAuthorizationResourceEnforcementEnabled();
   const securityFilterEnabled = isAuthorizationSecurityFilterEnforcementEnabled();
   if (!resourceEnabled && !securityFilterEnabled) return null;
-  const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
+  // Perf fix — burada yalnız companyId (scope kontrolü) lazım; tam
+  // CASE_INCLUDE (notes/attachments/history/callLogs) getirmenin karşılığı
+  // yok. bkz. caseRepository.getScopeOnly.
+  const c = await caseRepository.getScopeOnly(req.params.id, req.user.allowedCompanyIds, req.user.role);
   if (!c) {
     throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
   }
@@ -540,7 +543,9 @@ async function assertCaseCloseRequiredFields(req, { nextStatus, payload }) {
   if (!isAuthorizationFieldEnforcementEnabled()) return null;
   const fields = closeFieldCandidatesFor(nextStatus);
   if (fields.length === 0) return null;
-  const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
+  // Perf fix — bkz. assertCaseResourcePolicy'deki aynı not; yalnız companyId
+  // kullanılıyor, tam include gereksiz.
+  const c = await caseRepository.getScopeOnly(req.params.id, req.user.allowedCompanyIds, req.user.role);
   if (!c) {
     throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
   }
@@ -712,6 +717,9 @@ router.get(
       teamId,
       teamIds: teamIds && teamIds.length > 0 ? teamIds : undefined,
       personId,
+      // Vaka Sahibi — vakayı açan kullanıcı (Case.createdByUserId). "Kişi"
+      // (assignedPersonId) filtresinden ayrı, atamadan bağımsız.
+      createdByUserId: typeof f.createdByUserId === 'string' ? f.createdByUserId : undefined,
       dateFrom: f.dateFrom,
       dateTo: f.dateTo,
       customerMatchPending,
@@ -987,9 +995,16 @@ router.get(
     const f = req.query;
     const filters = {
       statuses: f.statuses ? f.statuses.split(',') : undefined,
-      dateFrom: f.dateFrom,
-      dateTo: f.dateTo,
+      // 2026-08-19 fix — bu ekranda tarih filtresi Çözüm Tarihi'ne göre
+      // çalışır (Açılış Tarihi'ne DEĞİL — bkz. resolvedDateFrom/To altındaki
+      // ana route yorumu). dateFrom/dateTo (createdAt) BİLEREK kullanılmadı.
+      resolvedDateFrom: f.resolvedDateFrom,
+      resolvedDateTo: f.resolvedDateTo,
       teamId: f.teamId || undefined,
+      // Vaka No araması — f.search'ten BİLEREK ayrı (bkz. buildWhere'deki
+      // caseNumberSearch yorumu): bu ekran sadece Vaka No'da arar, f.search
+      // gibi başlık/müşteri adını da eşleştirmez.
+      caseNumberSearch: f.search || undefined,
     };
     const securityWhere = await buildCaseListSecurityWhere(req);
     const { items } = await caseRepository.list({
@@ -1007,9 +1022,12 @@ router.get(
 );
 
 /**
- * GET /api/cases/tagging-review?dateFrom&dateTo&statuses&page&pageSize
+ * GET /api/cases/tagging-review?resolvedDateFrom&resolvedDateTo&statuses&teamId&search&page&pageSize
  *
  * Vaka Etiket Doğrulama Ekranı — Supervisor/Admin/SystemAdmin.
+ * `search` — SADECE Vaka No'da arar (caseNumberSearch filtresine map'lenir);
+ * f.search'ün title/accountName eşleştirmesinden BİLEREK ayrı — bkz.
+ * buildWhere()'deki caseNumberSearch yorumu.
  * KRİTİK: bu literal route GET /:id'den (aşağıda) ÖNCE mount edilmeli,
  * yoksa Express '/:id' ile eşleşir (id="tagging-review") ve buraya hiç
  * ulaşılmaz — bkz. aşağıdaki /watching route'undaki aynı uyarı.
@@ -1017,6 +1035,14 @@ router.get(
  * caseRepository.list/shape/CASE_INCLUDE'a dokunulmaz: vaka listesi mevcut
  * filtre/scope mantığıyla çekilir, review kayıtları ayrı sorgulanıp
  * caseId → review map'i olarak ayrı bir alanda döner.
+ *
+ * 2026-08-19 fix — tarih filtresi ÖNCEDEN dateFrom/dateTo (Case.createdAt,
+ * yani Açılış Tarihi) kullanıyordu. Bu ekranın amacı ÇÖZÜLMÜŞ vakaların
+ * etiketlerini gözden geçirmek — kullanıcı "Statü: Çözüldü + bugünün
+ * tarihi" seçtiğinde "bugün açılan" değil "bugün çözülen" vakaları
+ * bekliyor. resolvedDateFrom/resolvedDateTo (Case.resolvedAt) kullanılır;
+ * bu, buildWhere()'e YENİ ve ADDITIVE bir filtre olarak eklendi — mevcut
+ * dateFrom/dateTo (CasesListPage vb. diğer ekranlar) davranışı DEĞİŞMEDİ.
  */
 router.get(
   '/tagging-review',
@@ -1025,9 +1051,13 @@ router.get(
     const f = req.query;
     const filters = {
       statuses: f.statuses ? f.statuses.split(',') : undefined,
-      dateFrom: f.dateFrom,
-      dateTo: f.dateTo,
+      resolvedDateFrom: f.resolvedDateFrom,
+      resolvedDateTo: f.resolvedDateTo,
       teamId: f.teamId || undefined,
+      // Vaka No araması — f.search'ten BİLEREK ayrı (bkz. buildWhere'deki
+      // caseNumberSearch yorumu): bu ekran sadece Vaka No'da arar, f.search
+      // gibi başlık/müşteri adını da eşleştirmez.
+      caseNumberSearch: f.search || undefined,
     };
     const HARD_MAX_PAGE_SIZE = 200;
     const requestedPageSize = Number(f.pageSize ?? 25);
@@ -1080,6 +1110,7 @@ const TAGGING_REVIEW_FIELD_KEYS = [
   'closingRootCauseDetailVerdict', 'closingRootCauseDetailCorrectedCode',
   'closingResolutionTypeVerdict', 'closingResolutionTypeCorrectedCode',
   'closingPermanentPreventionVerdict', 'closingPermanentPreventionCorrectedCode',
+  'requestTypeVerdict', 'requestTypeCorrectedCode',
 ];
 
 router.put(

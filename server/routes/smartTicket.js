@@ -66,6 +66,31 @@ async function loadActiveTaxonomies(companyId) {
   return out;
 }
 
+// Option C (WR-Smart-Ticket açılışı Haiku'ya taşı) — loadActiveTaxonomies'in DB v4
+// açılış satırlarını KB categorize-v2'nin beklediği override şekline çevirir:
+//   { <kbField>: { label, description, values[] } }
+// KB alan adları statik cc-taxonomy-v2.json ile aynı: platform / is_sureci /
+// islem_tipi / etkilenen_nesne / etki. (urun KB-özel, DB v4'te yok → statik kalır.)
+// Kapanıştaki loadActiveClosureTaxonomies → sgBody.taxonomy deseninin açılış eşleniği.
+const KB_OPEN_FIELD_BY_TYPE = {
+  platform: { field: 'platform', label: 'Platform' },
+  businessProcess: { field: 'is_sureci', label: 'İş Süreci' },
+  operationType: { field: 'islem_tipi', label: 'İşlem Tipi' },
+  affectedObject: { field: 'etkilenen_nesne', label: 'Etkilenen Nesne' },
+  impact: { field: 'etki', label: 'Etki' },
+};
+function buildKbOpenTaxonomy(taxonomies) {
+  const out = {};
+  for (const [type, meta] of Object.entries(KB_OPEN_FIELD_BY_TYPE)) {
+    const rows = Array.isArray(taxonomies?.[type]) ? taxonomies[type] : [];
+    const values = rows
+      .map((r) => r.label)
+      .filter((s) => typeof s === 'string' && s.trim().length > 0);
+    if (values.length) out[meta.field] = { label: meta.label, description: '', values };
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 router.post('/suggest-classification', async (req, res) => {
   try {
     const body = req.body ?? {};
@@ -114,6 +139,14 @@ router.post('/suggest-classification', async (req, res) => {
     if (typeof body.customerName === 'string' && body.customerName.trim()) {
       v2Body.customer_name = body.customerName.trim();
     }
+
+    // Option C — DB v4 açılış taksonomisini KB'ye ilet: categorize-v2 statik
+    // cc-taxonomy-v2.json yerine güncel v4 vocab'ından seçsin → dönen etiketler
+    // aşağıdaki mapClassificationToTaxonomy'de birebir eşleşir (unmatched drift
+    // kapanır). Aynı `taxonomies` mapping'de yeniden kullanılır (tek DB round-trip).
+    const taxonomies = await loadActiveTaxonomies(companyId);
+    const kbOpenTaxonomy = buildKbOpenTaxonomy(taxonomies);
+    if (kbOpenTaxonomy) v2Body.openTaxonomy = kbOpenTaxonomy;
 
     // Codex P2 (main #447 review) — externalKbClient.proxy() non-2xx HTTP
     // veya network/timeout için throw atmaz; { ok: false, error, data }
@@ -191,7 +224,7 @@ router.post('/suggest-classification', async (req, res) => {
     // snake_case alanlarını (platform, is_sureci, vb.) okuyor; analyze'in
     // analysis.classification.X path'ini de aynı adapter cover ediyor.
     const raw = extractClassificationFromKb(kbResponse);
-    const taxonomies = await loadActiveTaxonomies(companyId);
+    // `taxonomies` yukarıda (Option C) zaten yüklendi — yeniden DB'ye gitme.
     const { suggestions, unmatched } = mapClassificationToTaxonomy(raw, taxonomies);
 
     // categorize-v2 cevabı confidence/reason dönüyor — meta'ya yazarız;

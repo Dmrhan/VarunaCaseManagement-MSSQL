@@ -173,6 +173,9 @@ interface ClosureFormState {
   resolutionType: string;
   permanentPrevention: string;
   resolutionNote: string;
+  /** COMP-UNIVERA'da Çözüldü'ye geçmeden önce zorunlu (backend transitionStatus
+   * guard'ı, product_version_required_for_closure). */
+  productVersion: string;
 }
 
 const emptyForm = (companyId: string): SmartTicketFormState => ({
@@ -202,6 +205,7 @@ const emptyClosure = (): ClosureFormState => ({
   resolutionType: '',
   permanentPrevention: '',
   resolutionNote: '',
+  productVersion: '',
 });
 
 export function SmartTicketNewPage({
@@ -210,6 +214,10 @@ export function SmartTicketNewPage({
   onOpenExistingCase,
   initialAccountId,
   initialAccountName,
+  initialProjectId,
+  initialProjectName,
+  autoPickSingleProject = false,
+  fromCall = false,
 }: {
   /**
    * Kullanıcı bilinçli olarak Case Detail'e gitmek isterse caller bunu
@@ -228,6 +236,23 @@ export function SmartTicketNewPage({
   /** Gelen çağrı screen pop'u: müşteri ön-seçili açılır (callerId eşleşmesi). */
   initialAccountId?: string | null;
   initialAccountName?: string | null;
+  /**
+   * Gelen çağrı pop'u — şifreden çözülen PROJE (AccountCompany tek aktif proje).
+   * Verilirse proje KESİN ön-seçilir (autoPickSingleProject heuristiğinden bağımsız).
+   */
+  initialProjectId?: string | null;
+  initialProjectName?: string | null;
+  /**
+   * Gelen çağrı pop'u — müşterinin TEK aktif projesi varsa BİR KEZ oto-seç.
+   * YALNIZ çağrıda true; manuel akıllı-ticket açılışında false → mevcut davranış
+   * (proje elle seçilir) hiç değişmez.
+   */
+  autoPickSingleProject?: boolean;
+  /**
+   * Gelen çağrıdan açıldıysa oluşan vakanın origin'i 'Telefon' olur (aksi 'Web').
+   * Çağrı-merkezi raporlamasında kanal doğru görünsün diye. YALNIZ çağrıda true.
+   */
+  fromCall?: boolean;
 }) {
   const companies = useMemo(() => lookupService.companies(), []);
   const defaultCompanyId = companies[0]?.id ?? '';
@@ -235,6 +260,9 @@ export function SmartTicketNewPage({
   const [form, setForm] = useState<SmartTicketFormState>(() => emptyForm(defaultCompanyId));
   const [stage, setStage] = useState<Stage>('opening');
   const [createdCase, setCreatedCase] = useState<Case | null>(null);
+  // Tek-proje oto-seçimi yalnız BİR KEZ (çağrıdan gelen ilk müşteri için); sonraki
+  // manuel hesap değişiminde tetiklenmesin.
+  const autoPickConsumedRef = useRef(false);
 
   // Gelen çağrı screen pop'u: müşteri ön-seçili gelirse form'a uygula (boşsa).
   useEffect(() => {
@@ -242,6 +270,15 @@ export function SmartTicketNewPage({
       setForm((f) => (f.accountId ? f : { ...f, accountId: initialAccountId, accountName: initialAccountName ?? '' }));
     }
   }, [initialAccountId, initialAccountName]);
+
+  // Şifreden çözülen proje (kesin) — form'a uygula (boşsa). Proje-load useEffect'i, aynı
+  // isActive/status filtresini kullandığından bu projeyi listede bulup KORUR; böylece
+  // AccountCompany'nin birden çok projesi olsa bile doğru proje ön-seçili kalır.
+  useEffect(() => {
+    if (initialProjectId) {
+      setForm((f) => (f.accountProjectId ? f : { ...f, accountProjectId: initialProjectId, accountProjectName: initialProjectName ?? '' }));
+    }
+  }, [initialProjectId, initialProjectName]);
 
   const selectedCompany = useMemo(
     () => companies.find((c) => c.id === form.companyId) ?? null,
@@ -392,11 +429,19 @@ export function SmartTicketNewPage({
         .filter((p) => p.isActive && p.status === 'Active')
         .map((p) => ({ id: p.id, name: p.name, code: p.code }));
       setProjects(list);
-      setForm((f) =>
-        f.accountProjectId && !list.some((p) => p.id === f.accountProjectId)
-          ? { ...f, accountProjectId: '', accountProjectName: '' }
-          : f,
-      );
+      setForm((f) => {
+        // Seçili proje artık listede yoksa temizle.
+        if (f.accountProjectId && !list.some((p) => p.id === f.accountProjectId)) {
+          return { ...f, accountProjectId: '', accountProjectName: '' };
+        }
+        // Faz 2 — YALNIZ gelen çağrı pop'unda (autoPickSingleProject) ve bir kez:
+        // müşterinin tek aktif projesi varsa oto-seç. Manuel akışta hiç çalışmaz.
+        if (!f.accountProjectId && projectsEnabled && list.length === 1 && autoPickSingleProject && !autoPickConsumedRef.current) {
+          autoPickConsumedRef.current = true;
+          return { ...f, accountProjectId: list[0].id, accountProjectName: list[0].name };
+        }
+        return f;
+      });
     });
     return () => {
       alive = false;
@@ -918,7 +963,7 @@ export function SmartTicketNewPage({
         description: form.description.trim(),
         caseType: 'GeneralSupport',
         priority: finalPriority,
-        origin: 'Web',
+        origin: fromCall ? 'Telefon' : 'Web',
         companyId: form.companyId,
         companyName: selectedCompanyName(),
         accountId: form.accountId,
@@ -1495,6 +1540,14 @@ export function SmartTicketNewPage({
       );
       return;
     }
+    // Versiyon No — yalnız COMP-UNIVERA, backend transitionStatus guard'ının
+    // (product_version_required_for_closure) aynası. SystemAdmin muaf.
+    const requiresProductVersion =
+      createdCase.companyId === 'COMP-UNIVERA' && user?.role !== 'SystemAdmin';
+    if (requiresProductVersion && !closure.productVersion.trim()) {
+      setClosureError('Versiyon No zorunlu.');
+      return;
+    }
     setClosing(true);
     setClosureError(null);
 
@@ -1549,6 +1602,13 @@ export function SmartTicketNewPage({
     }
 
     try {
+      // Versiyon No — transitionStatus'un genel payload'ında productVersion
+      // yok; StatusTransitionPanel'deki handleSaveProductVersion ile aynı
+      // desen: ayrı bir update(), transitionStatus'tan ÖNCE, ki guard
+      // prev.productVersion'ı dolu bulsun.
+      if (requiresProductVersion && closure.productVersion.trim()) {
+        await caseService.update(createdCase.id, { productVersion: closure.productVersion.trim() });
+      }
       const updated = await caseService.transitionStatus(createdCase.id, 'Çözüldü', {
         resolutionNote: closure.resolutionNote.trim(),
         smartTicketClosure: closurePayload,
@@ -2058,6 +2118,7 @@ export function SmartTicketNewPage({
           {stage === 'closure' && createdCase && (
             <Stage3Closure
               createdCase={createdCase}
+              isSystemAdmin={user?.role === 'SystemAdmin'}
               closure={closure}
               setClosure={setClosure}
               closureLists={closureLists}
@@ -2336,6 +2397,7 @@ interface ClosureListsRef {
 
 function Stage3Closure({
   createdCase,
+  isSystemAdmin,
   closure,
   setClosure,
   closureLists,
@@ -2357,6 +2419,7 @@ function Stage3Closure({
   onItemUpdated,
 }: {
   createdCase: Case;
+  isSystemAdmin: boolean;
   closure: ClosureFormState;
   setClosure: (fn: (c: ClosureFormState) => ClosureFormState) => void;
   closureLists: ClosureListsRef;
@@ -2458,6 +2521,15 @@ function Stage3Closure({
             placeholder="Sorun nasıl çözüldü? Müşteriye ne anlatıldı?"
           />
         </Field>
+        {createdCase.companyId === 'COMP-UNIVERA' && !isSystemAdmin && (
+          <Field label="Versiyon No" required hint="Bu vaka Versiyon No girilmeden çözülemez.">
+            <TextInput
+              value={closure.productVersion}
+              onChange={(e) => setClosure((c) => ({ ...c, productVersion: e.target.value }))}
+              placeholder="örn. 3.2.1"
+            />
+          </Field>
+        )}
         {closureSuggesting && !closureSuggestion && (
           <div className="flex items-center gap-2 rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 text-xs text-violet-800 dark:border-violet-900/40 dark:bg-violet-950/30 dark:text-violet-200">
             <Loader2 size={12} className="animate-spin" />

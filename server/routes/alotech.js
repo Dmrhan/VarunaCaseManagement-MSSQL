@@ -4,6 +4,8 @@ import { getSessionKey, getCachedSession } from '../integrations/alotech/session
 import { click2Call } from '../integrations/alotech/click2.js';
 import { v1Fetch } from '../integrations/alotech/v1.js';
 import { isAlotechConfigured, logAlotechConfigOnce } from '../integrations/alotech/config.js';
+import { report as callLogReport, resolveActiveCallContext, linkCase as callLogLinkCase } from '../db/callLogRepository.js';
+import { prisma } from '../db/client.js';
 
 // Boot anında BİR KEZ log (eksik env varsa); route handler'ı tarafından
 // (lazy) ilk istekte tetiklenir → server.js'ye dokunmadan tek yerde durur.
@@ -197,6 +199,32 @@ router.get('/active-call', async (req, res) => {
       talkDate: c.talkdate,
       key: c.key,
     }));
+    // Faz 2 — CallLog'dan şifre/müşteri zenginleştir (callId join). Gelen çağrı
+    // webhook'unun yakaladığı CustomerPassword + çözülen müşteriyi pop'a taşır;
+    // yeni real-time kanal gerekmez. Best-effort: hata olsa callerId ile çalışır.
+    try {
+      const cid = process.env.ALOTECH_COMPANY_ID;
+      if (cid && calls.length) {
+        // Webhook CallLog'u call_activecallkey ile saklar; /activecall'da bunun
+        // karşılığı callid VEYA key olabilir → İKİSİYLE de eşleştir (güvenli).
+        const keys = [...calls.map((c) => c.callId), ...calls.map((c) => c.key)];
+        const ctx = await resolveActiveCallContext(cid, keys);
+        calls.forEach((c) => {
+          const e = ctx.get(c.callId) || ctx.get(c.key);
+          // NOT: customerPassword frontend'e GÖNDERİLMEZ (gereksiz müşteri-kodu ifşası);
+          // pop matchedAccountId ile açar.
+          c.matchedAccountId = e?.matchedAccountId ?? null;
+          c.matchedAccountName = e?.matchedAccountName ?? null;
+          // Şifreden çözülen proje (AccountCompany tek aktif proje) — pop ön-seçer.
+          c.matchedProjectId = e?.matchedProjectId ?? null;
+          c.matchedProjectName = e?.matchedProjectName ?? null;
+          // link-call'ın kullanacağı CallLog anahtarı (hangisi eşleştiyse).
+          c.callLogKey = e ? (ctx.has(c.callId) ? c.callId : c.key) : null;
+        });
+      }
+    } catch (e) {
+      console.error('[alotech:active-call:enrich]', e?.message || e);
+    }
     // Agent'ın gerçek müsaitlik durumu (çağrı bitince "ringing" takılı kalmasın)
     const st = await v1Fetch('/agent/get_agents_status');
     const me = (st.data?.agents_status_list || []).find((a) => (a.email || '').toLowerCase() === agentEmail.toLowerCase());
@@ -226,6 +254,48 @@ router.post('/hangup', async (req, res) => {
   } catch (err) {
     console.error('[alotech:hangup]', err);
     res.status(502).json({ error: 'hangup_failed', message: err?.message ?? 'Çağrı sonlandırılamadı.' });
+  }
+});
+
+/**
+ * POST /link-call — çağrı ↔ ticket bağı (CallLog.caseId = caseId).
+ * Frontend, oto-pop'tan gelen callId ile ticket oluşturulunca çağırır.
+ * Body: { callId, caseId }. Case'in tenant'ı kullanıcının erişiminde olmalı.
+ */
+router.post('/link-call', async (req, res) => {
+  try {
+    const { callId, caseId, callerId } = req.body || {};
+    if (!caseId || (!callId && !callerId)) return res.status(400).json({ error: 'caseId_and_callId_or_callerId_required' });
+    const c = await prisma.case.findUnique({ where: { id: String(caseId) }, select: { companyId: true } });
+    if (!c) return res.status(404).json({ error: 'case_not_found' });
+    const allowed = req.user?.allowedCompanyIds;
+    if (Array.isArray(allowed) && !allowed.includes(c.companyId)) return res.status(403).json({ error: 'forbidden' });
+    await callLogLinkCase({ companyId: c.companyId, callId: callId ? String(callId) : null, callerId: callerId ? String(callerId) : null, caseId: String(caseId) });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[alotech:link-call]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Bağlama başarısız.' });
+  }
+});
+
+/**
+ * GET /call-report — çağrı-merkezi raporu (müşteri × ticket × agent × süre).
+ * Kaynak: CallLog (webhook'tan). companyId = ALOTECH_COMPANY_ID (tek tenant);
+ * kullanıcı o şirkette olmalı (allowedCompanyIds guard).
+ * Query: from, to (ISO), accountId?, agentEmail?, direction?
+ */
+router.get('/call-report', async (req, res) => {
+  try {
+    const cid = process.env.ALOTECH_COMPANY_ID || null;
+    if (!cid) return res.status(503).json({ error: 'company_not_configured', message: 'ALOTECH_COMPANY_ID tanımlı değil.' });
+    const allowed = req.user?.allowedCompanyIds;
+    if (Array.isArray(allowed) && !allowed.includes(cid)) return res.status(403).json({ error: 'forbidden' });
+    const { from, to, accountId, agentEmail, direction } = req.query || {};
+    const result = await callLogReport({ companyId: cid, from, to, accountId, agentEmail, direction });
+    res.json(result);
+  } catch (err) {
+    console.error('[alotech:call-report]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Rapor alınamadı.' });
   }
 });
 

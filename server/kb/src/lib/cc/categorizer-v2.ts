@@ -32,6 +32,7 @@ import {
   type OpenFieldsResult,
   type CloseFieldsResult,
   type CloseTaxonomyOverride,
+  type OpenTaxonomyOverride,
 } from "./taxonomy-v2";
 
 const SYSTEM = `
@@ -71,6 +72,12 @@ export type CategorizeV2Input = {
   description: string;
   project?: string | null;
   customerName?: string | null;
+  // Option C (WR-Smart-Ticket açılışı Haiku'ya taşı) — verilirse categorize-v2
+  // statik data/cc-taxonomy-v2.json yerine bu DB v4 açılış vocab'ından seçer;
+  // dönen etiketler ana app'te mapClassificationToTaxonomy ile birebir eşleşir
+  // (unmatched drift kapanır). Verilmezse mevcut davranış aynen (geri uyum).
+  // Kapanıştaki `taxonomy` (CloseTaxonomyOverride) override deseninin eşleniği.
+  openTaxonomy?: OpenTaxonomyOverride;
 };
 
 function extractJson(raw: string): string {
@@ -95,7 +102,7 @@ export async function categorizeV2(
   // yalnız caching eklenir). Tekrarlı etiketlemede ~%90 input tasarrufu.
   const fullPrompt = [
     "TAKSONOMİ — 6 AÇILIŞ ALANI:",
-    formatOpenForPrompt(),
+    formatOpenForPrompt(input.openTaxonomy),
     "",
     formatHintsForPrompt(),
     "",
@@ -148,12 +155,13 @@ export async function categorizeV2(
 
   // Strict validation — uymayan değerleri null'a düşür (silently drop yerine
   // override etmek tehlikeli; ajan görsün ve elle düzeltsin).
-  let urun = isValidOpenValue("urun", out.urun) ? out.urun : null;
-  let platform = isValidOpenValue("platform", out.platform) ? out.platform : null;
-  const is_sureci = isValidOpenValue("is_sureci", out.is_sureci) ? out.is_sureci : null;
-  const islem_tipi = isValidOpenValue("islem_tipi", out.islem_tipi) ? out.islem_tipi : null;
-  const etkilenen_nesne = isValidOpenValue("etkilenen_nesne", out.etkilenen_nesne) ? out.etkilenen_nesne : null;
-  const etki = isValidOpenValue("etki", out.etki) ? out.etki : null;
+  const ovr = input.openTaxonomy;
+  let urun = isValidOpenValue("urun", out.urun, ovr) ? out.urun : null;
+  let platform = isValidOpenValue("platform", out.platform, ovr) ? out.platform : null;
+  const is_sureci = isValidOpenValue("is_sureci", out.is_sureci, ovr) ? out.is_sureci : null;
+  const islem_tipi = isValidOpenValue("islem_tipi", out.islem_tipi, ovr) ? out.islem_tipi : null;
+  const etkilenen_nesne = isValidOpenValue("etkilenen_nesne", out.etkilenen_nesne, ovr) ? out.etkilenen_nesne : null;
+  const etki = isValidOpenValue("etki", out.etki, ovr) ? out.etki : null;
 
   // Hint enforcement #1 — Etkilenen nesne / işlem tipi tabanlı:
   // Mobil-kesin / Backoffice-kesin listede ise platform zorlanır.

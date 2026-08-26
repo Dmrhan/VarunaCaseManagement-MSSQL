@@ -290,6 +290,7 @@ export const CASE_FIELD_LABELS: Record<string, string> = {
   subCategory:          'Alt Kategori',
   requestType:          'Talep Türü',
   productGroup:         'Ürün Grubu',
+  productVersion:       'Versiyon No',
 
   // FK / atama
   companyId:            'Şirket',
@@ -385,6 +386,7 @@ export type EditableCaseField =
   | 'description'
   | 'requestType'
   | 'productGroup'
+  | 'productVersion'
   | 'origin'
   | 'originDescription'
   | 'category'
@@ -458,6 +460,13 @@ export interface Case {
   productName?: string;
   packageId?: string;
   packageName?: string;
+
+  /**
+   * Serbest metin sürüm bilgisi. Açılışta zorunlu değil; yalnız
+   * COMP-UNIVERA'da Çözüldü'ye geçişten önce backend zorunlu kılar
+   * (product_version_required_for_closure).
+   */
+  productVersion?: string | null;
 
   assignedTeamId?: string;
   assignedTeamName?: string;
@@ -852,6 +861,13 @@ export interface CaseTaggingReview {
   closingPermanentPreventionCorrectedCode: string | null;
   closingPermanentPreventionCorrectedLabel: string | null;
 
+  /** 2026-08-19 — Talep Türü doğrulaması (source: enum, TaxonomyDef DEĞİL). */
+  requestTypeOriginalCode: string | null;
+  requestTypeOriginalLabel: string | null;
+  requestTypeVerdict: TaggingVerdict | null;
+  requestTypeCorrectedCode: string | null;
+  requestTypeCorrectedLabel: string | null;
+
   note: string | null;
   reviewerId: string | null;
   reviewerName: string | null;
@@ -936,6 +952,9 @@ export interface CaseFilters {
    *  Havuz kartı bunu kullanır. */
   teamIds?: string[];
   personId?: string;
+  /** Vaka Sahibi — Case.createdByUserId (vakayı açan kullanıcı, atamadan
+   *  bağımsız). "Kişi" (personId → assignedPersonId) filtresinden AYRI. */
+  createdByUserId?: string;
   dateFrom?: string;                // ISO date (YYYY-MM-DD)
   dateTo?: string;                  // ISO date
   // Phase D — yalnız Supervisor+ rolleri görür; backend ignore eder Agent için.

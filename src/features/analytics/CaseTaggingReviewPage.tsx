@@ -43,11 +43,12 @@ const VERDICT_LABELS: Record<TaggingVerdict, string> = {
 type TaxonomyType = keyof SmartTicketTaxonomyResponse['taxonomies'];
 
 interface TagDef {
-  prefix: 'opening' | 'closing';
+  prefix: 'opening' | 'closing' | 'requestType';
   field: string;
   label: string;
   customField: string;
-  taxonomyType: TaxonomyType;
+  /** requestType (source enum) hariç hepsinde zorunlu — options TaxonomyDef'ten gelir. */
+  taxonomyType?: TaxonomyType;
 }
 
 const TAG_DEFS: TagDef[] = [
@@ -60,10 +61,27 @@ const TAG_DEFS: TagDef[] = [
   { prefix: 'closing', field: 'RootCauseDetail',     label: 'Kök Neden Detayı',  customField: 'rootCauseDetail',     taxonomyType: 'rootCauseDetail' },
   { prefix: 'closing', field: 'ResolutionType',      label: 'Çözüm Tipi',        customField: 'resolutionType',      taxonomyType: 'resolutionType' },
   { prefix: 'closing', field: 'PermanentPrevention', label: 'Kalıcı Önlem',      customField: 'permanentPrevention', taxonomyType: 'permanentPrevention' },
+  // 2026-08-19 — Talep Türü. Kaynağı customFields JSON DEĞİL Case.requestType;
+  // options TaxonomyDef'ten DEĞİL sabit REQUEST_TYPE_OPTIONS'tan (aşağıda) —
+  // TagSection'a overrideOptionsByKey ile geçirilir, taxonomyType hiç okunmaz.
+  // field boş bırakılır: tagKey = prefix+field = "requestType" (DB kolon
+  // ailesi "requestTypeVerdict" vb. — ne "opening" ne "closing" prefix'i var).
+  { prefix: 'requestType', field: '', label: 'Talep Türü', customField: 'requestType' },
+];
+
+// Case.requestType — ASCII kod (DB) / TR etiket (görünen) çifti, backend
+// enumMap.js'teki M_REQUEST ile birebir aynı. TaxonomyDef'e ihtiyaç duymaz.
+const REQUEST_TYPE_OPTIONS: SmartTicketTaxonomyItem[] = [
+  { code: 'Bilgi',   label: 'Bilgi',   sortOrder: 0 },
+  { code: 'Oneri',   label: 'Öneri',   sortOrder: 1 },
+  { code: 'Talep',   label: 'Talep',   sortOrder: 2 },
+  { code: 'Sikayet', label: 'Şikayet', sortOrder: 3 },
+  { code: 'Hata',    label: 'Hata',    sortOrder: 4 },
 ];
 
 const OPENING_DEFS = TAG_DEFS.filter((d) => d.prefix === 'opening');
 const CLOSING_DEFS = TAG_DEFS.filter((d) => d.prefix === 'closing');
+const REQUEST_TYPE_DEFS = TAG_DEFS.filter((d) => d.prefix === 'requestType');
 
 function tagKey(def: TagDef) {
   return `${def.prefix}${def.field}`;
@@ -128,6 +146,9 @@ function ProgressCell({ progress }: { progress: ReviewProgress }) {
 }
 
 function originalLabel(c: Case, def: TagDef): string | null {
+  // Talep Türü — customFields JSON'ına hiç bakmaz, Case.requestType zaten
+  // TR etiket olarak geliyor (backend fromDb ile çevirip döndürür).
+  if (def.prefix === 'requestType') return c.requestType || null;
   const smartTicket = (c.customFields?.smartTicket ?? {}) as Record<string, unknown>;
   const src = def.prefix === 'opening' ? smartTicket : ((smartTicket.closure ?? {}) as Record<string, unknown>);
   return (src?.[`${def.customField}Label`] as string | undefined) ?? null;
@@ -194,7 +215,12 @@ function ExpandableCell({ text }: { text: string }) {
   );
 }
 
-const FILTER_KEY = 'varuna:tagging-review-filters-v2';
+// v3 — 2026-08-19: tarih filtresi Açılış Tarihi'nden (createdAt) Çözüm
+// Tarihi'ne (resolvedAt) geçti; eski v2 kaydı farklı bir alanı temsil
+// ediyordu, sürüm bilerek bumplandı ki eski dateFrom/dateTo kaydı yanlış
+// yorumlanıp sessizce "Çözüm Tarihi" gibi uygulanmasın.
+// v4 — Vaka No arama alanı (search) eklendi.
+const FILTER_KEY = 'varuna:tagging-review-filters-v4';
 
 function formatUtcDateTime(value?: string | null): string {
   if (!value) return '';
@@ -207,7 +233,7 @@ function loadSavedFilters() {
   try {
     const raw = localStorage.getItem(FILTER_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as { dateFrom: string; dateTo: string; statuses: CaseStatus[]; teamId: string };
+    return JSON.parse(raw) as { resolvedDateFrom: string; resolvedDateTo: string; statuses: CaseStatus[]; teamId: string; search: string };
   } catch {
     return null;
   }
@@ -237,6 +263,12 @@ function TaggingModal({
   onClose,
 }: TaggingModalProps) {
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  // Talep Türü — TaxonomyDef lookup'ı hiç devreye girmesin diye sabit
+  // options tek elemanlı bir override map'i olarak geçirilir.
+  const requestTypeOverride: Record<string, SmartTicketTaxonomyItem[]> = {
+    [tagKey(REQUEST_TYPE_DEFS[0])]: REQUEST_TYPE_OPTIONS,
+  };
 
   // CASCADE: kapanış etiketleri için seçili correctedCode'u okuyup filtreli seçenekler üret.
   const closingCascadeOverrides: Record<string, SmartTicketTaxonomyItem[]> = (() => {
@@ -427,6 +459,18 @@ function TaggingModal({
             overrideOptionsByKey={closingCascadeOverrides}
             onUpdateField={handleClosingUpdateField}
           />
+
+          {/* Talep Türü — TaxonomyDef'ten değil sabit REQUEST_TYPE_OPTIONS'tan;
+              overrideOptionsByKey ile taxonomies lookup'ı hiç devreye girmez. */}
+          <TagSection
+            title="Talep Türü"
+            defs={REQUEST_TYPE_DEFS}
+            case_={case_}
+            draft={draft}
+            taxonomies={taxonomies}
+            overrideOptionsByKey={requestTypeOverride}
+            onUpdateField={onUpdateField}
+          />
         </div>
       </div>
     </Modal>
@@ -460,7 +504,7 @@ function TagSection({ title, defs, case_, draft, taxonomies, overrideOptionsByKe
           const field           = draft.fields[key];
           const label           = originalLabel(case_, def);
           // CASCADE: overrideOptionsByKey varsa onu kullan, yoksa tam liste.
-          const options = overrideOptionsByKey?.[key] ?? taxonomies?.[def.taxonomyType] ?? [];
+          const options = overrideOptionsByKey?.[key] ?? (def.taxonomyType ? taxonomies?.[def.taxonomyType] : undefined) ?? [];
           const correctedDisabled = field.verdict === '' || field.verdict === 'Dogru';
 
           return (
@@ -523,10 +567,11 @@ function TagSection({ title, defs, case_, draft, taxonomies, overrideOptionsByKe
 // ── Ana sayfa ───────────────────────────────────────────────────────────────
 
 export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPageProps) {
-  const [dateFrom, setDateFrom] = useState(() => loadSavedFilters()?.dateFrom ?? '');
-  const [dateTo, setDateTo]     = useState(() => loadSavedFilters()?.dateTo ?? '');
+  const [resolvedDateFrom, setResolvedDateFrom] = useState(() => loadSavedFilters()?.resolvedDateFrom ?? '');
+  const [resolvedDateTo, setResolvedDateTo]     = useState(() => loadSavedFilters()?.resolvedDateTo ?? '');
   const [statuses, setStatuses] = useState<CaseStatus[]>(() => loadSavedFilters()?.statuses ?? ['Çözüldü']);
   const [teamId, setTeamId]     = useState(() => loadSavedFilters()?.teamId ?? '');
+  const [search, setSearch]     = useState(() => loadSavedFilters()?.search ?? '');
   const [page, setPage]         = useState(1);
   const [sortKey, setSortKey]   = useState<TaggingSortKey>('createdAt');
   const [sortDir, setSortDir]   = useState<SortDir>('desc');
@@ -561,10 +606,11 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
     setLoading(true);
     const result = await caseService.listTaggingReviews(
       {
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
+        resolvedDateFrom: resolvedDateFrom || undefined,
+        resolvedDateTo: resolvedDateTo || undefined,
         statuses: statuses.length ? statuses : undefined,
         teamId: teamId || undefined,
+        search: search || undefined,
       },
       { page: pageOverride ?? page, pageSize },
       { sortBy: sortKey, sortDir },
@@ -580,10 +626,11 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
     setExporting(true);
     try {
       const { items, reviews } = await caseService.exportTaggingReviews({
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
+        resolvedDateFrom: resolvedDateFrom || undefined,
+        resolvedDateTo: resolvedDateTo || undefined,
         statuses: statuses.length ? statuses : undefined,
         teamId: teamId || undefined,
+        search: search || undefined,
       });
 
       const VERDICT_TR: Record<string, string> = { Dogru: 'Doğru', Yanlis: 'Yanlış', Belirsiz: 'Belirsiz' };
@@ -602,7 +649,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
         };
         for (const def of TAG_DEFS) {
           const key      = tagKey(def);
-          const prefix   = def.prefix === 'opening' ? 'Ac' : 'Ka';
+          const prefix   = def.prefix === 'opening' ? 'Ac' : def.prefix === 'closing' ? 'Ka' : 'TT';
           const verdictRaw = r?.[verdictField(def)] as string | null;
           const correctedLabel = r?.[`${key}CorrectedLabel` as keyof CaseTaggingReview] as string | null;
           const originalLabel  = r?.[`${key}OriginalLabel` as keyof CaseTaggingReview] as string | null;
@@ -635,9 +682,9 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
 
   useEffect(() => {
     try {
-      localStorage.setItem(FILTER_KEY, JSON.stringify({ dateFrom, dateTo, statuses, teamId }));
+      localStorage.setItem(FILTER_KEY, JSON.stringify({ resolvedDateFrom, resolvedDateTo, statuses, teamId, search }));
     } catch {}
-  }, [dateFrom, dateTo, statuses, teamId]);
+  }, [resolvedDateFrom, resolvedDateTo, statuses, teamId, search]);
 
   useEffect(() => {
     void fetchPage();
@@ -739,11 +786,11 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           </p>
         </div>
         <div className="ml-auto flex flex-wrap items-end gap-2">
-          <Field label="Başlangıç tarihi" className="w-36">
-            <TextInput type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} max={dateTo || undefined} />
+          <Field label="Çözüm Başlangıç" className="w-36">
+            <TextInput type="date" value={resolvedDateFrom} onChange={(e) => setResolvedDateFrom(e.target.value)} max={resolvedDateTo || undefined} />
           </Field>
-          <Field label="Bitiş tarihi" className="w-36">
-            <TextInput type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} min={dateFrom || undefined} />
+          <Field label="Çözüm Bitiş" className="w-36">
+            <TextInput type="date" value={resolvedDateTo} onChange={(e) => setResolvedDateTo(e.target.value)} min={resolvedDateFrom || undefined} />
           </Field>
           <Field label="Takım" className="w-48">
             <Select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
@@ -752,6 +799,14 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
             </Select>
+          </Field>
+          <Field label="Vaka No" className="w-40">
+            <TextInput
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); void fetchPage(1); } }}
+              placeholder="örn. UNV-1000042"
+            />
           </Field>
           <Button
             leftIcon={loading ? <Loader2 size={13} className="animate-spin" /> : <Filter size={13} />}

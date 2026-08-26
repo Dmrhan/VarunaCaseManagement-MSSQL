@@ -12,6 +12,7 @@ import { ActorRequiredError } from '../lib/actor.js';
 import { devopsClient, parseWorkItemId } from '../lib/devopsClient.js';
 import crypto from 'node:crypto';
 import { resolveSlaPolicy, resolveTargetMinutes } from '../lib/sla/slaPolicyResolver.js';
+import { parseIstanbulDateBound } from '../lib/istanbulDateBounds.js';
 import { getEffectiveCalendar, addBusinessMinutes, businessMinutesBetween, getCalendarGateFor, diffMinutes, netDayMinutes } from '../lib/sla/businessTime.js';
 import { closeCustomerWaitPatch } from '../lib/sla/customerWaitPause.js';
 import { resolveExtendedTargetMinutes, extendedSlaTriggerMet, buildExtendedSlaPatch } from '../lib/sla/extendedSla.js';
@@ -1318,7 +1319,17 @@ const TAGGING_FIELD_DEFS = [
   { prefix: 'closing', tag: 'RootCauseDetail', customField: 'rootCauseDetail', taxonomyType: 'rootCauseDetail' },
   { prefix: 'closing', tag: 'ResolutionType', customField: 'resolutionType', taxonomyType: 'resolutionType' },
   { prefix: 'closing', tag: 'PermanentPrevention', customField: 'permanentPrevention', taxonomyType: 'permanentPrevention' },
+  // 2026-08-19 — Talep Türü. Diğer 9'dan farklı: kaynağı customFields JSON
+  // DEĞİL Case.requestType kolonu, geçerli seçenekleri TaxonomyDef DEĞİL
+  // sabit 5 değerlik enum (M_REQUEST). source:'enum' bu iki noktada
+  // (upsertTaggingReview'daki correction-doğrulama + original-snapshot)
+  // ayrı dallanma tetikler; prefix boş çünkü DB kolonu "requestType..."
+  // (ne "opening" ne "closing").
+  { prefix: '', tag: 'requestType', customField: 'requestType', source: 'enum' },
 ];
+// requestType düzeltme kodunu (ASCII: Bilgi/Oneri/Talep/Sikayet/Hata) TR
+// etikete çevirir — M_REQUEST'in tersi, TaxonomyDef'e ihtiyaç duymaz.
+const R_REQUEST_TYPE = Object.fromEntries(Object.entries(M_REQUEST).map(([tr, ascii]) => [ascii, tr]));
 
 // Vaka başına maksimum ek sayısı — kanal (browser upload / Connect ingest)
 // FARK ETMEKSİZİN geçerli bir iş kuralı. requestUpload (browser, aşağıda)
@@ -1611,24 +1622,21 @@ export const caseRepository = {
         // security filter (securityWhere) altında GİZLİ olan Case'ler de
         // sayıma dahil olur (kart sayısı ≠ tıklayınca görünen liste sayısı,
         // ve gizli vakaların VARLIĞI sızdırılmış olur). listTransferredByMe
-        // ile AYNI görünürlük kontratı: önce distinct caseId'leri topla,
-        // sonra securityWhere ile görünür Case sayısını say (Case.isArchived
-        // filtresi YOK — listTransferredByMe de filtrelemiyor).
-        (async () => {
-          const transferredCaseIds = (
-            await prisma.caseTransfer.groupBy({
-              by: ['caseId'],
-              where: { transferredBy: user.id, companyId: { in: allowedCompanyIds } },
-            })
-          ).map((r) => r.caseId);
-          if (transferredCaseIds.length === 0) return 0;
-          return prisma.case.count({
-            where: mergeSecurityWhere(
-              { id: { in: transferredCaseIds }, companyId: { in: allowedCompanyIds } },
-              securityWhere,
-            ),
-          });
-        })(),
+        // ile AYNI görünürlük kontratı — ama artık ID'leri JS'e toplayıp
+        // IN(...) ile saymak YERİNE, Case.transfers ilişkisi üzerinden
+        // Prisma'nın kendi EXISTS/JOIN'ine devrediyoruz (2026-08-18 fix —
+        // çok sayıda devir yapmış kullanıcılarda MSSQL 2100 parametre
+        // sınırına çarpıyordu, bkz. code 8003). Case.isArchived filtresi
+        // YOK — listTransferredByMe de filtrelemiyor, davranış aynı kalır.
+        prisma.case.count({
+          where: mergeSecurityWhere(
+            {
+              transfers: { some: { transferredBy: user.id, companyId: { in: allowedCompanyIds } } },
+              companyId: { in: allowedCompanyIds },
+            },
+            securityWhere,
+          ),
+        }),
         // unassigned chip: liste görünürlüğüyle tutarlı havuz sayısı.
         // L1 Agent (agentBlockedFromPool) hiç sahipsiz kayıt görmediği için
         // sorgu bile atılmadan 0 sabitlenir.
@@ -1670,24 +1678,18 @@ export const caseRepository = {
           where: scoped({ ...scope, ...teamFilter, resolvedAt: todayRange, status: 'Cozuldu' }),
         }),
         // transferredByMeCount — Supervisor "Yönlendirdiklerim" kartı (Agent'taki
-        // aynı kartın rol karşılığı). Aynı görünürlük kontratı: distinct caseId'leri
-        // topla, sonra securityWhere ile görünür Case sayısını say (bkz. yukarıdaki
-        // personal mode yorumu — kart sayısı ≠ liste sayısı sızıntısı önlenir).
-        (async () => {
-          const transferredCaseIds = (
-            await prisma.caseTransfer.groupBy({
-              by: ['caseId'],
-              where: { transferredBy: user.id, companyId: { in: allowedCompanyIds } },
-            })
-          ).map((r) => r.caseId);
-          if (transferredCaseIds.length === 0) return 0;
-          return prisma.case.count({
-            where: mergeSecurityWhere(
-              { id: { in: transferredCaseIds }, companyId: { in: allowedCompanyIds } },
-              securityWhere,
-            ),
-          });
-        })(),
+        // aynı kartın rol karşılığı, bkz. yukarıdaki personal mode yorumu —
+        // Case.transfers ilişkisi üzerinden, IN(...) parametre sınırına
+        // çarpmayan sürüm, 2026-08-18 fix).
+        prisma.case.count({
+          where: mergeSecurityWhere(
+            {
+              transfers: { some: { transferredBy: user.id, companyId: { in: allowedCompanyIds } } },
+              companyId: { in: allowedCompanyIds },
+            },
+            securityWhere,
+          ),
+        }),
         // chip sayıları — scope'taki tüm atanmamış/kritik açık + snooze-dışı vakalar
         prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
         prisma.case.count({ where: scoped({ ...scope, priority: 'Critical', status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
@@ -1783,6 +1785,34 @@ export const caseRepository = {
     // roller için 404 davranışı (null döner → route 404 yansıtır).
     if (c.isArchived && actorRole !== 'SystemAdmin') return null;
     return (await enrichSlaView([await shapeWithProjectAvailability(c)]))[0];
+  },
+
+  /**
+   * get()'in kapsam/erişim kontrolü ile AYNISI (allowedCompanyIds +
+   * isArchived guard) ama notes/attachments/history/callLogs (CASE_INCLUDE)
+   * dahil etmeden — yalnız {id, companyId}. Yetki kontrolü yapan
+   * çağrı yerleri (assertCaseResourcePolicy, assertCaseCloseRequiredFields
+   * vb.) döndürülen case'ten yalnız companyId'yi okuyor; onlara tam
+   * CASE_INCLUDE fetch'i vermek gereksiz bir maliyet.
+   *
+   * Perf fix — "İptal Et"/"Çözüldü" gibi close aksiyonlarında route bu iki
+   * assert fonksiyonunu ARKA ARKAYA çağırıyor; ikisi de eskiden get() (tam
+   * include) çağırıyordu → aynı vaka aynı istekte 2 kez ağır şekilde
+   * çekiliyordu (ölçüm: ~590ms sadece bu tekrar için, notu/geçmişi daha
+   * kalabalık vakalarda çok daha fazla). getScopeOnly ile her iki çağrı da
+   * hafifliyor.
+   */
+  async getScopeOnly(id, allowedCompanyIds, actorRole) {
+    const c = await prisma.case.findUnique({
+      where: { id },
+      select: { id: true, companyId: true, isArchived: true },
+    });
+    if (!c) return null;
+    if (allowedCompanyIds && !allowedCompanyIds.includes(c.companyId)) {
+      throw new CaseAccessError();
+    }
+    if (c.isArchived && actorRole !== 'SystemAdmin') return null;
+    return c;
   },
 
   /**
@@ -3111,12 +3141,40 @@ export const caseRepository = {
         },
       });
 
+      const row = await prisma.case.findUnique({ where: { id: caseId } });
+
+      // Ürün kararı — her DevOps kaydı hata/defect kabul edilir: work item
+      // bağlanınca Talep Türü otomatik "Hata"ya çekilir, mevcut değer ne
+      // olursa olsun ezilir. Zaten "Hata" ise no-op (gereksiz update/log
+      // yok — aynı vakaya birden fazla work item bağlanabiliyor).
+      // Tek yönlü: unlinkDevops'ta bilinçli karşılığı YOK, aşağıdaki SLA
+      // uzatma emsaliyle aynı prensip (U-E — geri daraltma yok).
+      if (row && row.requestType !== 'Hata') {
+        await prisma.case.update({
+          where: { id: caseId },
+          data: {
+            requestType: 'Hata',
+            history: {
+              create: [{
+                companyId,
+                actionType: 'FieldUpdate',
+                fieldName: 'requestType',
+                fromValue: row.requestType,
+                toValue: 'Hata',
+                action: 'Talep Türü otomatik güncellendi (DevOps bağlantısı)',
+                actor: actor.displayName,
+                actorUserId: actor.userId ?? null,
+              }],
+            },
+          },
+        });
+      }
+
       // Uzatılmış SLA v1 — koşulun İKİNCİ yarısı sonradan tamamlanabilir:
       // vaka ZATEN bayraklı 3. partide beklerken DevOps kaydı şimdi
       // bağlandıysa uzatma bu olayla tetiklenir. Kendi içinde atomik:
       // due + damga + ihlal + history TEK update. unlinkDevops'ta bilinçli
       // karşılığı YOK (U-E — geri daraltma yok).
-      const row = await prisma.case.findUnique({ where: { id: caseId } });
       if (row?.status === 'ThirdPartyWaiting' && row.thirdPartyId && row.slaTargetSource !== 'extended') {
         const tp = await prisma.thirdParty.findUnique({
           where: { id: row.thirdPartyId },
@@ -4795,6 +4853,22 @@ export const caseRepository = {
       );
     }
 
+    // Versiyon No zorunluluğu (kapanış kapısı) — yalnız COMP-UNIVERA.
+    // Karar: yalnız Cozuldu (IptalEdildi muaf — diğer kapanış kapılarıyla
+    // aynı gerekçe); SystemAdmin istisna. Diğer tenant'ları etkilemez.
+    if (
+      dbNext === 'Cozuldu' &&
+      prev.status !== 'Cozuldu' &&
+      prev.companyId === 'COMP-UNIVERA' &&
+      !prev.productVersion &&
+      actorObject?.role !== 'SystemAdmin'
+    ) {
+      throw new CaseValidationError(
+        'Vaka Versiyon No belirtilmeden çözülemez. Lütfen önce versiyon numarasını girin.',
+        { status: 400, code: 'product_version_required_for_closure' },
+      );
+    }
+
     // Açılış etiketleri zorunluluğu (kapanış kapısı) — TÜM Univera vakalarında
     // (müşteri/proje eşleşmiş olsun olmasın): platform/businessProcess/
     // operationType/affectedObject/impact taksonomi alanlarının kaydın
@@ -5741,12 +5815,26 @@ export const caseRepository = {
       }
     }
 
-    const where = { id: { in: [...byCase.keys()] } };
-    if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
-    const rows = await prisma.case.findMany({
-      where: mergeSecurityWhere(where, securityWhere),
-      include: CASE_INCLUDE,
-    });
+    // 2026-08-18 fix — id: { in: [...byCase.keys()] } çok sayıda devir yapmış
+    // kullanıcılarda ("Yönlendirdiklerim" kartına tıklayınca) MSSQL 2100
+    // parametre sınırına çarpıyordu (code 8003). `transfers: { some: {...} } }`
+    // relation-filter'ı count() için sorunu çözdü (yukarıdaki getStats), AMA
+    // include: CASE_INCLUDE ile birlikte findMany()'de Prisma'nın SQL Server
+    // sorgu planı yine ID'leri materialize edip aynı duvara çarpıyor (test
+    // edildi, doğrulandı) — o yüzden burada ID listesi 1000'lik chunk'lara
+    // bölünüp paralel sorgulanıyor (MSSQL parametre sınırının altında kalır,
+    // her chunk ayrı sorgu → limitsiz ölçeklenir).
+    const caseIds = [...byCase.keys()];
+    const CHUNK = 1000;
+    const chunkedRows = await Promise.all(
+      Array.from({ length: Math.ceil(caseIds.length / CHUNK) }, (_, i) => {
+        const chunk = caseIds.slice(i * CHUNK, (i + 1) * CHUNK);
+        const where = { id: { in: chunk } };
+        if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
+        return prisma.case.findMany({ where: mergeSecurityWhere(where, securityWhere), include: CASE_INCLUDE });
+      }),
+    );
+    const rows = chunkedRows.flat();
 
     const metas = [...byCase.values()];
     const teamIds = [...new Set(metas.map((v) => v.toTeamId).filter(Boolean))];
@@ -5782,14 +5870,23 @@ export const caseRepository = {
    * Mutation idempotent: zaten snoozeUntil null olanlar where'de eşleşmez.
    * Bildirim tetikleme şu aşamada uygulama-içi log; Faz 2 §6 bildirim sistemi
    * canlı olunca CaseNotification kaydı buradan üretilir.
+   *
+   * Perf — üst sınırsız fetch riski: aynı saate çok sayıda vaka snooze
+   * edilirse (örn. "Pazartesi 09:00" toplu deseni), bu cron turu vaka
+   * başına sıralı update+history yazdığı için uzayabilir. SNOOZE_WAKEUP_BATCH_CAP
+   * ile bir turda işlenecek kayıt sınırlanır; kalan kayıtlar bir sonraki
+   * 5 dk'lık turda işlenir — veri kaybı yok, sadece uyanma gecikmesi.
    */
   async processSnoozeWakeups() {
+    const SNOOZE_WAKEUP_BATCH_CAP = 200;
     const due = await prisma.case.findMany({
       where: {
         snoozeUntil: { lte: new Date() },
         NOT: { snoozeUntil: null },
       },
       select: { id: true, companyId: true, status: true, snoozeReason: true, snoozePreviousStatus: true },
+      orderBy: { snoozeUntil: 'asc' },
+      take: SNOOZE_WAKEUP_BATCH_CAP,
     });
     if (due.length === 0) return { woken: 0, ids: [] };
 
@@ -5964,21 +6061,25 @@ export const caseRepository = {
     }
 
     // correctedCode → kendi taxonomyType'ına karşı tek batched sorgu.
+    // requestType (source:'enum') TaxonomyDef'e hiç sorulmaz — sabit
+    // M_REQUEST/R_REQUEST_TYPE eşlemesine karşı doğrulanır.
     const correctedEntries = TAGGING_FIELD_DEFS
       .map((def) => ({ def, code: input[`${def.prefix}${def.tag}CorrectedCode`] }))
       .filter((e) => e.code !== undefined && e.code !== null && e.code !== '');
+    const taxonomyCorrectedEntries = correctedEntries.filter((e) => e.def.source !== 'enum');
+    const enumCorrectedEntries = correctedEntries.filter((e) => e.def.source === 'enum');
 
-    if (correctedEntries.length) {
+    if (taxonomyCorrectedEntries.length) {
       const rows = await prisma.taxonomyDef.findMany({
         where: {
           companyId,
           isActive: true,
-          OR: correctedEntries.map((e) => ({ taxonomyType: e.def.taxonomyType, code: e.code })),
+          OR: taxonomyCorrectedEntries.map((e) => ({ taxonomyType: e.def.taxonomyType, code: e.code })),
         },
         select: { taxonomyType: true, code: true, label: true },
       });
       const found = new Map(rows.map((r) => [`${r.taxonomyType}::${r.code}`, r.label]));
-      for (const e of correctedEntries) {
+      for (const e of taxonomyCorrectedEntries) {
         const label = found.get(`${e.def.taxonomyType}::${e.code}`);
         if (!label) {
           return {
@@ -5988,6 +6089,16 @@ export const caseRepository = {
         }
         e.label = label;
       }
+    }
+    for (const e of enumCorrectedEntries) {
+      const label = R_REQUEST_TYPE[e.code];
+      if (!label) {
+        return {
+          error: 'invalid_input',
+          message: `Geçersiz doğru etiket kodu: ${e.def.prefix}${e.def.tag} = "${e.code}".`,
+        };
+      }
+      e.label = label;
     }
     const correctedByDef = new Map(correctedEntries.map((e) => [e.def, e]));
 
@@ -6014,11 +6125,20 @@ export const caseRepository = {
       return prisma.caseTaggingReview.update({ where: { caseId: id }, data });
     }
 
-    const caseRow = await prisma.case.findUnique({ where: { id }, select: { customFields: true } });
+    const caseRow = await prisma.case.findUnique({ where: { id }, select: { customFields: true, requestType: true } });
     const smartTicket = caseRow?.customFields?.smartTicket ?? {};
     const closure = smartTicket?.closure ?? {};
     const originalData = {};
     for (const def of TAGGING_FIELD_DEFS) {
+      if (def.source === 'enum') {
+        // requestType — Case kolonundan doğrudan (DB'de zaten ASCII kod:
+        // Bilgi/Oneri/Talep/Sikayet/Hata). customFields JSON'ına hiç bakmaz.
+        originalData[`${def.prefix}${def.tag}OriginalCode`] = caseRow?.requestType ?? null;
+        originalData[`${def.prefix}${def.tag}OriginalLabel`] = caseRow?.requestType
+          ? (R_REQUEST_TYPE[caseRow.requestType] ?? caseRow.requestType)
+          : null;
+        continue;
+      }
       const src = def.prefix === 'opening' ? smartTicket : closure;
       originalData[`${def.prefix}${def.tag}OriginalCode`] = src?.[def.customField] ?? null;
       originalData[`${def.prefix}${def.tag}OriginalLabel`] = src?.[`${def.customField}Label`] ?? null;
@@ -7190,6 +7310,27 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null, roleDefaultScope
       andClauses.push({ OR: orClauses });
     }
   }
+  // Vaka Etiket Doğrulama ekranı — sadece Vaka No'da arama. f.search'ten
+  // AYRI ve additive bir filtre: f.search title/accountName'i de eşleştirir
+  // (üstteki blok), ama bu ekran SADECE Vaka No istiyor — paylaşılan
+  // f.search'ü genişletmek diğer ekranlarda (CasesListPage vb.) istenmeyen
+  // başlık/müşteri eşleşmeleri getirirdi. resolvedDateFrom/resolvedDateTo
+  // ile aynı prensip (bkz. üstteki yorum) — additive, mevcut f.search
+  // davranışı değişmedi.
+  if (f.caseNumberSearch) {
+    const q = f.caseNumberSearch.trim();
+    if (q) {
+      const numericOnly = /^\d+$/.test(q);
+      const orClauses = [{ caseNumber: { contains: q } }];
+      if (numericOnly) {
+        const asNumber = Number(q);
+        if (Number.isSafeInteger(asNumber)) {
+          orClauses.push({ caseSeq: asNumber });
+        }
+      }
+      andClauses.push({ OR: orClauses });
+    }
+  }
   if (andClauses.length) where.AND = andClauses;
   if (f.statuses?.length) where.status = { in: f.statuses };
   if (f.caseType && f.caseType !== 'Tümü') where.caseType = f.caseType;
@@ -7201,12 +7342,30 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null, roleDefaultScope
   // gönderir), ama gelirse teamIds öncelikli (daha spesifik/son eklenen).
   if (f.teamIds?.length) where.assignedTeamId = { in: f.teamIds };
   if (f.personId) where.assignedPersonId = f.personId;
-  if (f.dateFrom) where.createdAt = { ...(where.createdAt ?? {}), gte: new Date(f.dateFrom) };
-  if (f.dateTo) {
-    const to = new Date(f.dateTo);
-    to.setHours(23, 59, 59, 999);
-    where.createdAt = { ...(where.createdAt ?? {}), lte: to };
-  }
+  // Vaka Sahibi — vakayı açan kullanıcı (Case.createdByUserId), atamadan
+  // bağımsız. "Kişi" filtresinden (assignedPersonId) AYRI kavram.
+  if (f.createdByUserId) where.createdByUserId = f.createdByUserId;
+  // 2026-08-19 fix — `new Date('YYYY-MM-DD')` HER ZAMAN UTC gece yarısı
+  // üretir (sunucu saat diliminden bağımsız, ECMAScript spec); TR gün
+  // sınırına anlanmadan doğrudan gte/lte'ye verilirse gün ~3 saat kayar
+  // (TR gününün ilk 3 saati dışlanır, ertesi günün ilk 3 saati dahil olur).
+  // parseIstanbulDateBound Rapor Studyosu'ndaki (server/lib/caseReport/
+  // buildWhere.js) daha önce düzeltilmiş aynı deseni paylaşılan tek
+  // noktadan uygular.
+  const dateFrom = parseIstanbulDateBound(f.dateFrom);
+  const dateTo = parseIstanbulDateBound(f.dateTo, { endOfDay: true });
+  if (dateFrom) where.createdAt = { ...(where.createdAt ?? {}), gte: dateFrom };
+  if (dateTo) where.createdAt = { ...(where.createdAt ?? {}), lte: dateTo };
+  // 2026-08-19 — Çözüm Tarihi filtresi (Case.resolvedAt), Açılış Tarihi'nden
+  // (dateFrom/dateTo → createdAt, üstte) BİLEREK ayrı. Vaka Etiket Doğrulama
+  // ekranı "bugün açılan" değil "bugün çözülen" vakaları arıyor — aynı isimli
+  // filtreyi paylaşsaydı diğer ekranlardaki (CasesListPage vb.) createdAt
+  // anlamı bozulurdu. Additive: yalnız gönderen çağıran (tagging-review)
+  // etkilenir.
+  const resolvedDateFrom = parseIstanbulDateBound(f.resolvedDateFrom);
+  const resolvedDateTo = parseIstanbulDateBound(f.resolvedDateTo, { endOfDay: true });
+  if (resolvedDateFrom) where.resolvedAt = { ...(where.resolvedAt ?? {}), gte: resolvedDateFrom };
+  if (resolvedDateTo) where.resolvedAt = { ...(where.resolvedAt ?? {}), lte: resolvedDateTo };
   // Phase D — Müşteri eşleştirme bekleyen vakalar filter.
   if (f.customerMatchPending === true) where.customerMatchPending = true;
   if (f.customerMatchPending === false) where.customerMatchPending = false;

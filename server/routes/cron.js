@@ -3,7 +3,7 @@ import { runPatternDetect } from '../cron/patternDetect.js';
 import { runQaScoreBatch, runScoreCase } from '../cron/qaScoreBatch.js';
 import { runNotificationCleanup } from '../cron/notificationCleanup.js';
 import { runActionItemArchive } from '../cron/actionItemArchive.js';
-import { runMonitoringSnapshot } from '../cron/monitoringSnapshot.js';
+import { runRefreshTicketLifecycle } from '../cron/refreshTicketLifecycle.js';
 import { runDevopsStateSync } from '../cron/devopsStateSync.js';
 import { runRemoteSessionReconcile } from '../cron/remoteSessionReconcile.js';
 
@@ -100,17 +100,18 @@ router.post('/actionitem-archive', async (req, res) => {
 });
 
 /**
- * Monitoring (Yönetici Raporlama) snapshot yenileme — manuel tetik.
- * dbo.rpt_TicketLifecycle rebuild (~1-2dk). Zamanlanmış karşılığı 03:00.
+ * rpt_TicketLifecycle materialized rapor tablosu yenileme — manuel tetik.
+ * dbo.usp_Refresh_rpt_TicketLifecycle (~1-2dk). Zamanlanmış karşılığı 04:00
+ * (cronScheduler: rpt-lifecycle-refresh).
  */
-router.post('/monitoring-snapshot', async (req, res) => {
+router.post('/rpt-lifecycle-refresh', async (req, res) => {
   if (!checkCronSecret(req, res)) return;
   try {
-    const result = await runMonitoringSnapshot();
-    if (!result.ok) return res.status(500).json(result);
-    res.json(result);
+    const result = await runRefreshTicketLifecycle();
+    if (result && result.ok === false) return res.status(500).json(result);
+    res.json(result ?? { ok: true });
   } catch (err) {
-    console.error('[cron:monitoring-snapshot]', err);
+    console.error('[cron:rpt-lifecycle-refresh]', err);
     res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
   }
 });

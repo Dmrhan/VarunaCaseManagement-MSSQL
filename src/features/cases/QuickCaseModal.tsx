@@ -289,6 +289,11 @@ export function QuickCaseModal({
   const [resolveExpanded, setResolveExpanded] = useState(false);
   const [resolveControls, setResolveControls] = useState('');
   const [resolveNote, setResolveNote] = useState('');
+  // COMP-UNIVERA'da Çözüldü'ye geçmeden önce Versiyon No zorunlu (backend
+  // transitionStatus guard'ı, product_version_required_for_closure). Bu
+  // akış StatusTransitionPanel'i kullanmadığı için aynı ön-koşulu burada
+  // ayrıca topluyoruz — proaktif alan, backend hatasına düşmeden önce.
+  const [resolveProductVersion, setResolveProductVersion] = useState('');
   const RESOLVE_OUTCOMES = [
     'Çözüldü',
     'Geçici çözüm uygulandı',
@@ -583,6 +588,11 @@ export function QuickCaseModal({
   const resolveBlockedByCustomerless =
     resolveEnabled && form.customerless && !form.accountId && !isSystemAdmin;
 
+  // Versiyon No — yalnız COMP-UNIVERA'da, Çözümle oluştur aktifken zorunlu
+  // (StatusTransitionPanel'deki productVersionGateActive ile aynı scope).
+  const resolveNeedsProductVersion =
+    resolveEnabled && form.companyId === 'COMP-UNIVERA' && !isSystemAdmin;
+
   const canSubmit =
     phase === 'idle' &&
     !!form.companyId &&
@@ -596,6 +606,7 @@ export function QuickCaseModal({
     (form.origin !== 'Diğer' || !!form.originDescription.trim()) &&
     (!transferEnabled || (!!transferToTeamId && reasonOk)) &&
     (!resolveEnabled || !!resolveNote.trim()) &&
+    (!resolveNeedsProductVersion || !!resolveProductVersion.trim()) &&
     !resolveBlockedByCustomerless &&
     // Devret ve Çözümle oluştur mutually exclusive (UI zaten gizler;
     // submit guard belt-and-braces)
@@ -703,6 +714,13 @@ export function QuickCaseModal({
         visibility: 'Internal',
         authorName: 'Hızlı Vaka',
       });
+      // Step 1.6: Versiyon No — transitionStatus'un genel payload'ında
+      // productVersion yok; StatusTransitionPanel'deki handleSaveProductVersion
+      // ile aynı desen: ayrı bir update(), transitionStatus'tan ÖNCE, ki
+      // guard prev.productVersion'ı dolu bulsun.
+      if (resolveNeedsProductVersion && resolveProductVersion.trim()) {
+        await caseService.update(created.id, { productVersion: resolveProductVersion.trim() });
+      }
       // Step 1.5: Kapanış analizi zorunluluğu (smart_ticket_closure_required
       // guard'ı) — Hızlı Vaka akışında ayrı "KB ile Analiz Et" butonu yok;
       // analiz otomatik çalıştırılır, öneri etiketleri + telemetri kapanış
@@ -1499,6 +1517,15 @@ export function QuickCaseModal({
                     onChange={(e) => setResolveNote(e.target.value)}
                   />
                 </Field>
+                {resolveNeedsProductVersion && (
+                  <Field label="Versiyon No" required hint="Bu vaka Versiyon No girilmeden çözülemez.">
+                    <TextInput
+                      placeholder="örn. 3.2.1"
+                      value={resolveProductVersion}
+                      onChange={(e) => setResolveProductVersion(e.target.value)}
+                    />
+                  </Field>
+                )}
                 <Field label="Sonuç" hint="Sonuç etiketi çözüm notuna eklenir; statü her durumda 'Çözüldü'.">
                   <div className="flex flex-wrap gap-1.5">
                     {RESOLVE_OUTCOMES.map((o) => {

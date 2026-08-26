@@ -142,9 +142,9 @@ model UserCompany {
 }
 
 model Company {
-  id        String   @id @default(cuid()) @db.NVarChar(450)
-  name      String   @unique @db.NVarChar(200)
-  isActive  Boolean  @default(true)
+  id               String   @id @default(cuid()) @db.NVarChar(450)
+  name             String   @unique @db.NVarChar(200)
+  isActive         Boolean  @default(true)
   /// Vaka numarası öneki — "UNV", "PRM" gibi 2-4 BÜYÜK harf. Vaka
   /// numaralandırma sistemi bu önek + per-tenant sıralı sayı kullanır
   /// (örn. "UNV-1000042"). Yeni firmalar create sırasında zorunlu; mevcut
@@ -152,9 +152,9 @@ model Company {
   /// firma aynı önekle vaka numarası üretemez. Bir kez set edildikten
   /// sonra değiştirilebilir ama boşaltılamaz (eski vakalar eski önekiyle
   /// kalır — [[project_varuna_case_number_prefix]]).
-  caseNumberPrefix String? @unique @db.NVarChar(4)
-  createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
-  updatedAt DateTime @updatedAt
+  caseNumberPrefix String?  @unique @db.NVarChar(4)
+  createdAt        DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt        DateTime @updatedAt
 
   accounts                   Account[]
   accountCompanies           AccountCompany[]
@@ -1572,6 +1572,11 @@ model Case {
   packageId   String? @db.NVarChar(450)
   packageName String? @db.NVarChar(Max)
 
+  /// Serbest metin sürüm bilgisi. Açılışta zorunlu değil; yalnız
+  /// COMP-UNIVERA'da Çözüldü'ye geçişten önce zorunlu (bkz. transitionStatus
+  /// kapanış kapısı). Diğer tenant'ları etkilemez.
+  productVersion String? @db.NVarChar(50)
+
   // Atama (FK + denormalized name)
   assignedTeamId     String? @db.NVarChar(450)
   assignedTeamName   String? @db.NVarChar(Max)
@@ -1811,6 +1816,9 @@ model Case {
   /// otomatik dispatch). MailThread bu listeden beslenir.
   caseEmails CaseEmail[]
 
+  /// Per-tenant sıralı numara benzersizlik — Case.caseSeq NULL legacy
+  /// satırlar bu index'e girmez (SQL Server @@unique NULL toleranslı).
+  @@unique([companyId, caseSeq])
   @@index([accountId])
   @@index([accountProjectId])
   @@index([companyId])
@@ -1829,6 +1837,12 @@ model Case {
   @@index([companyId, status])
   @@index([companyId, assignedTeamId])
   @@index([companyId, category, subCategory])
+  // Perf — Örüntü-alarm baseline hot path'i (server/lib/patternInsight.js
+  // baselineCount + liveTriggerCount): companyId + category + isArchived
+  // EŞİTLİK, createdAt ARALIK. Eşitlik sütunları önce, range sona → seek.
+  // Prod'da elle oluşturuldu (IX_Case_company_category_arch_created);
+  // gelecekteki migrate/db push drift'le DÜŞÜRMESİN diye şemaya resmileştirildi.
+  @@index([companyId, category, isArchived, createdAt], map: "IX_Case_company_category_arch_created")
   @@index([companyId, resolvedAt])
   // "Atanmış ama henüz incelemeye alınmamış" dashboard sorgusu için bir
   // index (companyId, pickedUpAt, assignedAt) faydalı olur — kasıtlı
@@ -1843,9 +1857,6 @@ model Case {
   @@index([companyId, packageId])
   /// M6.1 — "Yanıt bekliyor" filtresi (M6.3 list/board) için.
   @@index([companyId, pendingCustomerReply])
-  /// Per-tenant sıralı numara benzersizlik — Case.caseSeq NULL legacy
-  /// satırlar bu index'e girmez (SQL Server @@unique NULL toleranslı).
-  @@unique([companyId, caseSeq])
 }
 
 // CaseReminder — Faz 2 §6 "Bana Hatırlat" özelliği. Kullanıcı bir vakayı
@@ -2444,6 +2455,17 @@ model CaseTaggingReview {
   closingPermanentPreventionVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
   closingPermanentPreventionCorrectedCode  String? @db.NVarChar(255)
   closingPermanentPreventionCorrectedLabel String? @db.NVarChar(Max)
+
+  /// 2026-08-19 — Talep Türü doğrulaması. Diğer 9 etiketten farklı: kaynağı
+  /// Case.customFields.smartTicket JSON'ı DEĞİL, doğrudan Case.requestType
+  /// kolonu; geçerli seçenekleri TaxonomyDef DEĞİL, sabit 5 değerlik enum
+  /// (Bilgi/Öneri/Talep/Şikayet/Hata). Kolon ailesi aynı desende (prefix'siz —
+  /// ne "opening" ne "closing"), Original/Verdict/Corrected anlamı aynı.
+  requestTypeOriginalCode   String? @db.NVarChar(255)
+  requestTypeOriginalLabel  String? @db.NVarChar(Max)
+  requestTypeVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  requestTypeCorrectedCode  String? @db.NVarChar(255)
+  requestTypeCorrectedLabel String? @db.NVarChar(Max)
 
   note String? @db.NVarChar(Max)
 
@@ -3101,4 +3123,38 @@ model AuthorizationPolicy {
   @@index([companyId, resourceKey, action])
   @@index([companyId, scope, fieldKey])
   @@index([companyId, menuKey])
+}
+
+/// AloTech çağrı kaydı — gelen çağrı webhook'undan (incoming-call-start / -end).
+/// Amaç: hangi müşteri × hangi ticket × hangi agent × kaç dk (çağrı-merkezi raporu).
+/// İZOLE/ADDITIVE: Account/Case/Company ile Prisma-relation YOK — scalar FK'lar
+/// (matchedAccountId/caseId/companyId); join uygulama katmanında yapılır. Böylece
+/// çekirdek modellere (Account/Case) dokunulmaz, migration tek CREATE TABLE.
+/// customerPassword = IVR'de girilen müşteri şifresi = AccountCompany.externalCustomerCode.
+/// callId = call_activecallkey (AloTech çağrı anahtarı) — çağrı↔ticket join anahtarı.
+model CallLog {
+  id               String    @id @default(cuid()) @db.NVarChar(450)
+  companyId        String    @db.NVarChar(450)
+  callId           String    @db.NVarChar(255)
+  callerId         String?   @db.NVarChar(64)
+  customerPassword String?   @db.NVarChar(255)
+  direction        String    @default("inbound") @db.NVarChar(16)
+  queue            String?   @db.NVarChar(128)
+  agentEmail       String?   @db.NVarChar(255)
+  matchedAccountId String?   @db.NVarChar(450)
+  caseId           String?   @db.NVarChar(450)
+  status           String?   @db.NVarChar(32)
+  startedAt        DateTime?
+  answeredAt       DateTime?
+  endedAt          DateTime?
+  durationSec      Int?
+  raw              String?   @db.NVarChar(Max)
+  createdAt        DateTime  @default(dbgenerated("sysutcdatetime()"))
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([companyId, callId])
+  @@index([companyId, callerId])
+  @@index([companyId, matchedAccountId])
+  @@index([caseId])
+  @@index([startedAt])
 }

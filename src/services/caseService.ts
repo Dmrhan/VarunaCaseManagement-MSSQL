@@ -287,6 +287,7 @@ function applyFilters(items: Case[], f?: CaseFilters): Case[] {
   }
   if (f.teamId)   out = out.filter((c) => c.assignedTeamId === f.teamId);
   if (f.personId) out = out.filter((c) => c.assignedPersonId === f.personId);
+  if (f.createdByUserId) out = out.filter((c) => c.createdByUserId === f.createdByUserId);
   if (f.dateFrom) {
     const fromMs = new Date(f.dateFrom).getTime();
     out = out.filter((c) => new Date(c.createdAt).getTime() >= fromMs);
@@ -408,6 +409,7 @@ export const caseService = {
     if (filters?.teamId)   params.set('teamId', filters.teamId);
     if (filters?.teamIds?.length) params.set('teamIds', filters.teamIds.join(','));
     if (filters?.personId) params.set('personId', filters.personId);
+    if (filters?.createdByUserId) params.set('createdByUserId', filters.createdByUserId);
     if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
     if (filters?.dateTo)   params.set('dateTo', filters.dateTo);
     if (filters?.customerMatchPending !== undefined) {
@@ -448,7 +450,7 @@ export const caseService = {
    * Vaka listesi + her vakanın review kaydı (varsa) tek çağrıda döner.
    */
   async listTaggingReviews(
-    filters?: { dateFrom?: string; dateTo?: string; statuses?: CaseStatus[]; teamId?: string },
+    filters?: { resolvedDateFrom?: string; resolvedDateTo?: string; statuses?: CaseStatus[]; teamId?: string; search?: string },
     pagination?: CaseListPagination,
     sort?: { sortBy?: string; sortDir?: 'asc' | 'desc' },
   ): Promise<{ items: Case[]; total: number; reviews: Map<string, CaseTaggingReview> }> {
@@ -456,10 +458,11 @@ export const caseService = {
       return { items: [], total: 0, reviews: new Map() };
     }
     const params = new URLSearchParams();
-    if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
-    if (filters?.dateTo) params.set('dateTo', filters.dateTo);
+    if (filters?.resolvedDateFrom) params.set('resolvedDateFrom', filters.resolvedDateFrom);
+    if (filters?.resolvedDateTo) params.set('resolvedDateTo', filters.resolvedDateTo);
     if (filters?.statuses?.length) params.set('statuses', filters.statuses.join(','));
     if (filters?.teamId) params.set('teamId', filters.teamId);
+    if (filters?.search) params.set('search', filters.search);
     if (pagination) {
       params.set('page', String(pagination.page));
       params.set('pageSize', String(pagination.pageSize));
@@ -479,14 +482,15 @@ export const caseService = {
   },
 
   async exportTaggingReviews(
-    filters?: { dateFrom?: string; dateTo?: string; statuses?: CaseStatus[]; teamId?: string },
+    filters?: { resolvedDateFrom?: string; resolvedDateTo?: string; statuses?: CaseStatus[]; teamId?: string; search?: string },
   ): Promise<{ items: Case[]; reviews: Map<string, CaseTaggingReview> }> {
     if (USE_MOCK) return { items: [], reviews: new Map() };
     const params = new URLSearchParams();
-    if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
-    if (filters?.dateTo) params.set('dateTo', filters.dateTo);
+    if (filters?.resolvedDateFrom) params.set('resolvedDateFrom', filters.resolvedDateFrom);
+    if (filters?.resolvedDateTo) params.set('resolvedDateTo', filters.resolvedDateTo);
     if (filters?.statuses?.length) params.set('statuses', filters.statuses.join(','));
     if (filters?.teamId) params.set('teamId', filters.teamId);
+    if (filters?.search) params.set('search', filters.search);
     const data = await apiFetch<{
       value: Case[];
       reviews: Record<string, CaseTaggingReview>;
@@ -519,6 +523,8 @@ export const caseService = {
       closingResolutionTypeCorrectedCode?: string | null;
       closingPermanentPreventionVerdict?: TaggingVerdict | null;
       closingPermanentPreventionCorrectedCode?: string | null;
+      requestTypeVerdict?: TaggingVerdict | null;
+      requestTypeCorrectedCode?: string | null;
     },
   ): Promise<CaseTaggingReview | undefined> {
     if (USE_MOCK) return undefined;
@@ -2651,6 +2657,20 @@ export const lookupService = {
         },
       }
     );
+  },
+
+  /**
+   * "Vaka Sahibi" filtresi (CasesListPage) için — vaka açan kullanıcıların
+   * distinct listesi. Bootstrap'a dahil değil (yalnız CasesListPage filtre
+   * paneli kullanır); on-demand çekilir.
+   */
+  async caseCreators(): Promise<{ id: string; name: string }[]> {
+    const data = await apiFetch<{ id: string; name: string }[]>(
+      '/api/lookups/case-creators',
+      undefined,
+      'Vaka sahibi listesi yüklenemedi',
+    );
+    return data ?? [];
   },
 
   /**

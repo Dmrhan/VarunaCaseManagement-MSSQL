@@ -1553,12 +1553,13 @@ function enforcePlatformFromHints(current, etkilenenNesne, islemTipi) {
   }
   return { platform: current, overridden: false, reason: null };
 }
-function getOpenField(field) {
-  return loadTaxonomyV2().open[field];
+function getOpenField(field, override) {
+  return override?.[field] ?? loadTaxonomyV2().open[field];
 }
-function isValidOpenValue(field, value) {
+function isValidOpenValue(field, value, override) {
   if (value == null) return true;
-  return getOpenField(field).values.includes(value);
+  const spec = getOpenField(field, override);
+  return Array.isArray(spec?.values) ? spec.values.includes(value) : false;
 }
 function getKokNedenGroups(override) {
   return override?.groups ?? loadTaxonomyV2().close.kok_neden.groups;
@@ -1594,14 +1595,18 @@ function isValidKaliciOnlem(value, override) {
   if (value == null) return true;
   return getKaliciOnlem(override).values.includes(value);
 }
-function formatOpenForPrompt() {
+function formatOpenForPrompt(override) {
   const t = loadTaxonomyV2();
   return OPEN_FIELD_ORDER.map((f) => {
-    const spec = t.open[f];
+    const base = t.open[f];
+    const ov = override?.[f];
+    const label = ov?.label ?? base.label;
+    const description = ov?.description?.trim() ? ov.description : base.description;
+    const values = Array.isArray(ov?.values) && ov.values.length ? ov.values : base.values;
     return [
-      `## ${spec.label} (${f})`,
-      spec.description,
-      ...spec.values.map((v) => `  \u2022 ${v}`)
+      `## ${label} (${f})`,
+      description,
+      ...values.map((v) => `  \u2022 ${v}`)
     ].join("\n");
   }).join("\n\n");
 }
@@ -1642,7 +1647,7 @@ function extractJson3(raw) {
 async function categorizeV2(input) {
   const fullPrompt = [
     "TAKSONOM\u0130 \u2014 6 A\xC7ILI\u015E ALANI:",
-    formatOpenForPrompt(),
+    formatOpenForPrompt(input.openTaxonomy),
     "",
     formatHintsForPrompt(),
     "",
@@ -1688,12 +1693,13 @@ async function categorizeV2(input) {
     return emptyResult(res, "LLM \xE7\u0131kt\u0131s\u0131 \u015Femaya uymad\u0131");
   }
   const out = v.data;
-  let urun = isValidOpenValue("urun", out.urun) ? out.urun : null;
-  let platform = isValidOpenValue("platform", out.platform) ? out.platform : null;
-  const is_sureci = isValidOpenValue("is_sureci", out.is_sureci) ? out.is_sureci : null;
-  const islem_tipi = isValidOpenValue("islem_tipi", out.islem_tipi) ? out.islem_tipi : null;
-  const etkilenen_nesne = isValidOpenValue("etkilenen_nesne", out.etkilenen_nesne) ? out.etkilenen_nesne : null;
-  const etki = isValidOpenValue("etki", out.etki) ? out.etki : null;
+  const ovr = input.openTaxonomy;
+  let urun = isValidOpenValue("urun", out.urun, ovr) ? out.urun : null;
+  let platform = isValidOpenValue("platform", out.platform, ovr) ? out.platform : null;
+  const is_sureci = isValidOpenValue("is_sureci", out.is_sureci, ovr) ? out.is_sureci : null;
+  const islem_tipi = isValidOpenValue("islem_tipi", out.islem_tipi, ovr) ? out.islem_tipi : null;
+  const etkilenen_nesne = isValidOpenValue("etkilenen_nesne", out.etkilenen_nesne, ovr) ? out.etkilenen_nesne : null;
+  const etki = isValidOpenValue("etki", out.etki, ovr) ? out.etki : null;
   const hintReasons = [];
   const enforced = enforcePlatformFromHints(platform, etkilenen_nesne, islem_tipi);
   if (enforced.overridden) {

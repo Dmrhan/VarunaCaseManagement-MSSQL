@@ -25,6 +25,8 @@
       "label": "İş Süreci",
       "description": "Sorunun ait olduğu iş süreci",
       "values": [
+        "STG İşlemleri",
+        "Katalog İşlemleri",
         "Müşteri / Cari Kartı ve Gruplama İşlemleri",
         "Müşteri İşlemleri (Nokta Devri/Dist Nokta devri vb.)",
         "CRM işlemleri",
@@ -100,6 +102,7 @@
       "label": "Etkilenen Nesne",
       "description": "Sorundan etkilenen iş nesnesi veya ekran",
       "values": [
+        "Katalog",
         "Bilgi Gönderme",
         "Bilgi Alma",
         "Fatura Basım",
@@ -333,74 +336,325 @@
       "description": "Kök neden grubu → detay CASCADE; her detayın kabul ettiği çözüm tipleri 'cozum_tipleri' alanında.",
       "groups": [
         {
-          "group": "Altyapı, Sunucu ve Performans Kesintisi",
+          "group": "Altyapı, Sunucu ve Performans",
           "mode": "coupled",
           "details": [
             {
-              "label": "Yavaşlık / timeout (internet)",
-              "cozum_tipleri": [
-                "Sunucu Server ve Network Müdahalesi",
-                "Sql Server Müdahalesi"
-              ]
-            },
-            {
               "label": "Disk / temp yetersizliği",
               "cozum_tipleri": [
-                "Sunucu Server ve Network Müdahalesi"
-              ]
-            },
-            {
-              "label": "RAM / kaynak tüketimi",
-              "cozum_tipleri": [
-                "Sunucu Server ve Network Müdahalesi"
-              ]
-            },
-            {
-              "label": "Replikasyon durması",
-              "cozum_tipleri": [
-                "Sql Server Müdahalesi"
-              ]
-            },
-            {
-              "label": "Giriş / sunucu hatası",
-              "cozum_tipleri": [
-                "Sunucu Server ve Network Müdahalesi"
-              ]
-            },
-            {
-              "label": "Sql Server DB sorunu",
-              "cozum_tipleri": [
-                "Sql Server Müdahalesi"
-              ]
-            },
-            {
-              "label": "SSL Sertifika",
-              "cozum_tipleri": [
-                "Sunucu Server ve Network Müdahalesi"
-              ]
-            },
-            {
-              "label": "Load Balance sorunu",
-              "cozum_tipleri": [
-                "Sunucu Server ve Network Müdahalesi"
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
               "label": "Firewall",
               "cozum_tipleri": [
-                "Sunucu Server ve Network Müdahalesi"
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "Klasör yetkilendirme",
+              "label": "Kullanıcı Girişi Hatası",
               "cozum_tipleri": [
-                "Sunucu Server ve Network Müdahalesi"
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "IIS yetki",
+              "label": "Sunucu Erişim hatası",
               "cozum_tipleri": [
-                "Sunucu Server ve Network Müdahalesi"
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Load Balance sorunu",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "RAM / kaynak tüketimi",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Replikasyon durması",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Sql Server DB sorunu",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "SSL Sertifika",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Yavaşlık / timeout (internet)",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            }
+          ]
+        },
+        {
+          "group": "Belge ve Çıktı İşlemleri",
+          "mode": "coupled",
+          "details": [
+            {
+              "label": "Belge dizaynı eksik / hatalı",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Yazıcı / logo basım ayarı",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             }
           ]
@@ -410,203 +664,561 @@
           "mode": "coupled",
           "details": [
             {
-              "label": "Eşleştirme eksik",
+              "label": "ERP (Logo,SAP vb.)",
               "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
                 "Eğitim ve Bilgi Verilmesi",
-                "Doküman / SSS"
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "Web servis Aktarım",
+              "label": "Eşleştirme eksikliği",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Servis timeout",
-              "cozum_tipleri": [
                 "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "View kaynağı hatası",
-              "cozum_tipleri": [
-                "Script çalıştırma (DbUpdate)",
                 "Eğitim ve Bilgi Verilmesi",
-                "Parametre düzeltme",
-                "Kurulum ve Teknik Müdahale",
-                "Sql Server Müdahalesi"
-              ]
-            },
-            {
-              "label": "ERP (Logo,SAP vb.) Sorunu",
-              "cozum_tipleri": [
-                "Dış Servis müdahalesi",
-                "Doküman / SSS"
-              ]
-            },
-            {
-              "label": "Smart Connect Aktarım Hatası",
-              "cozum_tipleri": [
-                "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
               "label": "Ödeme/Sanal POS Altyapısı",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Servis timeout",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Smart Connect Aktarım",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "View kaynağı hatası",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Web servis Aktarım",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             }
           ]
         },
         {
-          "group": "Donanım / Cihaz Problemi (Hardware)",
+          "group": "Donanım / Cihaz (Hardware)",
           "mode": "coupled",
           "details": [
             {
-              "label": "APK versiyon uyumsuz",
+              "label": "APK versiyon uyumsuzluğu",
               "cozum_tipleri": [
-                "Kurulum ve Teknik Müdahale",
-                "Eğitim ve Bilgi Verilmesi"
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
               "label": "Cihaz Bağlantısı / eşleştirme",
               "cozum_tipleri": [
-                "Kurulum ve Teknik Müdahale"
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "Dosya indirilemiyor",
+              "label": "Cihaz tarih / saat",
               "cozum_tipleri": [
-                "Kurulum ve Teknik Müdahale"
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Dosya indirme",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
               "label": "Mobil Android ve IOS versiyon uyumsuzluğu",
               "cozum_tipleri": [
                 "APK Geçişi",
-                "Kurulum ve Teknik Müdahale",
-                "Doküman / SSS"
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
               "label": "Yazıcı Model Uyumsuzluğu",
               "cozum_tipleri": [
-                "Doküman / SSS",
+                "APK Geçişi",
                 "DLL Geçişi",
-                "APK Geçişi"
-              ]
-            },
-            {
-              "label": "Cihaz tarih / saat",
-              "cozum_tipleri": [
-                "Eğitim",
-                "Kurulum ve Teknik Müdahale"
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             }
           ]
         },
         {
-          "group": "E-Belge ve Entegratör İşlem Hatası",
+          "group": "E-Belge ve Entegratör",
           "mode": "coupled",
           "details": [
             {
               "label": "E-Belge ayarı /Entegratör servis / şifre / kontör",
               "cozum_tipleri": [
-                "Eğitim ve Bilgi Verilmesi"
-              ]
-            },
-            {
-              "label": "Mükellefiyet",
-              "cozum_tipleri": [
-                "Kurulum ve Teknik Müdahale",
-                "Eğitim ve Bilgi Verilmesi"
-              ]
-            },
-            {
-              "label": "Sertifika",
-              "cozum_tipleri": [
-                "Kurulum ve Teknik Müdahale",
-                "Eğitim ve Bilgi Verilmesi"
-              ]
-            },
-            {
-              "label": "XSLT şablon eksik",
-              "cozum_tipleri": [
-                "Kurulum ve Teknik Müdahale",
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
                 "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Parametre düzeltme",
-                "Dış Servis müdahalesi"
-              ]
-            },
-            {
-              "label": "GİB / Schematron hatası",
-              "cozum_tipleri": [
-                "Kurulum ve Teknik Müdahale",
-                "Eğitim ve Bilgi Verilmesi",
-                "Script çalıştırma (DbUpdate)",
-                "Parametre düzeltme",
-                "Dış Servis müdahalesi"
-              ]
-            },
-            {
-              "label": "Entegratör kuyruk gecikmesi",
-              "cozum_tipleri": [
-                "Kurulum ve Teknik Müdahale",
-                "Eğitim ve Bilgi Verilmesi",
-                "Script çalıştırma (DbUpdate)",
-                "Parametre düzeltme",
-                "Dış Servis müdahalesi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
               "label": "Entegratör (Logo, SAP, EDM vb.)",
               "cozum_tipleri": [
-                "Kurulum ve Teknik Müdahale",
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
                 "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Parametre düzeltme",
-                "Dış Servis müdahalesi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Entegratör kuyruk gecikmesi",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "GİB / Schematron hatası",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Mükellefiyet",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Sertifika",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
               "label": "Unidox V1 / V2 geçişi",
               "cozum_tipleri": [
-                "Kurulum ve Teknik Müdahale",
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
                 "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Parametre düzeltme",
-                "Dış Servis müdahalesi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "XSLT şablon eksik",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             }
           ]
@@ -616,594 +1228,1073 @@
           "mode": "coupled",
           "details": [
             {
-              "label": "İskonto / promosyon",
+              "label": "Fiyat",
               "cozum_tipleri": [
+                "APK Geçişi",
                 "DLL Geçişi",
                 "Doküman / SSS",
-                "Eğitim ve Bilgi Verilmesi",
                 "Dış Servis müdahalesi",
-                "Parametre düzeltme",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Versiyon geçişi",
-                "Yetki düzenleme",
-                "Uygulama Menü kartı düzeltme"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "Fiyat",
+              "label": "Fatura Gecikme",
               "cozum_tipleri": [
+                "APK Geçişi",
                 "DLL Geçişi",
                 "Doküman / SSS",
-                "Eğitim ve Bilgi Verilmesi",
                 "Dış Servis müdahalesi",
-                "Parametre düzeltme",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Versiyon geçişi",
-                "Yetki düzenleme",
-                "Uygulama Menü kartı düzeltme"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Müşteri Kredi Limiti",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "İskonto / promosyon",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
               "label": "KDV / muafiyet",
               "cozum_tipleri": [
+                "APK Geçişi",
                 "DLL Geçişi",
                 "Doküman / SSS",
-                "Eğitim ve Bilgi Verilmesi",
                 "Dış Servis müdahalesi",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Versiyon geçişi",
-                "Yetki düzenleme",
-                "Uygulama Menü kartı düzeltme"
-              ]
-            },
-            {
-              "label": "Gecikme / kredi limiti",
-              "cozum_tipleri": [
-                "DLL Geçişi",
-                "Doküman / SSS",
                 "Eğitim ve Bilgi Verilmesi",
-                "Dış Servis müdahalesi",
-                "Parametre düzeltme",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Versiyon geçişi",
-                "Yetki düzenleme",
-                "Uygulama Menü kartı düzeltme"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             }
           ]
         },
         {
-          "group": "Kullanıcı Uygulama kullanım ve İşlem Adımı Hatası",
-          "mode": "tumu",
+          "group": "İşlem ve Süreç Akışları",
+          "mode": "coupled",
           "details": [
             {
-              "label": "Menü yetkisi eksik",
+              "label": "Planlanmış Görev çalışmıyor.",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "İşlem yetkisi eksik",
+              "label": "Validasyon hatası",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "Distribütör / şube yetkisi eksik",
+              "label": "Versiyon uyumsuzluğu (Fix-DLL)",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Onay yetkisi yok",
-              "cozum_tipleri": [
                 "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
               "label": "Lisans limiti dolu",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Rol / kullanıcı tanımsız",
-              "cozum_tipleri": [
                 "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Müşteri kartı eksik / hatalı",
-              "cozum_tipleri": [
-                "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Ürün / stok kartı eksik",
-              "cozum_tipleri": [
-                "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Fiyat / KDV tanımı hatalı",
-              "cozum_tipleri": [
-                "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Satış temsilcisi tanımı hatalı",
-              "cozum_tipleri": [
-                "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Eksik kart ilişkisi (depo / sevk / seri)",
-              "cozum_tipleri": [
-                "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Belge dizaynı eksik / hatalı",
-              "cozum_tipleri": [
-                "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
               "label": "Matbu no / sıra",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Yazıcı / logo basım ayarı",
-              "cozum_tipleri": [
                 "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Kullanıcı işlem adımı hatası",
-              "cozum_tipleri": [
-                "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Yasal süreç (8 gün / ay kapanışı)",
-              "cozum_tipleri": [
-                "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Operatörlük / merkez onayı gereken işlem",
-              "cozum_tipleri": [
-                "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Bilgi / nasıl yapılır",
-              "cozum_tipleri": [
-                "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             }
           ]
         },
         {
           "group": "Parametre ve Konfigürasyon",
-          "mode": "tumu",
+          "mode": "coupled",
           "details": [
-            {
-              "label": "E-Belge ayarı / entegratör şifresi",
-              "cozum_tipleri": [
-                "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
             {
               "label": "Aktarım (SmartConnect) parametresi",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "Matbu / basım parametresi",
+              "label": "E-Belge ayarı / entegratör şifresi",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "ST parametresi eksik",
-              "cozum_tipleri": [
                 "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Yanlış parametre",
-              "cozum_tipleri": [
-                "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
               "label": "Eksik parametre",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "Yetki ve Parametre Şablon",
+              "label": "Matbu / basım parametresi",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Panorama Çalışma parametreleri",
-              "cozum_tipleri": [
                 "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Panorama Config ayarları",
-              "cozum_tipleri": [
-                "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
               "label": "Panorama API ayarları",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Panorama Çalışma parametreleri",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Panorama Config ayarları",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "ST parametresi eksikliği",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Yanlış parametre",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Yasal süreç (8 gün / ay kapanışı)",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             }
           ]
         },
         {
-          "group": "Veri / Veritabanı Hatası",
-          "mode": "tumu",
+          "group": "Tanım ve Ana Veri İşlemleri",
+          "mode": "coupled",
           "details": [
             {
-              "label": "Bozuk kayıt (stok tipi / belge detayı)",
+              "label": "Eksik kart ilişkisi (depo / sevk / seri)",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "Mükerrer kayıt",
+              "label": "Fiyat / KDV tanımı hatalı",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "Delete / İptal işlemi",
+              "label": "Kullanıcı işlem adımı hatası",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "Update ve insert işlemi",
+              "label": "Müşteri kartı eksik / hatalı",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Rol / kullanıcı tanımsız",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Satış temsilcisi tanımı hatalı",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Ürün / stok kartı eksik",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Master Kayıt Eksikliği",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
               "label": "Eksik/Hatalı Master Data (Ürün, Müşteri, Fiyat Listesi)",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
-                "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
-              ]
-            },
-            {
-              "label": "Sql Server DB sorunu",
-              "cozum_tipleri": [
                 "Dış Servis müdahalesi",
-                "Doküman / SSS",
-                "Parametre düzeltme",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             }
           ]
         },
         {
-          "group": "Yazılım Hatası",
-          "mode": "tumu",
+          "group": "Veritabanı İşlemleri",
+          "mode": "coupled",
           "details": [
             {
-              "label": "Planlanmış Görev çalışmıyor.",
+              "label": "Bozuk kayıt (stok tipi / belge detayı)",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "Versiyon uyumsuzluğu (Fix-DLL)",
+              "label": "Mükerrer kayıt",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "Validasyon hatası",
+              "label": "Sql Server DB sorunu",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            }
+          ]
+        },
+        {
+          "group": "Yetki / Erişim",
+          "mode": "coupled",
+          "details": [
+            {
+              "label": "Merkez onayı gereken işlem",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "Kod hatası",
+              "label": "IIS yetki",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             },
             {
-              "label": "Yeni APK verilmesi",
+              "label": "Klasör yetkilendirme",
               "cozum_tipleri": [
-                "Dış Servis müdahalesi",
+                "APK Geçişi",
+                "DLL Geçişi",
                 "Doküman / SSS",
-                "Parametre düzeltme",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
                 "Script çalıştırma (DbUpdate)",
-                "Ürün geliştirme",
-                "Uygulama Menü kartı düzeltme",
-                "Yetki düzenleme",
-                "DLL Geçişi"
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Distribütör / şube yetkisi",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "İşlem yetkisi",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Menü yetkisi",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Onay yetkisi yok",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
+              ]
+            },
+            {
+              "label": "Yetki ve Parametre Şablon",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Dış Servis müdahalesi",
+                "Eğitim ve Bilgi Verilmesi",
+                "Kurulum İşlemi",
+                "Parametre düzenleme",
+                "Script çalıştırma (DbUpdate)",
+                "Sql Server Müdahalesi",
+                "Sunucu ve Network Müdahalesi",
+                "Versiyon Geçişi",
+                "Geliştirme Gereksinimi",
+                "Yeni Kayıt İşlemi",
+                "Kayıt Silme İşlemi",
+                "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+                "Kontrol / Doğrulama",
+                "Aktarım İşlemi",
+                "Cihaz / Yazıcı Müdahalesi",
+                "Tanım / Ana Veri Güncelleme",
+                "Veri / Kayıt Düzeltme",
+                "Yetki / Kullanıcı Hesabı Güncelleme"
               ]
             }
           ]
@@ -1218,17 +2309,23 @@
         "DLL Geçişi",
         "Doküman / SSS",
         "Dış Servis müdahalesi",
-        "Eğitim",
         "Eğitim ve Bilgi Verilmesi",
-        "Kurulum ve Teknik Müdahale",
-        "Parametre düzeltme",
+        "Kurulum İşlemi",
+        "Parametre düzenleme",
         "Script çalıştırma (DbUpdate)",
         "Sql Server Müdahalesi",
-        "Sunucu Server ve Network Müdahalesi",
-        "Uygulama Menü kartı düzeltme",
-        "Versiyon geçişi",
-        "Yetki düzenleme",
-        "Ürün geliştirme"
+        "Sunucu ve Network Müdahalesi",
+        "Versiyon Geçişi",
+        "Geliştirme Gereksinimi",
+        "Yeni Kayıt İşlemi",
+        "Kayıt Silme İşlemi",
+        "Kullanıcı İşlemi Tamamlama(Operatörlük)",
+        "Kontrol / Doğrulama",
+        "Aktarım İşlemi",
+        "Cihaz / Yazıcı Müdahalesi",
+        "Tanım / Ana Veri Güncelleme",
+        "Veri / Kayıt Düzeltme",
+        "Yetki / Kullanıcı Hesabı Güncelleme"
       ]
     },
     "kalici_onlem": {
@@ -1248,6 +2345,6 @@
     },
     "version": "v4"
   },
-  "syncedFromDbAt": "2026-06-22T10:52:47.340Z",
+  "syncedFromDbAt": "2026-08-04T13:32:24.263Z",
   "closureSyncedFrom": "closure-taxonomy-v4.json (İş Süreçleri Kategorisi - 20260604 - DUZELTILMIS.xlsx)"
 }

@@ -237,12 +237,63 @@ function round1(v) {
 }
 
 /**
+ * Örüntü-alarm liste cache — company-scope + status anahtarlı, 60sn TTL.
+ *
+ * GET /patterns her aktif alarm için enrichPatternAlert() çalıştırır (alarm
+ * başına baselineCount + liveTriggerCount + cases findMany). Vakalar Listesi'ni
+ * açan HER Supervisor/Admin bunu tetikliyordu → aynı company-scope'unda tekrar
+ * tekrar onlarca Case sorgusu (canlıda user_seeks ~24.7k). Alarmlar 15 dk'da bir
+ * cron ile değiştiği için 60sn bayat sonuç güvenli; key userId DEĞİL scope →
+ * aynı scope'taki eşzamanlı açılışlar tek hesaplamayı paylaşır (maksimum isabet).
+ * Index (IX_Case_company_category_arch_created) her sorguyu seek yaptı; bu cache
+ * sorgu SAYISINI da düşürür → ikisi birlikte pool-drain'i bitirir.
+ *
+ * Bust: liste görünürlüğünü değiştiren mutasyonlar (status / dismiss) cache'i
+ * temizler → değişiklik anında görünür. Ek güvence: ?fresh=1 bypass.
+ */
+const PATTERN_LIST_CACHE_TTL_MS = 60_000;
+const patternListCache = new Map();
+
+function patternListCacheKey(user, status) {
+  const companies = [...(user.allowedCompanyIds ?? [])].sort().join(',');
+  return `${companies}|${status ?? 'all'}`;
+}
+function getCachedPatternList(user, status) {
+  const key = patternListCacheKey(user, status);
+  const entry = patternListCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt < Date.now()) {
+    patternListCache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+function setCachedPatternList(user, status, data) {
+  patternListCache.set(patternListCacheKey(user, status), {
+    data,
+    expiresAt: Date.now() + PATTERN_LIST_CACHE_TTL_MS,
+  });
+}
+function bustPatternListCache() {
+  patternListCache.clear();
+}
+
+/**
  * GET /api/analytics/patterns?status=active|all
  * Default: status=active. allowedCompanyIds scope. Faz 1.5 Madde 5.
  */
 router.get('/patterns', requireSupervisorAnalytics, async (req, res) => {
   try {
     const status = req.query.status === 'all' ? undefined : 'active';
+
+    // Cache — aynı company-scope + status için 60sn (bkz. patternListCache).
+    // ?fresh=1 bypass; mutasyonlar (status/dismiss) zaten cache'i bust eder.
+    const bypass = req.query.fresh === '1' || req.query.fresh === 'true';
+    if (!bypass) {
+      const cachedPayload = getCachedPatternList(req.user, status);
+      if (cachedPayload) return res.json(cachedPayload);
+    }
+
     const where = { companyId: { in: req.user.allowedCompanyIds } };
     if (status) where.status = status;
     const items = await prisma.patternAlert.findMany({
@@ -255,20 +306,37 @@ router.get('/patterns', requireSupervisorAnalytics, async (req, res) => {
     // Her alarm için commonThread + spike + impact + severity hesapla.
     // enrichPatternAlert fail olursa kart `insight=null` ile döner
     // (graceful degrade — mevcut consumer'lar etkilenmez).
+    //
+    // Perf fix — N+1: eskiden TÜM alarmlar (take:100) tek Promise.all'de
+    // SINIRSIZ eşzamanlı enrichPatternAlert() çağırıyordu; her çağrı 4-5
+    // Case sorgusu (findMany + 2x count, biri 7 günlük baseline taraması)
+    // içeriyor — 100 alarımda ~400-500 eşzamanlı sorgu, aynı Case tablosu
+    // bölgesinde PAGELATCH_UP kilitlenmesi yaratıyordu (operationsAggregator.js
+    // queryPatternAlertSummary ile aynı kök sebep, ayrı çağrı yeri).
+    // Fix: aynı desen — en fazla PATTERN_INSIGHT_CONCURRENCY tanesi aynı anda,
+    // küçük gruplar hâlinde sırayla.
     const allowedCompanyIds = req.user.allowedCompanyIds ?? [];
-    const enriched = await Promise.all(
-      items.map(async (alert) => {
-        try {
-          const insight = await enrichPatternAlert(alert, { allowedCompanyIds });
-          return { ...alert, insight };
-        } catch (insightErr) {
-          console.warn('[analytics:patterns] insight failed for', alert.id, insightErr?.message);
-          return { ...alert, insight: null };
-        }
-      }),
-    );
+    const PATTERN_INSIGHT_CONCURRENCY = 10;
+    const enriched = [];
+    for (let i = 0; i < items.length; i += PATTERN_INSIGHT_CONCURRENCY) {
+      const chunk = items.slice(i, i + PATTERN_INSIGHT_CONCURRENCY);
+      const chunkResults = await Promise.all(
+        chunk.map(async (alert) => {
+          try {
+            const insight = await enrichPatternAlert(alert, { allowedCompanyIds });
+            return { ...alert, insight };
+          } catch (insightErr) {
+            console.warn('[analytics:patterns] insight failed for', alert.id, insightErr?.message);
+            return { ...alert, insight: null };
+          }
+        }),
+      );
+      enriched.push(...chunkResults);
+    }
 
-    res.json({ value: enriched, '@odata.count': enriched.length });
+    const payload = { value: enriched, '@odata.count': enriched.length };
+    setCachedPatternList(req.user, status, payload);
+    res.json(payload);
   } catch (e) {
     console.error('[analytics:patterns]', e);
     res.status(500).json({ error: 'internal', message: e?.message });
@@ -562,6 +630,7 @@ router.patch('/patterns/:id/status', requireSupervisorAnalytics, async (req, res
       where: { id: target.id },
       data,
     });
+    bustPatternListCache(); // status değişti → liste cache'i geçersiz
     res.json({ id: updated.id, status: updated.status });
   } catch (e) {
     console.error('[analytics:patterns:status]', e);
@@ -685,6 +754,7 @@ router.patch('/patterns/:id/dismiss', requireSupervisorAnalytics, async (req, re
         dismissedAt: new Date(),
       },
     });
+    bustPatternListCache(); // dismiss → aktif listeden düştü, cache'i geçersiz
     res.json({ id: updated.id, status: updated.status });
   } catch (e) {
     console.error('[analytics:patterns:dismiss]', e);

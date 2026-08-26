@@ -44,6 +44,7 @@ import {
   ShoppingBag,
   Sparkles,
   Star,
+  Tag,
   TrendingDown,
   User,
   UserCheck,
@@ -2804,17 +2805,30 @@ function LinksTab({
   const isOwner = !!user?.personId && item.assignedPersonId === user.personId;
   const canRemove = elevated || isOwner;
 
+  // Race guard — LinksTab kullanıcı bu tab'i açıkken başka bir vakaya
+  // geçebilir (aynı CaseDetailPage instance'ı, bu component unmount OLMAZ —
+  // satır ~1476'da key yok). reload()/loadAi()/addLink()/removeLink() async
+  // yanıtları geç gelirse, artık ekranda gösterilen vaka DEĞİŞMİŞ olabilir;
+  // bu ref her render'da en güncel item.id'yi tutar (activeIdRef deseniyle
+  // aynı — bkz. handleCommitDescription).
+  const itemIdRef = useRef(item.id);
+  itemIdRef.current = item.id;
+
   async function reload() {
+    const caseIdAtCall = item.id;
     setLoading(true);
-    const rows = await caseService.listLinks(item.id);
+    const rows = await caseService.listLinks(caseIdAtCall);
+    if (itemIdRef.current !== caseIdAtCall) return; // kullanıcı başka vakaya geçti — bu yanıtı UYGULAMA
     setLinks(rows);
     setLoading(false);
   }
 
   async function loadAi() {
+    const caseIdAtCall = item.id;
     setAiLoading(true);
     setAiErrored(false);
-    const r = await aiService.suggestLinks(item.id);
+    const r = await aiService.suggestLinks(caseIdAtCall);
+    if (itemIdRef.current !== caseIdAtCall) return; // kullanıcı başka vakaya geçti — bu yanıtı UYGULAMA
     setAiLoading(false);
     if (r.ok) setSuggestions(r.data.suggestions);
     else setAiErrored(true);
@@ -2827,9 +2841,11 @@ function LinksTab({
   }, [item.id]);
 
   async function addLink(linkedCaseId: string, linkType: import('./types').CaseLinkType) {
+    const caseIdAtCall = item.id;
     setBusy(true);
-    const r = await caseService.addLink(item.id, linkedCaseId, linkType);
+    const r = await caseService.addLink(caseIdAtCall, linkedCaseId, linkType);
     setBusy(false);
+    if (itemIdRef.current !== caseIdAtCall) return; // kullanıcı başka vakaya geçti — bu yanıtı UYGULAMA
     if (r) {
       toast({ type: 'success', message: 'Bağlantı eklendi.', duration: 1500 });
       await reload();
@@ -2839,9 +2855,11 @@ function LinksTab({
   }
 
   async function removeLink(linkId: string) {
+    const caseIdAtCall = item.id;
     setBusy(true);
-    const r = await caseService.removeLink(item.id, linkId);
+    const r = await caseService.removeLink(caseIdAtCall, linkId);
     setBusy(false);
+    if (itemIdRef.current !== caseIdAtCall) return; // kullanıcı başka vakaya geçti — bu yanıtı UYGULAMA
     if (r) {
       toast({ type: 'success', message: 'Bağlantı kaldırıldı.', duration: 1500 });
       setLinks((ls) => ls.filter((l) => l.linkId !== linkId));
@@ -3876,7 +3894,7 @@ function DetailTab({
       {/* PR-D3 — Azure DevOps İş Öğeleri.
           Backend ALLOWLIST guard'lı (16 alan). Read role-gate ile arşivli case
           için SystemAdmin görür, diğer roller 404. Bağla/Kaldır case-write. */}
-      <DevOpsSection caseId={item.id} canWrite={canWriteCase} />
+      <DevOpsSection caseId={item.id} canWrite={canWriteCase} onCaseUpdated={onCaseUpdated} />
       <RemoteSupportSection caseId={item.id} canWrite={canWriteCase} />
 
       {/* Adım-2 #5 — "Müşteri & Sınıflandırma" → "Sınıflandırma":
@@ -3994,6 +4012,27 @@ function DetailTab({
                   return merged.map((name) => ({ value: name, label: name }));
                 })(),
               ]}
+            />
+          ),
+        };
+
+        // Versiyon No — productGroupItem ile aynı gerekçe: serbest metin,
+        // açılışta zorunlu değil ama YALNIZ COMP-UNIVERA'da Çözüldü'ye
+        // geçişten önce backend zorunlu kılar (product_version_required_for_closure).
+        // Bu yüzden "Diğer sınıflandırma bilgileri" katlanabilir bölümüne
+        // (boşsa saklanır) TABİ DEĞİL — her zaman görünen ayrı bir satır.
+        const productVersionItem = {
+          label: 'Versiyon No', icon: Tag, node: (
+            <InlineEdit
+              fieldKey="productVersion"
+              type="text"
+              value={v('productVersion')}
+              editing={editingField === 'productVersion'}
+              isDraft={drafts.productVersion !== undefined}
+              onStart={() => onStartEdit('productVersion')}
+              onCommit={(val) => onCommitDraft('productVersion', String(val))}
+              onCancel={onCancelEdit}
+              placeholder="örn. 3.2.1"
             />
           ),
         };
@@ -4119,6 +4158,11 @@ function DetailTab({
                 <productGroupItem.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
                 <span className="shrink-0 text-[11px] font-medium text-slate-500">{productGroupItem.label}:</span>
                 <div className="min-w-0 flex-1 text-sm">{productGroupItem.node}</div>
+              </div>
+              <div key={productVersionItem.label} className="flex items-center gap-1 px-1.5 py-0.5">
+                <productVersionItem.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
+                <span className="shrink-0 text-[11px] font-medium text-slate-500">{productVersionItem.label}:</span>
+                <div className="min-w-0 flex-1 text-sm">{productVersionItem.node}</div>
               </div>
               {filledSecondary.map((i) => (
                 <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
