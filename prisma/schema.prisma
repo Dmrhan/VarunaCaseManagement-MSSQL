@@ -1776,6 +1776,7 @@ model Case {
   attachments            CaseAttachment[]
   history                CaseActivity[]
   callLogs               CaseCallLog[]
+  remoteSessions         CaseRemoteSession[]
   caseOffers             CaseOfferedSolution[]
   approvals              CaseApproval[]
   /// WR-D4 Phase 1 — Per-case resolution approval cycles (immutable history).
@@ -2027,6 +2028,45 @@ model CaseCallLog {
   @@index([companyId])
   @@index([callDate])
   @@index([nextFollowupDate])
+}
+
+// CaseRemoteSession — L1 uzak destek (TeamViewer) oturumu ↔ vaka bağı.
+// "Bağlantı Al" butonu bir işaret satırı açar (vaka + temsilci + müşteri TV ID
+// + başlangıç). Süre butonda ölçülmez; gece reconcile job'ı TeamViewer bağlantı
+// raporundan (deviceid == customerTvId + temsilci + zaman penceresi) gerçek
+// start/end/süreyi bulup bu satıra yazar. Raporlama bu tablodan yapılır.
+model CaseRemoteSession {
+  id          String   @id @default(cuid()) @db.NVarChar(450)
+  caseId      String   @db.NVarChar(450)
+  companyId   String   @db.NVarChar(450)
+
+  // Buton anında yazılan (agent beyanı)
+  agentUserId  String? @db.NVarChar(450)
+  agentName    String  @db.NVarChar(Max)
+  customerTvId String  @db.NVarChar(64) // müşterinin TeamViewer ID'si = rapor deviceid
+  tool         String  @default("TeamViewer") @db.NVarChar(50)
+  startedAt    DateTime @default(dbgenerated("sysutcdatetime()"))
+  launchedVia  String?  @db.NVarChar(50) // 'deeplink' | 'manual' | null
+
+  // Gece reconcile ile TeamViewer raporundan doldurulan gerçek ölçüm
+  tvConnectionId String?  @db.NVarChar(128)
+  tvStartDate    DateTime?
+  tvEndDate      DateTime?
+  durationSec    Int?
+  // 'pending' (buton bastı, henüz eşleşmedi) | 'matched' | 'ambiguous' | 'unmatched'
+  matchState     String   @default("pending") @db.NVarChar(20)
+  matchedAt      DateTime?
+  note           String?  @db.NVarChar(Max)
+
+  createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt DateTime @updatedAt
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([caseId])
+  @@index([companyId, startedAt])
+  @@index([customerTvId])
+  @@index([matchState])
 }
 
 // CaseOfferedSolution — Churn vakaları için teklif geçmişi (audit)
