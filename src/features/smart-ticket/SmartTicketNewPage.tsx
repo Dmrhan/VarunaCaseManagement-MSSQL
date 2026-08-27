@@ -56,6 +56,8 @@ import {
   CASE_REQUEST_TYPES,
 } from '@/features/cases/types';
 import { CaseSolutionStepsPanel } from '@/features/cases/CaseSolutionStepsPanel';
+import { RemoteSupportSection } from '@/features/cases/components/RemoteSupportSection';
+import { RemoteSupportStartButton } from '@/features/cases/components/RemoteSupportStartButton';
 import { resolveSmartTicketMapping } from './mapping';
 import { CustomerContextBanner } from './CustomerContextBanner';
 import { CustomerContextDrawer } from './CustomerContextDrawer';
@@ -857,11 +859,12 @@ export function SmartTicketNewPage({
     });
   }
 
-  // ── Stage 1 → 2 transition: Case create + AI suggested steps import ─
-  async function handleCreateAndContinue() {
-    if (!canCreate) return;
-    setCreating(true);
-    setError(null);
+  // Vaka oluşturma (idempotent, HIZLI) — hem "Vaka Oluştur ve Çözüm Adımlarına
+  // Geç" hem Stage 1 "Bağlantı Al" bunu kullanır. Yavaş AI çözüm-adımı importu
+  // BURADA YOK; yalnız caseService.create. Zaten oluşmuşsa mevcut vakayı döner.
+  async function ensureCaseCreated(): Promise<Case | null> {
+    if (createdCase) return createdCase;
+    if (!canCreate) return null;
 
     const mapping = resolveSmartTicketMapping(taxonomies, {
       platform: form.platform || undefined,
@@ -995,7 +998,24 @@ export function SmartTicketNewPage({
         customFields: { smartTicket },
       });
       setCreatedCase(created);
+      return created;
+    } catch (e) {
+      setError((e as Error)?.message ?? 'Vaka oluşturulamadı.');
+      return null;
+    }
+  }
 
+  // ── Stage 1 → 2 transition: ensureCaseCreated + dosya + AI adım importu ─
+  async function handleCreateAndContinue() {
+    if (!canCreate && !createdCase) return;
+    setCreating(true);
+    setError(null);
+    const created = await ensureCaseCreated();
+    if (!created) {
+      setCreating(false);
+      return;
+    }
+    try {
       // PR-5 — Pending files'i sırayla upload et (Case create başarılı
       // olduktan sonra, KB import'tan ÖNCE). Hata olursa Case AÇIK KALIR;
       // kullanıcıya warn toast ile "Vaka Detayı → Dosyalar'dan tekrar
@@ -2068,10 +2088,18 @@ export function SmartTicketNewPage({
               )}
 
               {stage === 'opening' && (
-                <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-3 dark:border-ndark-border">
+                <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 pt-3 dark:border-ndark-border">
                   <Button variant="outline" onClick={onCancel} disabled={creating} size="sm">
                     Vazgeç
                   </Button>
+                  {/* Açılışta hızlı bağlantı: vakayı hemen oluşturur (yavaş AI
+                      importunu beklemeden) ve TeamViewer oturumunu başlatır.
+                      Zorunlu alanlar dolmadan pasif. */}
+                  <RemoteSupportStartButton
+                    getCaseId={async () => (await ensureCaseCreated())?.id ?? null}
+                    disabled={!canCreate && !createdCase}
+                    label="Bağlantı Al"
+                  />
                   <Button
                     onClick={() => void handleCreateAndContinue()}
                     disabled={!canCreate}
@@ -2360,6 +2388,13 @@ function Stage2Solution({
             if (c) onCaseChanged(c);
           });
         }}
+      />
+      {/* Bağlantılı Destek — Akıllı Ticket açılış akışında, vaka oluştuktan
+          sonra agent aynı ekrandan TeamViewer bağlantısı alabilir. */}
+      <RemoteSupportSection
+        caseId={createdCase.id}
+        canWrite
+        caseStatus={createdCase.status}
       />
       <Card>
         <CardBody>
