@@ -850,7 +850,13 @@ export function SmartTicketNewPage({
     key: 'platform' | 'businessProcess' | 'operationType' | 'affectedObject' | 'impact',
     value: string,
   ) {
-    setForm((f) => ({ ...f, [key]: value }));
+    setForm((f) => {
+      const next = { ...f, [key]: value };
+      // İş Süreci değişince alt cascade (Etkilenen Nesne) sıfırlanır — eski
+      // sürecin nesnesi yeni süreçte geçersiz olabilir.
+      if (key === 'businessProcess') next.affectedObject = '';
+      return next;
+    });
     setAppliedSuggestionFields((prev) => {
       if (!prev.has(key as SuggestClassificationField)) return prev;
       const next = new Set(prev);
@@ -2041,7 +2047,19 @@ export function SmartTicketNewPage({
                 )}
                 <div className="space-y-2">
                   {TAXONOMY_FIELDS.map((f) => {
-                    const items = (taxonomies?.[f.key] ?? []) as SmartTicketTaxonomyItem[];
+                    let items = (taxonomies?.[f.key] ?? []) as SmartTicketTaxonomyItem[];
+                    // AÇILIŞ CASCADE — Etkilenen Nesne yalnız seçili İş Süreci'nin
+                    // altındaki nesneleri gösterir (kapanış grup→detay cascade'inin
+                    // açılış karşılığı; TaxonomyDef.parentId eşleşmesi). İş Süreci
+                    // seçilmeden boş — önce süreç seçilmeli.
+                    if (f.key === 'affectedObject') {
+                      const selectedProcess = (taxonomies?.businessProcess ?? []).find(
+                        (p) => p.code === form.businessProcess,
+                      );
+                      items = selectedProcess?.id
+                        ? items.filter((it) => it.parentId === selectedProcess.id)
+                        : [];
+                    }
                     const isFromSuggestion = appliedSuggestionFields.has(f.key as SuggestClassificationField);
                     const suggested = suggestion?.suggestions?.[f.key as SuggestClassificationField];
                     const Icon = f.Icon;
