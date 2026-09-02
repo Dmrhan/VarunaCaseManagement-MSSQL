@@ -456,7 +456,18 @@ export function SmartClassificationCard({
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {FIELDS.map((f) => {
-          const list = taxonomies?.[f.key] ?? [];
+          let list = taxonomies?.[f.key] ?? [];
+          // AÇILIŞ CASCADE — Etkilenen Nesne yalnız seçili İş Süreci'nin
+          // altındaki nesneleri gösterir (TaxonomyDef.parentId eşleşmesi).
+          // Süreç seçilmeden liste boş — önce İş Süreci seçilir.
+          if (f.key === 'affectedObject') {
+            const selectedProcess = (taxonomies?.businessProcess ?? []).find(
+              (p) => p.code === values.businessProcess,
+            );
+            list = selectedProcess?.id
+              ? list.filter((t) => t.parentId === selectedProcess.id)
+              : [];
+          }
           const badge = badgeFor(f.key);
           return (
             <div key={f.key}>
@@ -466,7 +477,12 @@ export function SmartClassificationCard({
               <Select
                 value={values[f.key]}
                 onChange={(e) =>
-                  setValues((prev) => ({ ...prev, [f.key]: e.target.value }))
+                  setValues((prev) => {
+                    const next = { ...prev, [f.key]: e.target.value };
+                    // İş Süreci değişince Etkilenen Nesne sıfırlanır.
+                    if (f.key === 'businessProcess') next.affectedObject = '';
+                    return next;
+                  })
                 }
                 disabled={saving}
               >
