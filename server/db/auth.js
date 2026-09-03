@@ -2,6 +2,17 @@ import { prisma } from './client.js';
 import { withDbRetry } from './retry.js';
 import { verifyAccessToken } from '../lib/authTokens.js';
 
+// WR-PERF — verifyJwt cache. Yük altında HER istek 2 DB sorgusu (user +
+// company/userCompany) yapıyordu → çok-kullanıcıda DB/pool doygunluğu → 502.
+// Token sub'ına (userId) göre kısa TTL cache: istek başına 2 sorgu → ~0.
+// Trade-off: rol/şirket/isActive değişikliği en geç TTL kadar (30sn) gecikir;
+// anında yansıması gereken yerlerde invalidateAuthCache(userId) çağrılır.
+const AUTH_CACHE_TTL_MS = 30_000;
+const authCache = new Map(); // userId -> { user, allowedCompanyIds, companyRoles, expiresAt }
+export function invalidateAuthCache(userId) {
+  if (userId) authCache.delete(userId);
+}
+
 /**
  * BFF auth — local JWT doğrulama + DB'deki User satırına çözümleme (Faz 3).
  *
@@ -35,6 +46,14 @@ export async function verifyJwt(req, res, next) {
     const payload = verifyAccessToken(m[1]);
     if (!payload?.sub) {
       return res.status(401).json({ error: 'invalid_token', message: 'Oturum geçersiz, tekrar giriş yap.' });
+    }
+
+    // Cache-hit — imza yukarıda LOKAL doğrulandı (expired/tampered zaten elenir);
+    // yalnız DB user/company çözümlemesi cache'ten gelir.
+    const cached = authCache.get(payload.sub);
+    if (cached && Date.now() < cached.expiresAt) {
+      req.user = { ...cached.user, allowedCompanyIds: cached.allowedCompanyIds, companyRoles: cached.companyRoles };
+      return next();
     }
 
     // Geçici DB aksaklıklarında 1x retry (300ms). User lookup idempotent.
@@ -78,6 +97,14 @@ export async function verifyJwt(req, res, next) {
 
     // passwordHash'i req.user'a TAŞIMA — route handler'lara sızmasın.
     const { passwordHash: _ph, ...safeUser } = user;
+    // Yalnız aktif kullanıcı cache'lenir (isActive kontrolü yukarıda geçti);
+    // deaktive olursa en geç TTL kadar (30sn) sonra düşer.
+    authCache.set(payload.sub, {
+      user: safeUser,
+      allowedCompanyIds,
+      companyRoles,
+      expiresAt: Date.now() + AUTH_CACHE_TTL_MS,
+    });
     req.user = { ...safeUser, allowedCompanyIds, companyRoles };
     next();
   } catch (err) {

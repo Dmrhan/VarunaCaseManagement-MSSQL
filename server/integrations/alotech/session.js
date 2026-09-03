@@ -12,10 +12,18 @@ export async function getSessionKey(agentEmail, appToken = APP_TOKEN) {
   if (!agentEmail) throw new Error('agentEmail zorunlu');
   if (!appToken) throw new Error('app_token (veya ALOTECH_SECRET_KEY) tanimsiz');
   const url = `https://${HOST}/api/?function=login&email=${encodeURIComponent(agentEmail)}&app_token=${encodeURIComponent(appToken)}`;
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
-  const text = await res.text();
-  let data; try { data = JSON.parse(text); } catch { data = { _raw: text }; }
-  return { ok: res.ok, status: res.status, data, text };
+  // WR-PERF — timeout: AloTech login hang olursa istek asılı kalıp IIS 502
+  // üretmesin; 8sn'de abort → throw → caller (active-call) catch'ler.
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), Number(process.env.ALOTECH_TIMEOUT_MS) || 8000);
+  try {
+    const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: ctrl.signal });
+    const text = await res.text();
+    let data; try { data = JSON.parse(text); } catch { data = { _raw: text }; }
+    return { ok: res.ok, status: res.status, data, text };
+  } finally {
+    clearTimeout(to);
+  }
 }
 
 // Session 18sa geçerli; polling her 3sn login yapmasın diye agent başına cache (17sa).
