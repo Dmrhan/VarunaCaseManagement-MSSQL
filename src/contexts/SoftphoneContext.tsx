@@ -197,6 +197,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     if (status !== 'ready') return;
     let alive = true;
     const poll = async () => {
+      // WR-PERF — sekme gizliyken (arka planda) sunucuyu polling'le yorma.
+      if (typeof document !== 'undefined' && document.hidden) return;
       const r = await fetchActiveCall().catch(() => undefined);
       if (!alive) return;
       // Backend env eksik → disabled'a düş + sonraki poll'leri durdur.
@@ -247,8 +249,17 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       }
     };
     void poll();
-    const t = setInterval(() => { void poll(); }, 2000);
-    return () => { alive = false; clearInterval(t); };
+    // WR-PERF — 2sn → 8sn. Yük altında her kullanıcının 2sn'de bir aktif-çağrı
+    // polling'i DB (verifyJwt + enrichment) ve AloTech'i selliyordu → 502.
+    const t = setInterval(() => { void poll(); }, 8000);
+    // Sekme tekrar görünür olunca hemen bir kez yokla (gelen çağrıyı kaçırmamak için).
+    const onVisible = () => { if (typeof document !== 'undefined' && !document.hidden) void poll(); };
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      alive = false;
+      clearInterval(t);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [status]);
 
   // NOT: Varuna içi gelen-çağrı "bip" zili KALDIRILDI (kullanıcı isteği) — AloTech
