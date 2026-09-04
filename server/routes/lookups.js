@@ -143,12 +143,13 @@ router.get('/catalog', async (req, res) => {
  *   }
  *
  * Notes:
- *   - Kapanış taksonomileri (rootCauseGroup / rootCauseDetail /
- *     resolutionType / permanentPrevention) BAĞIMSIZ düz listelerdir.
- *     rootCauseDetail artık rootCauseGroup'a bağlı DEĞİL — tüm detaylar
- *     seçilen gruptan bağımsız olarak seçilebilir (ürün kararı: kapanış
- *     kategorileri birbirine bağlı olmamalı). TaxonomyDef.parentId şemada
- *     forward-compat için durur ama bu akışta okunmaz/yazılmaz.
+ *   - Kapanış taksonomileri v4 CASCADE (açılış İş Süreci→Etkilenen Nesne ile
+ *     simetrik): rootCauseGroup (düz) → rootCauseDetail (parentId === grup.id)
+ *     → resolutionType (detay.metadata.allowedResolutionTypes; null →
+ *     kısıtlama yok). permanentPrevention düz. Frontend ağacı id + parentId +
+ *     metadata ile kurar (aşağıdaki "v4 CASCADE" notuna bkz.); bu yüzden bu üç
+ *     alan response'a EKLENİR. (Eski "bağımsız düz liste" kararı v4 ile
+ *     değişti — id/parentId artık okunur.)
  *   - Smart Ticket businessProcess/etc. mevcut Case.category/subCategory/
  *     requestType ALANLARININ YERİNE GEÇMEZ — bu PR'da Case akışı dokunulmaz.
  */

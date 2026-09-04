@@ -24,6 +24,7 @@ import { RunaAiCard } from '@/components/ui/RunaAiCard';
 import {
   caseService,
   lookupService,
+  parseAllowedResolutionCodes,
   type SmartTicketTaxonomyResponse,
   type SmartTicketTaxonomyItem,
   type SuggestClosureResponse,
@@ -493,12 +494,25 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     };
   }, [isSmartTicket, pending, item.companyId, closureTax]);
 
-  // Kapanış decouple — rootCauseDetail rootCauseGroup'tan bağımsızdır; grup
-  // değişiminde detayı sıfırlamaya gerek yok (tüm detaylar her zaman geçerli).
-  // Eski "grup değişince detayı temizle" effect'i + suppress ref kaldırıldı.
+  // KAPANIŞ CASCADE v4 — açılıştaki İş Süreci→Etkilenen Nesne ağaç mantığının
+  // kapanış karşılığı; SmartTicketNewPage / CaseTaggingReviewPage kapanış
+  // cascade'iyle PARİTE (bu panel eskiden decouple idi — v4 sürüklenmesi).
+  //   grup (düz) → detay (parentId === grup.id) → çözüm tipi
+  //   (detay.metadata.allowedResolutionTypes; null → kısıtlama yok).
+  // Üst seçilmeden alt liste boş kalır (UX: önce grup, sonra detay seçilir).
+  // permanentPrevention düz kalır (bağı yok).
   const closureRcgList: SmartTicketTaxonomyItem[] = closureTax?.rootCauseGroup ?? [];
-  const closureRcdList: SmartTicketTaxonomyItem[] = closureTax?.rootCauseDetail ?? [];
-  const closureRtList: SmartTicketTaxonomyItem[] = closureTax?.resolutionType ?? [];
+  const closureRcgSelected = closureRcgList.find((g) => g.code === closureRcg);
+  const closureRcdList: SmartTicketTaxonomyItem[] = closureRcgSelected?.id
+    ? (closureTax?.rootCauseDetail ?? []).filter((d) => d.parentId === closureRcgSelected.id)
+    : [];
+  const closureRcdSelected = closureRcdList.find((d) => d.code === closureRcd);
+  const closureRtList: SmartTicketTaxonomyItem[] = (() => {
+    const all = closureTax?.resolutionType ?? [];
+    if (!closureRcdSelected) return []; // detay seçilmeden çözüm tipi boş
+    const allowed = parseAllowedResolutionCodes(closureRcdSelected);
+    return allowed != null ? all.filter((r) => allowed.includes(r.code)) : all;
+  })();
   const closurePpList: SmartTicketTaxonomyItem[] = closureTax?.permanentPrevention ?? [];
 
   /**
@@ -740,10 +754,12 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     // customFields.smartTicket.closure altına deep-merge eder; opening
     // alanları + diğer dinamik customFields aynen korunur.
     const closureLabels = (() => {
-      const rcg = closureRcgList.find((g) => g.code === closureRcg);
-      const rcd = closureRcdList.find((d) => d.code === closureRcd);
-      const rt = closureRtList.find((r) => r.code === closureRt);
-      const pp = closurePpList.find((p) => p.code === closurePp);
+      // Label TAM listeden çözülür (filtreli değil) — cascade filtre durumundan
+      // bağımsız doğru label persist edilir (SmartClassificationCard deseni).
+      const rcg = (closureTax?.rootCauseGroup ?? []).find((g) => g.code === closureRcg);
+      const rcd = (closureTax?.rootCauseDetail ?? []).find((d) => d.code === closureRcd);
+      const rt = (closureTax?.resolutionType ?? []).find((r) => r.code === closureRt);
+      const pp = (closureTax?.permanentPrevention ?? []).find((p) => p.code === closurePp);
       return {
         rootCauseGroup: closureRcg || undefined,
         rootCauseGroupLabel: rcg?.label,
@@ -1185,7 +1201,12 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                     <Field label="Kök Neden Grubu">
                       <Select
                         value={closureRcg}
-                        onChange={(e) => setClosureRcg(e.target.value)}
+                        onChange={(e) => {
+                          // CASCADE RESET — grup değişince detay + çözüm tipi sıfırlanır.
+                          setClosureRcg(e.target.value);
+                          setClosureRcd('');
+                          setClosureRt('');
+                        }}
                         disabled={closureTaxLoading || closureRcgList.length === 0}
                       >
                         <option value="">— Seçim yok —</option>
@@ -1199,7 +1220,11 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                     <Field label="Kök Neden Detayı">
                       <Select
                         value={closureRcd}
-                        onChange={(e) => setClosureRcd(e.target.value)}
+                        onChange={(e) => {
+                          // CASCADE RESET — detay değişince çözüm tipi sıfırlanır.
+                          setClosureRcd(e.target.value);
+                          setClosureRt('');
+                        }}
                         disabled={closureTaxLoading || closureRcdList.length === 0}
                       >
                         <option value="">— Seçim yok —</option>
