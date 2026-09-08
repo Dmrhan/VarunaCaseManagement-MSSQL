@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react';
 import { Phone, PhoneOff, Loader2, Minus } from 'lucide-react';
 import { useSoftphone } from '../../contexts/SoftphoneContext';
+import { SOFTPHONE_V2 } from '../../services/softphoneService';
 
 // Panel genişliği — TEK YERDEN ayarla. Değişirse App.tsx'teki pr-[300px] de güncellenmeli.
 const PANEL_W = 'w-[300px]';
@@ -72,7 +73,14 @@ export function SoftphoneWidget() {
     <iframe
       title="AloTech Softphone"
       src={iframeUrl}
-      allow="microphone; autoplay; camera; clipboard-write"
+      // v2: OAuth login pop-up + WebRTC mikrofon için sandbox/allow (manuel §12).
+      // v1: mevcut davranış korunur (sandbox yok).
+      allow={SOFTPHONE_V2
+        ? 'camera *; microphone *; geolocation *; autoplay; clipboard-write'
+        : 'microphone; autoplay; camera; clipboard-write'}
+      {...(SOFTPHONE_V2
+        ? { sandbox: 'allow-forms allow-modals allow-popups allow-same-origin allow-scripts' }
+        : {})}
       className="w-full flex-1 border-0 bg-white"
     />
   ) : (

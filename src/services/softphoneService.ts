@@ -287,6 +287,73 @@ export function buildSoftphoneIframeUrl(
   return `${SOFTPHONE_URL}${sep}${qs}`;
 }
 
+// ── SOFTPHONE v2 (OAuth clientId + postMessage) — FLAG'Lİ GEÇİŞ ──────────────
+// v2 URL: softphone-cti.alo-tech.com/integrations/generic?tenant=<host>&clientId=<id>
+//   - Auth: session anahtarı YERİNE OAuth clientId (tenant-side CTI SSO). Backend
+//     /session çağrısı YAPILMAZ — clientId + tenant env'den gelir.
+//   - Screen-pop: polling YERİNE iframe'in window.postMessage event'leri
+//     (bkz. SoftphoneContext v2 listener + parseSoftphoneV2Event).
+// Flag: VITE_ALOTECH_SOFTPHONE_V2==='true'. Kapalıyken v1 yolu AYNEN çalışır.
+export const SOFTPHONE_V2 = ((import.meta as any).env?.VITE_ALOTECH_SOFTPHONE_V2 as string) === 'true';
+
+// v2 base — v1'in VITE_ALOTECH_SOFTPHONE_URL'inden AYRI env (çakışma olmasın).
+const SOFTPHONE_V2_URL =
+  ((import.meta as any).env?.VITE_ALOTECH_SOFTPHONE_V2_URL as string) ||
+  'https://softphone-cti.alo-tech.com/integrations/generic';
+const ALOTECH_CLIENT_ID = ((import.meta as any).env?.VITE_ALOTECH_CLIENT_ID as string) || '';
+// tenant = tam host, https ÖNEKSİZ (AloTech şartı). param-univera.alo-tech.com.
+const ALOTECH_TENANT_HOST =
+  ((import.meta as any).env?.VITE_ALOTECH_TENANT as string) || 'param-univera.alo-tech.com';
+
+/** v2 postMessage event'lerinin beklenen origin'i (güvenlik allowlist). Base
+ *  URL'in origin'i alınır; testte gerçek event.origin loglanıp teyit edilir. */
+export const SOFTPHONE_V2_ORIGIN = (() => {
+  try { return new URL(SOFTPHONE_V2_URL).origin; } catch { return 'https://softphone-cti.alo-tech.com'; }
+})();
+
+/** v2 gömülü softphone iframe src'i: ?tenant=<host>&clientId=<id>.
+ *  clientId env'de yoksa '' döner → SoftphoneContext disabled'a düşer. */
+export function buildSoftphoneV2IframeUrl(): string {
+  if (!ALOTECH_CLIENT_ID) return '';
+  const params = new URLSearchParams();
+  params.set('tenant', ALOTECH_TENANT_HOST);      // https'siz tam host
+  params.set('clientId', ALOTECH_CLIENT_ID);
+  const sep = SOFTPHONE_V2_URL.includes('?') ? '&' : '?';
+  return `${SOFTPHONE_V2_URL}${sep}${params.toString()}`;
+}
+
+/** v2 çağrı/chat event'i (iframe → host, window.postMessage). Payload AloTech
+ *  Softphone v2 manueli örneklerinden (messageType + number/activecallkey…). */
+export interface SoftphoneV2Event {
+  messageType: string;   // Dial|OutgoingActiveCallKey|IncomingCall|ShowRinging|Answer|Accept|Hangup|Transfer|Chat*
+  number?: string;
+  activecallkey?: string;
+  call_id?: string;
+  tenant?: string;
+  username?: string;
+  session?: string;
+  outbound?: boolean;
+  isDialer?: boolean;
+  queue_name?: string;
+  sender?: string;       // "AloTech"
+  [k: string]: unknown;
+}
+
+/** Ham postMessage'ı DOĞRULA + parse et. GÜVENLİK: yabancı origin / sender
+ *  reddedilir (sahte çağrı-event enjeksiyonu engellenir). Geçersizse null. */
+export function parseSoftphoneV2Event(e: MessageEvent): SoftphoneV2Event | null {
+  if (e.origin !== SOFTPHONE_V2_ORIGIN) return null;          // origin allowlist
+  let data: unknown = e.data;
+  if (typeof data === 'string') { try { data = JSON.parse(data); } catch { return null; } }
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (d.sender !== 'AloTech') return null;                    // sender guard
+  if (typeof d.messageType !== 'string') return null;
+  // Başka tenant'ın event'ini alma (varsa teyit et).
+  if (typeof d.tenant === 'string' && ALOTECH_TENANT_HOST && d.tenant !== ALOTECH_TENANT_HOST) return null;
+  return d as unknown as SoftphoneV2Event;
+}
+
 interface InitOptions {
   onLogout?: (resp: any) => void;
   onMediaFailed?: (resp: any) => void;
