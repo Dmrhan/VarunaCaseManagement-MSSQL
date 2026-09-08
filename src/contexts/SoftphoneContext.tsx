@@ -12,6 +12,7 @@ import { notify } from '../components/ui/Toast';
 import {
   fetchAgentStatus, callViaClick2Call, hangupCall, fetchActiveCall, setAgentStatusApi,
   fetchSoftphoneSession, buildSoftphoneIframeUrl,
+  SOFTPHONE_V2, buildSoftphoneV2IframeUrl, parseSoftphoneV2Event,
   getAlotechEmail, setAlotechEmail,
   isAlotechDisabled,
   type AgentStatusValue,
@@ -137,7 +138,18 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     setStatus('connecting');
     setError(null);
     try {
-      if (isEmbedded) {
+      if (isEmbedded && SOFTPHONE_V2) {
+        // v2: OAuth clientId ile iframe URL'i env'den kurulur; backend /session
+        // çağrısı YOK. Agent iframe içindeki AloTech OAuth ekranından giriş yapar.
+        const url = buildSoftphoneV2IframeUrl();
+        if (!url) {                 // clientId env'de yok → sessiz disabled
+          startedRef.current = false;
+          setStatus('disabled');
+          return;
+        }
+        setIframeUrl(url);
+        setStatus('ready');
+      } else if (isEmbedded) {
         const sess = await fetchSoftphoneSession();
         if (isAlotechDisabled(sess)) {
           startedRef.current = false;
@@ -194,7 +206,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   // Embedded modda da çalışır: gelen çağrı sunucu tarafından (callerId ile) yakalanır,
   // banner/screen pop gösterilir; ses/cevaplama AJS üzerindendir (sabit IP).
   useEffect(() => {
-    if (status !== 'ready') return;
+    // v2'de screen-pop iframe postMessage event'lerinden gelir (aşağıdaki
+    // listener) → REST polling YOK (502 kaynağı da böylece kalkar).
+    if (status !== 'ready' || SOFTPHONE_V2) return;
     let alive = true;
     const poll = async () => {
       // WR-PERF — sekme gizliyken (arka planda) sunucuyu polling'le yorma.
@@ -260,6 +274,71 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       clearInterval(t);
       if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
     };
+  }, [status]);
+
+  // ── v2 EVENT LISTENER: iframe postMessage → screen-pop + aktif çağrı.
+  // v1 polling'in yerini alır. GÜVENLİK parseSoftphoneV2Event içinde (origin +
+  // sender + tenant doğrulaması). Downstream event'ler (SOFTPHONE_INCOMING/
+  // ANSWERED) v1 ile AYNI shape'te dispatch edilir → banner/screen-pop
+  // dinleyicileri değişmeden çalışır.
+  // NOT (v2 MVP): enrichment (webhook'tan çözülen müşteri) YOK — screen-pop
+  // number ile açılır. activecallkey event'te geliyor; ileride backend
+  // enrichment'a bağlanabilir.
+  useEffect(() => {
+    if (!SOFTPHONE_V2 || !isEmbedded || status !== 'ready') return;
+    const onMessage = (e: MessageEvent) => {
+      const ev = parseSoftphoneV2Event(e);
+      if (!ev) return;
+      const key = ev.activecallkey || ev.call_id || ev.number || 'call';
+      switch (ev.messageType) {
+        case 'IncomingCall':
+        case 'ShowRinging': {
+          if (key === dismissedKey.current || key === lastIncomingKey.current) return;
+          lastIncomingKey.current = key;
+          lastInbound.current = { callerId: ev.number || 'Bilinmeyen', queue: ev.queue_name || '', key, matchedAccountId: null, matchedAccountName: null, matchedProjectId: null, matchedProjectName: null, callLogKey: ev.activecallkey ?? null };
+          const call: IncomingCall = { number: ev.number || 'Bilinmeyen', queue: ev.queue_name, key, status: 'ringing', inbound: true, matchedAccountId: null, matchedAccountName: null, matchedProjectId: null, matchedProjectName: null, callLogKey: ev.activecallkey ?? null };
+          setAgentStatus('ringing');
+          setIncomingCall(call);
+          window.dispatchEvent(new CustomEvent(SOFTPHONE_INCOMING_EVENT, { detail: call }));
+          break;
+        }
+        case 'Answer':
+        case 'Accept': {
+          // Yanıtlandı → banner düşer, aktif çağrı. INBOUND ise screen-pop
+          // (ANSWERED) çağrı başına BİR KEZ (outbound'da lastInbound yok → atlanır).
+          setIncomingCall(null);
+          setAgentStatus('talking');
+          setActiveCall({ number: ev.number || lastInbound.current?.callerId || 'Bilinmeyen', direction: ev.outbound ? 'outbound' : 'inbound', status: 'active', startedAt: Date.now() });
+          const inb = lastInbound.current;
+          if (inb && lastAnsweredKey.current !== inb.key) {
+            lastAnsweredKey.current = inb.key;
+            window.dispatchEvent(new CustomEvent(SOFTPHONE_ANSWERED_EVENT, { detail: { number: inb.callerId, key: inb.key, matchedAccountId: inb.matchedAccountId, matchedAccountName: inb.matchedAccountName, matchedProjectId: inb.matchedProjectId, matchedProjectName: inb.matchedProjectName, callLogKey: inb.callLogKey } }));
+          }
+          break;
+        }
+        case 'Dial':
+        case 'OutgoingActiveCallKey': {
+          setAgentStatus('dialing');
+          setActiveCall({ number: ev.number || 'Bilinmeyen', direction: 'outbound', status: ev.messageType === 'Dial' ? 'ringing' : 'active', startedAt: Date.now() });
+          break;
+        }
+        case 'Hangup': {
+          setActiveCall(null);
+          setIncomingCall(null);
+          setAgentStatus('available');
+          lastIncomingKey.current = null;
+          dismissedKey.current = null;
+          lastInbound.current = null;
+          lastAnsweredKey.current = null;
+          break;
+        }
+        // Transfer / Chat* → v2 MVP'de state değişimi yok (bilgi amaçlı).
+        default:
+          break;
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
   }, [status]);
 
   // NOT: Varuna içi gelen-çağrı "bip" zili KALDIRILDI (kullanıcı isteği) — AloTech
