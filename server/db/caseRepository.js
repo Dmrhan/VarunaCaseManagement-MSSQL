@@ -5669,7 +5669,9 @@ export const caseRepository = {
 
   /**
    * Vakayı ertele — snoozeUntil + snoozeReason + snoozePreviousStatus set,
-   * status değişmez. unsnooze/cron-wakeup snoozePreviousStatus'a geri döner.
+   * status değişmez. snoozePreviousStatus SADECE audit/bilgi amaçlı saklanır
+   * (erteleme anındaki statü) — 2026-08-21 fix'ten sonra unsnooze/cron-wakeup
+   * artık buna geri DÖNMÜYOR, mevcut statüyü koruyor (bkz. unsnoozeCase).
    */
   async snoozeCase(id, { snoozeUntil, snoozeReason }, actor, allowedCompanyIds) {
     assertActor(actor, 'caseRepository.snoozeCase');
@@ -5712,8 +5714,15 @@ export const caseRepository = {
   },
 
   /**
-   * Erteleme kaldır — snooze alanlarını temizle, snoozePreviousStatus'a dön.
-   * Yoksa Acik fallback (yalnızca Cozuldu/IptalEdildi değilse).
+   * Erteleme kaldır — snooze alanlarını temizle, MEVCUT statüyü KORUR.
+   *
+   * 2026-08-21 fix — eskiden snoozePreviousStatus'a (erteleme ANINDAKİ
+   * statü) zorla geri dönülüyordu. Ama vaka ertelenmişken statü elle
+   * ilerletilirse (örn. İncelemede → Çözüldü) bu ilerleme snoozePrevious
+   * Status'a hiç yansımıyordu — erteleme kaldırılınca kullanıcının
+   * yaptığı iş sessizce silinip vaka eski (Açık gibi) statüye dönüyordu.
+   * Artık status hiç değiştirilmiyor — "ertele" sadece Inbox'tan gizleme/
+   * hatırlatma mekanizması, statünün kendisine müdahale etmiyor.
    */
   async unsnoozeCase(id, actor, allowedCompanyIds) {
     assertActor(actor, 'caseRepository.unsnoozeCase');
@@ -5725,23 +5734,21 @@ export const caseRepository = {
       return await shapeWithProjectAvailability(await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE }));
     }
 
-    const restored = pickRestoreStatus(exists.snoozePreviousStatus, exists.status);
-    const restoredTr = fromDb({ status: restored }).status;
+    const currentTr = fromDb({ status: exists.status }).status;
     const updated = await prisma.case.update({
       where: { id },
       data: {
         snoozeUntil: null,
         snoozeReason: null,
         snoozePreviousStatus: null,
-        status: restored,
         history: {
           create: {
             companyId,
-            action: `Erteleme kaldırıldı → ${restoredTr}`,
+            action: `Erteleme kaldırıldı — statü korundu: ${currentTr}`,
             actionType: 'FieldUpdate',
             fieldName: 'snoozeUntil',
             fromValue: exists.snoozeUntil.toISOString(),
-            toValue: restoredTr,
+            toValue: currentTr,
             actor,
           },
         },
@@ -5899,10 +5906,12 @@ export const caseRepository = {
     });
     if (due.length === 0) return { woken: 0, ids: [] };
 
+    // 2026-08-21 fix — unsnoozeCase() ile aynı düzeltme: statü zorla eski
+    // (snoozePreviousStatus) değere döndürülmüyor, MEVCUT statü korunuyor
+    // (bkz. unsnoozeCase yorumu).
     const woken = [];
     for (const c of due) {
-      const restored = pickRestoreStatus(c.snoozePreviousStatus, c.status);
-      const restoredTr = fromDb({ status: restored }).status;
+      const currentTr = fromDb({ status: c.status }).status;
       const reasonLabel = c.snoozeReason ? SNOOZE_REASON_LABEL[c.snoozeReason] : '—';
       await prisma.case.update({
         where: { id: c.id },
@@ -5910,14 +5919,13 @@ export const caseRepository = {
           snoozeUntil: null,
           snoozeReason: null,
           snoozePreviousStatus: null,
-          status: restored,
           history: {
             create: {
               companyId: c.companyId,
-              action: `Erteleme süresi doldu → ${restoredTr} (${reasonLabel})`,
+              action: `Erteleme süresi doldu — statü korundu: ${currentTr} (${reasonLabel})`,
               actionType: 'FieldUpdate',
               fieldName: 'snoozeUntil',
-              toValue: restoredTr,
+              toValue: currentTr,
               actor: 'Sistem (cron)',
             },
           },
@@ -7248,16 +7256,6 @@ export const reactionRepo = {
 };
 
 // ----- helpers -----
-
-// Snooze sonrası dönüş statüsü kararı:
-//  - snoozePreviousStatus varsa ona dön (3rdPartyBekleniyor gibi statüler korunsun)
-//  - Yoksa: mevcut Cozuldu/IptalEdildi'yse oraya bırak, değilse Acik fallback
-//  - Tüm değerler ASCII identifier (Prisma enum), TR mapping caller'ın işi.
-function pickRestoreStatus(previous, current) {
-  if (previous) return previous;
-  if (['Cozuldu', 'IptalEdildi'].includes(current)) return current;
-  return 'Acik';
-}
 
 function buildWhere(f, allowedCompanyIds, securityWhere = null, roleDefaultScope = null) {
   if (!f) f = {};
